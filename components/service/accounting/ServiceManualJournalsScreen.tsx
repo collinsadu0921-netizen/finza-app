@@ -27,9 +27,11 @@ type Draft = {
   total_credit: number | string
   status: DraftStatus
   created_by: string
+  created_by_display: string | null
   created_at: string
   updated_at: string
   posted_by: string | null
+  posted_by_display: string | null
   posted_at: string | null
   journal_entry_id: string | null
   reversal_journal_entry_id: string | null
@@ -622,8 +624,8 @@ export default function ServiceManualJournalsScreen({ businessId }: { businessId
               </div>
 
               <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs text-gray-600 dark:text-gray-400 mb-4">
-                <dt>Created by</dt><dd>{shortId(selectedDraft.created_by)} · {formatTimestamp(selectedDraft.created_at)}</dd>
-                <dt>Posted by</dt><dd>{selectedDraft.posted_by ? `${shortId(selectedDraft.posted_by)} · ${formatTimestamp(selectedDraft.posted_at)}` : "Not posted"}</dd>
+                <dt>Created by</dt><dd title={selectedDraft.created_by}>{selectedDraft.created_by_display || "Unknown actor"} · {formatTimestamp(selectedDraft.created_at)}</dd>
+                <dt>Posted by</dt><dd title={selectedDraft.posted_by || undefined}>{selectedDraft.posted_by ? `${selectedDraft.posted_by_display || "Unknown actor"} · ${formatTimestamp(selectedDraft.posted_at)}` : "Not posted"}</dd>
                 <dt>Journal entry</dt>
                 <dd>
                   {selectedDraft.journal_entry_id ? (

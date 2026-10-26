@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { createSupabaseAdminClient } from "@/lib/supabaseAdmin"
 import { resolveServiceManualJournalAuthority } from "@/lib/service/accounting/manualJournalAuth"
+import { resolveAuditActors } from "@/lib/audit/resolveAuditActors"
 import {
   mapServiceManualRpcError,
   validateServiceManualAccounts,
@@ -64,8 +65,21 @@ export async function GET(request: NextRequest) {
       return jsonError(500, "SERVICE_MANUAL_LIST_FAILED", "Unable to load manual journals.")
     }
 
+    const drafts = draftsResult.data || []
+    const actorIds = drafts.flatMap((draft) => [draft.created_by, draft.posted_by])
+    const actors = await resolveAuditActors(admin, authority.businessId, actorIds)
+    const draftsWithActors = drafts.map((draft) => {
+      const createdBy = draft.created_by ? actors.get(draft.created_by) : null
+      const postedBy = draft.posted_by ? actors.get(draft.posted_by) : null
+      return {
+        ...draft,
+        created_by_display: createdBy?.label ?? null,
+        posted_by_display: postedBy?.label ?? null,
+      }
+    })
+
     return NextResponse.json({
-      drafts: draftsResult.data || [],
+      drafts: draftsWithActors,
       accounts: accountsResult.data || [],
       periods: periodsResult.data || [],
       role: authority.role,

@@ -6,6 +6,12 @@ import { buildAccountingRoute } from "@/lib/accounting/routes"
 import { buildServiceRoute } from "@/lib/service/routes"
 import type { ScreenProps } from "./types"
 import { formatTimestamp } from "@/lib/formatTimestamp"
+import {
+  auditActorLabel,
+  formatAuditAction,
+  formatAuditEntity,
+  formatAuditSummary,
+} from "@/lib/audit/formatAuditLog"
 
 type AuditLog = {
   id: string
@@ -18,6 +24,13 @@ type AuditLog = {
   new_values: Record<string, unknown> | null
   description: string | null
   created_at: string
+  user?: {
+    id: string
+    name?: string | null
+    display_name?: string | null
+    email?: string | null
+    label?: string | null
+  } | null
 }
 
 const ACTION_TYPES = [
@@ -307,7 +320,7 @@ export default function AuditScreen({ mode, businessId }: ScreenProps) {
                             Entity type
                           </th>
                           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
-                            Entity ID
+                            Entity
                           </th>
                           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
                             Reason / Description
@@ -328,20 +341,17 @@ export default function AuditScreen({ mode, businessId }: ScreenProps) {
                               <td className="px-4 py-2 text-sm text-gray-900 dark:text-gray-100 whitespace-nowrap">
                                 {formatDate(log.created_at)}
                               </td>
-                              <td className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 font-mono">
-                                {log.user_id ?? "—"}
+                              <td className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">
+                                {auditActorLabel(log)}
                               </td>
                               <td className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">
-                                {log.action_type}
+                                {formatAuditAction(log)}
                               </td>
                               <td className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">
-                                {log.entity_type}
+                                {formatAuditEntity(log)}
                               </td>
-                              <td className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 font-mono truncate max-w-[120px]">
-                                {log.entity_id ?? "—"}
-                              </td>
-                              <td className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 max-w-[200px] truncate">
-                                {log.description ?? "—"}
+                              <td className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 max-w-[240px] truncate">
+                                {formatAuditSummary(log)}
                               </td>
                               <td className="px-4 py-2">
                                 <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
@@ -365,6 +375,12 @@ export default function AuditScreen({ mode, businessId }: ScreenProps) {
                               <tr key={`${log.id}-expanded`}>
                                 <td colSpan={8} className="px-4 py-3 bg-gray-50 dark:bg-gray-800/50">
                                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                                    <div className="col-span-2 text-gray-500 dark:text-gray-400 space-y-1">
+                                      <p><span className="font-medium">Audit ID:</span> {log.id}</p>
+                                      <p><span className="font-medium">User ID:</span> {log.user_id ?? "—"}</p>
+                                      <p><span className="font-medium">Raw action:</span> {log.action_type}</p>
+                                      <p><span className="font-medium">Raw entity:</span> {log.entity_type} {log.entity_id ?? ""}</p>
+                                    </div>
                                     {log.old_values &&
                                       Object.keys(log.old_values).length > 0 && (
                                         <div>

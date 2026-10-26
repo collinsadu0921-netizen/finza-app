@@ -8,6 +8,12 @@ import PageHeader from "@/components/ui/PageHeader"
 import EmptyState from "@/components/ui/EmptyState"
 import { formatTimestamp } from "@/lib/formatTimestamp"
 import { getSelectedBusinessId } from "@/lib/business"
+import {
+  auditActorLabel,
+  formatAuditAction,
+  formatAuditEntity,
+  formatAuditSummary,
+} from "@/lib/audit/formatAuditLog"
 
 type AuditLog = {
   id: string
@@ -24,7 +30,10 @@ type AuditLog = {
   created_at: string // Correct field name (not timestamp)
   user?: {
     id: string
-    email: string
+    name?: string | null
+    display_name?: string | null
+    email?: string | null
+    label?: string | null
   } | null
 }
 
@@ -102,10 +111,6 @@ export default function AuditLogPage() {
       setError(err.message || "Failed to load audit logs")
       setLoading(false)
     }
-  }
-
-  const formatActionType = (actionType: string) => {
-    return actionType.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase())
   }
 
   const getActionColor = (actionType: string) => {
@@ -259,18 +264,18 @@ export default function AuditLogPage() {
                             {formatTimestamp(log.created_at)}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                            {log.user ? log.user.email : <span className="text-gray-400 italic">System</span>}
+                            {auditActorLabel(log)}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             <span className={`px-2 py-1 rounded text-xs font-medium ${getActionColor(log.action_type)}`}>
-                              {formatActionType(log.action_type)}
+                              {formatAuditAction(log)}
                             </span>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                            {log.entity_type} {log.entity_id ? `#${log.entity_id.substring(0, 8)}` : ""}
+                            {formatAuditEntity(log)}
                           </td>
                           <td className="px-6 py-4 text-sm text-gray-700">
-                            {log.description || "—"}
+                            {formatAuditSummary(log)}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             <button
@@ -285,6 +290,12 @@ export default function AuditLogPage() {
                           <tr>
                             <td colSpan={6} className="px-6 py-4 bg-gray-50">
                               <div className="grid grid-cols-2 gap-4">
+                                <div className="col-span-2 text-xs text-gray-500 dark:text-gray-400 space-y-1">
+                                  <p><span className="font-medium">Audit ID:</span> {log.id}</p>
+                                  <p><span className="font-medium">User ID:</span> {log.user_id ?? "—"}</p>
+                                  <p><span className="font-medium">Raw action:</span> {log.action_type}</p>
+                                  <p><span className="font-medium">Raw entity:</span> {log.entity_type} {log.entity_id ?? ""}</p>
+                                </div>
                                 {log.old_values && Object.keys(log.old_values).length > 0 && (
                                   <div>
                                     <h4 className="font-semibold text-sm text-gray-900 mb-2">Old Values:</h4>

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { createSupabaseAdminClient } from "@/lib/supabaseAdmin"
 import { resolveServiceManualJournalAuthority } from "@/lib/service/accounting/manualJournalAuth"
+import { resolveAuditActors } from "@/lib/audit/resolveAuditActors"
 
 export const dynamic = "force-dynamic"
 
@@ -42,6 +43,18 @@ export async function GET(
       return NextResponse.json({ error: "Manual journal draft not found.", code: "DRAFT_NOT_FOUND" }, { status: 404 })
     }
 
+    const actors = await resolveAuditActors(admin, authority.businessId, [
+      draft.created_by,
+      draft.posted_by,
+    ])
+    const createdBy = draft.created_by ? actors.get(draft.created_by) : null
+    const postedBy = draft.posted_by ? actors.get(draft.posted_by) : null
+    const draftWithActors = {
+      ...draft,
+      created_by_display: createdBy?.label ?? null,
+      posted_by_display: postedBy?.label ?? null,
+    }
+
     const lineAccountIds = [...new Set(((draft.lines as any[]) || []).map((line) => line?.account_id).filter(Boolean))]
     const { data: accounts } = await admin
       .from("accounts")
@@ -68,7 +81,7 @@ export async function GET(
     }
 
     return NextResponse.json({
-      draft,
+      draft: draftWithActors,
       accounts: accounts || [],
       journal_entry: journalEntry,
       canWrite: authority.canWrite,
