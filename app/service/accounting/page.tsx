@@ -78,6 +78,15 @@ export default function ServiceAccountingPage() {
                 Record a loan drawdown or principal repayment.
               </span>
             </Link>
+            <Link
+              href="/service/accounting/journals"
+              className="flex flex-col p-4 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800/50 hover:border-blue-200 dark:hover:border-blue-800 transition-colors"
+            >
+              <span className="font-semibold text-gray-900 dark:text-gray-100">Manual Journal</span>
+              <span className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                Create a balanced journal, post it, or reverse a posted entry.
+              </span>
+            </Link>
           </div>
         </section>
 

@@ -16,6 +16,8 @@ export type ServiceActivityType =
   | "loan_drawdown"
   | "loan_repayment"
   | "loan_interest"
+  | "manual_journal"
+  | "reversal"
 
 export type ServiceActivityItemLike = {
   type: ServiceActivityType
@@ -144,6 +146,12 @@ export function formatServiceActivityDescription(item: ServiceActivityItemLike):
       return formatLoanActivityLabel("loan_repayment", item.lenderName)
     case "loan_interest":
       return formatLoanActivityLabel("loan_interest", item.lenderName)
+    case "manual_journal":
+      if (/^manual journal/i.test(raw)) return raw
+      return raw ? `Manual journal — ${raw}` : "Manual journal"
+    case "reversal":
+      if (/^reversal/i.test(raw)) return raw
+      return raw ? `Reversal - ${raw}` : "Reversal"
     case "customer": {
       if (/^new customer/i.test(raw)) return raw
       return raw ? `New customer — ${raw}` : "New customer added"
@@ -162,6 +170,27 @@ export function supplierBillDetailHref(billId: string): string {
 
 export function expenseDetailHref(expenseId: string): string {
   return `/service/expenses/${expenseId}/view`
+}
+
+/**
+ * Exact Service ledger entry (with its debit/credit lines) for a manual journal
+ * or reversal. Prefer the journal's reference filters, which the ledger screen
+ * already applies; fall back to the entry id when no reference is stored.
+ */
+export function manualJournalDetailHref(
+  businessId: string,
+  journalEntryId: string,
+  referenceType?: string | null,
+  referenceId?: string | null
+): string {
+  const params = new URLSearchParams({ business_id: businessId })
+  if (referenceType && referenceId) {
+    params.set("reference_type", referenceType)
+    params.set("reference_id", referenceId)
+  } else {
+    params.set("highlight", journalEntryId)
+  }
+  return `/service/ledger?${params.toString()}`
 }
 
 /** Canonical service credit-note view used by the dashboard activity feed. */

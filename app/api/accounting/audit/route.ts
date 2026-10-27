@@ -7,6 +7,8 @@
 
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
+import { createSupabaseAdminClient } from "@/lib/supabaseAdmin"
+import { resolveAuditActors } from "@/lib/audit/resolveAuditActors"
 import { checkAccountingAuthority } from "@/lib/accounting/auth"
 import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
 import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
@@ -115,8 +117,34 @@ export async function GET(request: NextRequest) {
         ? returned[returned.length - 1].created_at
         : null
 
+    const actorIds = returned
+      .map((log) => log.user_id)
+      .filter((id): id is string => typeof id === "string" && id.length > 0)
+
+    let actors = new Map<string, { id: string; name: string | null; email: string | null; label: string | null }>()
+    try {
+      const admin = createSupabaseAdminClient()
+      actors = await resolveAuditActors(admin, businessId, actorIds)
+    } catch (err) {
+      console.warn("Accounting audit actor resolution failed", err)
+    }
+
     return NextResponse.json({
-      logs: returned,
+      logs: returned.map((log) => {
+        const actor = log.user_id ? actors.get(log.user_id) : null
+        return {
+          ...log,
+          user: actor
+            ? {
+                id: actor.id,
+                name: actor.name,
+                display_name: actor.name,
+                email: actor.email,
+                label: actor.label,
+              }
+            : null,
+        }
+      }),
       nextCursor,
     })
   } catch (err: unknown) {

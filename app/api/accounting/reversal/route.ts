@@ -1,13 +1,51 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
+import { createSupabaseAdminClient } from "@/lib/supabaseAdmin"
 import { checkAccountingAuthority } from "@/lib/accounting/auth"
-import { logAudit } from "@/lib/auditLog"
+import { getTrustedRequestMetadata } from "@/lib/audit/requestMetadata"
 import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
 import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 import { enforceServiceIndustryBusinessTierForAccountingApi } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
 import { inventoryLinkedJournalReversalBlock } from "@/lib/accounting/inventoryLinkedJournalReversal"
+import { mapServiceManualRpcError } from "@/lib/service/accounting/manualJournal"
 
 const MIN_REASON_LENGTH = 10
+
+type ReversalOriginal = {
+  id: string
+  business_id: string
+  source_type: string | null
+}
+
+/**
+ * Keep the Service manual-journal draft in sync with generic GL reversals.
+ * The ledger reversal is already authoritative; this is display/link state only.
+ */
+async function linkServiceManualDraftToReversal(
+  original: ReversalOriginal,
+  reversalJournalEntryId: string
+): Promise<void> {
+  if (original.source_type !== "service_manual") return
+
+  try {
+    const admin = createSupabaseAdminClient()
+    const { error } = await admin
+      .from("service_manual_journal_drafts")
+      .update({
+        status: "reversed",
+        reversal_journal_entry_id: reversalJournalEntryId,
+      })
+      .eq("journal_entry_id", original.id)
+      .eq("business_id", original.business_id)
+      .neq("status", "reversed")
+
+    if (error) {
+      console.error("Reversal: failed to link Service manual draft:", error)
+    }
+  } catch (error) {
+    console.error("Reversal: failed to link Service manual draft:", error)
+  }
+}
 
 /**
  * POST /api/accounting/reversal
@@ -68,7 +106,7 @@ export async function POST(request: NextRequest) {
 
     const { data: originalJe, error: fetchError } = await supabase
       .from("journal_entries")
-      .select("id, business_id, date, description, period_id, reference_type, reference_id")
+      .select("id, business_id, date, description, period_id, source_type, reference_type, reference_id")
       .eq("id", original_je_id)
       .maybeSingle()
 
@@ -125,6 +163,86 @@ export async function POST(request: NextRequest) {
         { error: inventoryBlock.error, code: inventoryBlock.code },
         { status: 409 }
       )
+    }
+
+    // Service manual journals use the Service authority, draft linkage and
+    // audit rules. Keep the ledger route as the entry point for the Service
+    // admin/accountant who clicked Reverse in the General Ledger.
+    if (originalJe.source_type === "service_manual") {
+      const { data: existingServiceReversal } = await supabase
+        .from("journal_entries")
+        .select("id")
+        .eq("business_id", resolvedBusinessId)
+        .eq("reference_type", "reversal")
+        .eq("reference_id", original_je_id)
+        .limit(1)
+        .maybeSingle()
+
+      if (existingServiceReversal) {
+        await linkServiceManualDraftToReversal(
+          originalJe as ReversalOriginal,
+          existingServiceReversal.id
+        )
+        return NextResponse.json({
+          reversal_journal_entry_id: existingServiceReversal.id,
+          original_journal_entry_id: original_je_id,
+          already_reversed: true,
+        })
+      }
+
+      const requestMeta = getTrustedRequestMetadata(request)
+      const admin = createSupabaseAdminClient()
+      const { data: serviceReversalId, error: serviceReversalError } = await admin.rpc(
+        "reverse_service_manual_journal_with_request_metadata",
+        {
+          p_journal_entry_id: original_je_id,
+          p_reversal_date: reversal_date,
+          p_reason: reason,
+          p_actor_user_id: user.id,
+          p_request_ip: requestMeta.ipAddress,
+          p_request_user_agent: requestMeta.userAgent,
+        }
+      )
+
+      if (serviceReversalError || !serviceReversalId) {
+        const mapped = mapServiceManualRpcError(serviceReversalError?.message || null)
+        if (mapped.code === "ALREADY_REVERSED") {
+          const { data: racedServiceReversal } = await supabase
+            .from("journal_entries")
+            .select("id")
+            .eq("business_id", resolvedBusinessId)
+            .eq("reference_type", "reversal")
+            .eq("reference_id", original_je_id)
+            .limit(1)
+            .maybeSingle()
+
+          if (racedServiceReversal) {
+            await linkServiceManualDraftToReversal(
+              originalJe as ReversalOriginal,
+              racedServiceReversal.id
+            )
+            return NextResponse.json({
+              reversal_journal_entry_id: racedServiceReversal.id,
+              original_journal_entry_id: original_je_id,
+              already_reversed: true,
+            })
+          }
+        }
+
+        return NextResponse.json(
+          { error: mapped.message, code: mapped.code, reason_code: "JOURNAL_NOT_REVERSIBLE" },
+          { status: mapped.status }
+        )
+      }
+
+      await linkServiceManualDraftToReversal(
+        originalJe as ReversalOriginal,
+        serviceReversalId
+      )
+      return NextResponse.json({
+        reversal_journal_entry_id: serviceReversalId,
+        original_journal_entry_id: original_je_id,
+      })
     }
 
     const { data: existingReversal } = await supabase
@@ -192,12 +310,15 @@ export async function POST(request: NextRequest) {
       description: l.description,
     }))
 
-    const { data: journalEntryId, error: postError } = await supabase.rpc("post_journal_entry", {
+    const requestMeta = getTrustedRequestMetadata(request)
+    const admin = createSupabaseAdminClient()
+    const { data: journalEntryId, error: postError } = await admin.rpc("post_journal_entry_with_request_metadata", {
       p_business_id: resolvedBusinessId,
       p_date: reversal_date,
       p_description: description,
       p_reference_type: "reversal",
       p_reference_id: original_je_id,
+      p_reverses_entry_id: original_je_id,
       p_lines,
       p_is_adjustment: true,
       p_adjustment_reason: reason,
@@ -209,12 +330,45 @@ export async function POST(request: NextRequest) {
       p_posted_by_accountant_id: user.id,
       p_posting_source: "accountant",
       p_is_revenue_correction: false,
+      p_request_ip: requestMeta.ipAddress,
+      p_request_user_agent: requestMeta.userAgent,
     })
 
     if (postError) {
+      const message = postError.message || "Failed to post reversal journal entry"
+
+      // A concurrent/retried reversal can lose the race after the pre-check.
+      // Reconcile to the existing reversal instead of returning an opaque 500.
+      if (
+        message.includes("SERVICE_MANUAL_ALREADY_REVERSED") ||
+        message.includes("REVERSAL_ALREADY_EXISTS") ||
+        message.toLowerCase().includes("duplicate key")
+      ) {
+        const { data: racedReversal } = await supabase
+          .from("journal_entries")
+          .select("id")
+          .eq("business_id", resolvedBusinessId)
+          .eq("reference_type", "reversal")
+          .eq("reference_id", original_je_id)
+          .limit(1)
+          .maybeSingle()
+
+        if (racedReversal) {
+          await linkServiceManualDraftToReversal(
+            originalJe as ReversalOriginal,
+            racedReversal.id
+          )
+          return NextResponse.json({
+            reversal_journal_entry_id: racedReversal.id,
+            original_journal_entry_id: original_je_id,
+            already_reversed: true,
+          })
+        }
+      }
+
       console.error("Reversal: post_journal_entry error", postError)
       return NextResponse.json(
-        { error: postError.message || "Failed to post reversal journal entry" },
+        { error: message },
         { status: 500 }
       )
     }
@@ -226,20 +380,13 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    await logAudit({
-      businessId: resolvedBusinessId,
-      userId: user.id,
-      actionType: "reversal",
-      entityType: "journal_entry",
-      entityId: original_je_id,
-      description: reason,
-      newValues: {
-        reversal_je_id: journalEntryId,
-        business_id: resolvedBusinessId,
-        period_id: period.id,
-      },
-      request,
-    })
+    await linkServiceManualDraftToReversal(
+      originalJe as ReversalOriginal,
+      journalEntryId
+    )
+
+    // The reversal audit row is written atomically by the journal_entries
+    // reversal trigger in migration 600. Do not write a second audit row here.
 
     // BUG 1 FIX: When reversing a payment JE, sync invoice status by soft-deleting
     // the payment. Ledger already reflects reversal (reversal JE); payments table

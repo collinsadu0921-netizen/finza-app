@@ -9,6 +9,7 @@ import {
   formatLoanActivityLabel,
   formatServiceActivityDescription,
   isCreditNoteReclassJournal,
+  manualJournalDetailHref,
   supplierBillDetailHref,
 } from "../formatServiceActivityDescription"
 import { mapJournalSourceToActivityType } from "@/lib/server/serviceDashboardActivityLoader"
@@ -169,6 +170,57 @@ describe("formatServiceActivityDescription", () => {
   })
 })
 
+describe("manual journal activity labels", () => {
+  it("labels a posted manual journal distinctly and keeps its description", () => {
+    const label = formatServiceActivityDescription({
+      type: "manual_journal",
+      description: "New test manual",
+    })
+    expect(label).toBe("Manual journal — New test manual")
+    expect(label).not.toMatch(/Expense recorded/i)
+  })
+
+  it("does not turn an expense-account manual journal into an expense", () => {
+    const label = formatServiceActivityDescription({
+      type: "manual_journal",
+      description: "Office supplies paid from cash",
+    })
+    expect(label).toBe("Manual journal — Office supplies paid from cash")
+    expect(label).not.toMatch(/Expense recorded/i)
+  })
+
+  it("keeps an asset-to-asset manual journal as a manual journal", () => {
+    const label = formatServiceActivityDescription({
+      type: "manual_journal",
+      description: "Transfer from bank to mobile money",
+    })
+    expect(label).toBe("Manual journal — Transfer from bank to mobile money")
+  })
+
+  it("labels manual-journal reversals as Reversal, including the generic form", () => {
+    expect(
+      formatServiceActivityDescription({
+        type: "reversal",
+        description: "Reversal of JE ea817b81: mistake by me",
+      })
+    ).toBe("Reversal of JE ea817b81: mistake by me")
+
+    expect(
+      formatServiceActivityDescription({
+        type: "reversal",
+        description: "Reversal of manual journal ea817b81: mistake by me",
+      })
+    ).toBe("Reversal of manual journal ea817b81: mistake by me")
+
+    expect(
+      formatServiceActivityDescription({
+        type: "reversal",
+        description: null,
+      })
+    ).toBe("Reversal")
+  })
+})
+
 describe("classifyLoanActivityKind", () => {
   it("detects drawdown, repayment, and interest from descriptions", () => {
     expect(classifyLoanActivityKind("Loan Drawdown", "loan")).toBe("loan_drawdown")
@@ -222,6 +274,40 @@ describe("mapJournalSourceToActivityType", () => {
     expect(mapJournalSourceToActivityType("invoice", "invoice")).toBe("invoice")
     expect(mapJournalSourceToActivityType(null, "invoice")).toBe("invoice")
   })
+
+  it("classifies Service manual journals from source_type, never from account usage", () => {
+    expect(
+      mapJournalSourceToActivityType(
+        "service_manual",
+        "manual",
+        "Office supplies paid from cash"
+      )
+    ).toBe("manual_journal")
+    expect(
+      mapJournalSourceToActivityType(
+        "service_manual",
+        "manual",
+        "Transfer from bank to mobile money"
+      )
+    ).toBe("manual_journal")
+  })
+
+  it("classifies both Service and generic reversals as reversal", () => {
+    expect(
+      mapJournalSourceToActivityType(
+        "service_manual_reversal",
+        "reversal",
+        "Reversal of manual journal ea817b81: mistake by me"
+      )
+    ).toBe("reversal")
+    expect(
+      mapJournalSourceToActivityType(
+        null,
+        "reversal",
+        "Reversal of JE ea817b81: mistake by me"
+      )
+    ).toBe("reversal")
+  })
 })
 
 describe("activity detail hrefs", () => {
@@ -241,6 +327,27 @@ describe("activity detail hrefs", () => {
     const href = creditNoteDetailHref("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
     expect(href).toBe("/service/credit-notes/cccccccc-cccc-4ccc-8ccc-cccccccccccc/view")
     expect(href).not.toMatch(/\/invoices\//)
+  })
+
+  it("links manual journals and reversals to the exact ledger entry", () => {
+    expect(
+      manualJournalDetailHref(
+        "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        "manual",
+        "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+      )
+    ).toBe(
+      "/service/ledger?business_id=bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb&reference_type=manual&reference_id=dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+    )
+    expect(
+      manualJournalDetailHref(
+        "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+      )
+    ).toBe(
+      "/service/ledger?business_id=bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb&highlight=eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+    )
   })
 })
 

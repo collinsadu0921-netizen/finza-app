@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
+import { createSupabaseAdminClient } from "@/lib/supabaseAdmin"
+import { resolveAuditActors } from "@/lib/audit/resolveAuditActors"
 import { resolveBusinessScopeForUser } from "@/lib/business"
 import { getEffectivePermissions } from "@/lib/userPermissions"
 import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
@@ -121,33 +123,35 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ logs: [] }, { status: 200 })
     }
 
-    // Fetch user emails for user_id lookups (if admin access available)
-    const userMap: Record<string, { id: string; email: string }> = {}
-    const userIds = Array.from(new Set((logs || []).map((log: any) => log.user_id).filter(Boolean)))
+    // Resolve only the actor IDs that appear on this business-scoped result.
+    // No unrestricted auth-admin user listing is performed.
+    const userIds = (logs || [])
+      .map((log: { user_id?: string | null }) => log.user_id)
+      .filter((id): id is string => typeof id === "string" && id.length > 0)
 
-    if (userIds.length > 0) {
-      try {
-        // Try to fetch users via admin API (if available)
-        const { data: usersData, error: usersError } = await supabase.auth.admin.listUsers()
-        if (!usersError && usersData) {
-          usersData.users.forEach((user) => {
-            if (userIds.includes(user.id)) {
-              userMap[user.id] = { id: user.id, email: user.email || 'Unknown' }
-            }
-          })
-        }
-      } catch (err) {
-        // If admin API not available, try fetching from public schema
-        // Note: This is a fallback and may not work in all setups
-        console.warn("Could not fetch user emails via admin API")
-      }
+    let userMap = new Map<string, { id: string; name: string | null; email: string | null; label: string | null }>()
+    try {
+      const admin = createSupabaseAdminClient()
+      userMap = await resolveAuditActors(admin, businessId, userIds)
+    } catch (err) {
+      console.warn("Could not resolve audit actor labels", err)
     }
 
-    // Map logs with user information
-    const logsWithUsers = (logs || []).map((log: any) => ({
-      ...log,
-      user: log.user_id ? (userMap[log.user_id] || null) : null,
-    }))
+    const logsWithUsers = (logs || []).map((log: any) => {
+      const actor = log.user_id ? userMap.get(log.user_id) : null
+      return {
+        ...log,
+        user: actor
+          ? {
+              id: actor.id,
+              name: actor.name,
+              display_name: actor.name,
+              email: actor.email,
+              label: actor.label,
+            }
+          : null,
+      }
+    })
 
     return NextResponse.json({ logs: logsWithUsers }, { status: 200 })
   } catch (error: any) {
