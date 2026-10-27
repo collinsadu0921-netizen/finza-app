@@ -2,10 +2,10 @@
  * Repairs text that was decoded with the wrong character set.
  *
  * Two corruptions have appeared in Finza data and source:
- * - UTF-8 bytes decoded as CP850 (Windows/DOS Latin-1). This is what turns
- *   the cedi sign (U+20B5, UTF-8 `E2 82 B5`) into `ÔéÁ`.
- * - UTF-8 bytes decoded as Windows-1252/Latin-1. This turns the same cedi
- *   sign into `â‚µ`.
+ * - UTF-8 bytes decoded as CP850 (Windows/DOS Latin-1). The cedi sign
+ *   (U+20B5, UTF-8 `E2 82 B5`) becomes the CP850 sequence `D4 E9 C1`.
+ * - UTF-8 bytes decoded as Windows-1252/Latin-1. The same cedi sign becomes
+ *   the Windows-1252 sequence `E2 82 B5`.
  *
  * The maps below contain complete, known sequences rather than a generic
  * byte round-trip. That keeps legitimate accented text (`å`, `ä`, `ö`)

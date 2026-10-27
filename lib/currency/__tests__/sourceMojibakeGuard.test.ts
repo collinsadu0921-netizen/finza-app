@@ -17,7 +17,6 @@ const ALLOWLIST = new Set([
   "lib/currency/__tests__/normalizeCurrencySymbol.test.ts",
   "lib/currency/__tests__/ghsDocumentRendering.test.ts",
   "lib/currency/__tests__/sourceMojibakeGuard.test.ts",
-  "lib/text/repairMojibake.ts",
   "lib/text/__tests__/repairMojibake.test.ts",
 ])
 

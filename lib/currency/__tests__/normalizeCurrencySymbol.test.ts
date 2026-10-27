@@ -45,7 +45,7 @@ describe("normalizeCurrencySymbol", () => {
 describe("isCorruptedGhsSymbol", () => {
   it("detects mojibake cedi variants", () => {
     expect(isCorruptedGhsSymbol(MOJIBAKE_GHS_CEDI)).toBe(true)
-    expect(isCorruptedGhsSymbol("GHâ‚µ")).toBe(true)
+    expect(isCorruptedGhsSymbol(`GH${MOJIBAKE_GHS_CEDI}`)).toBe(true)
   })
 
   it("does not flag unrelated currency symbols", () => {
