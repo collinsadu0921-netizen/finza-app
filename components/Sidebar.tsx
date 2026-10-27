@@ -563,6 +563,9 @@ export default function Sidebar() {
         const journalEntriesRoute = useServiceRoutes
           ? buildServiceRoute("/service/ledger", accountingBusinessId ?? undefined)
           : buildAccountingRoute("/accounting/ledger", accountingBusinessId ?? undefined)
+        const manualJournalsRoute = useServiceRoutes
+          ? buildServiceRoute("/service/accounting/journals", accountingBusinessId ?? undefined)
+          : null
         const coaRoute = useServiceRoutes ? buildServiceRoute("/service/accounting/chart-of-accounts", accountingBusinessId ?? undefined) : buildAccountingRoute("/accounting/chart-of-accounts", accountingBusinessId ?? undefined)
         const trialBalanceRoute = useServiceRoutes ? buildServiceRoute("/service/reports/trial-balance", accountingBusinessId ?? undefined) : buildAccountingRoute("/accounting/reports/trial-balance", accountingBusinessId ?? undefined)
         const reconciliationRoute = useServiceRoutes ? buildServiceRoute("/service/accounting/reconciliation", accountingBusinessId ?? undefined) : buildAccountingRoute("/accounting/reconciliation", accountingBusinessId ?? undefined)
@@ -571,6 +574,9 @@ export default function Sidebar() {
 
         const accountingItems: Array<{ label: string; route: string; minTier?: ServiceSubscriptionTier }> = [
           { label: "General Ledger", route: generalLedgerReportRoute, minTier: "business" },
+          ...(manualJournalsRoute
+            ? ([{ label: "Manual Journals", route: manualJournalsRoute, minTier: "business" as const }] satisfies Array<{ label: string; route: string; minTier?: ServiceSubscriptionTier }>)
+            : []),
           { label: "Journal Entries", route: journalEntriesRoute, minTier: "business" },
           { label: "Chart of Accounts", route: coaRoute, minTier: "business" },
           { label: "Trial Balance", route: trialBalanceRoute, minTier: "business" },

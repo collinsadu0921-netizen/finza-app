@@ -3,6 +3,11 @@
 import { useState, useEffect } from "react"
 import { formatTimestamp } from "@/lib/formatTimestamp"
 import { getSelectedBusinessId } from "@/lib/business"
+import {
+  auditActorLabel,
+  formatAuditAction,
+  formatAuditSummary,
+} from "@/lib/audit/formatAuditLog"
 
 type AuditLog = {
   id: string
@@ -16,7 +21,10 @@ type AuditLog = {
   created_at: string
   user?: {
     id: string
-    email: string
+    name?: string | null
+    display_name?: string | null
+    email?: string | null
+    label?: string | null
   } | null
 }
 
@@ -96,10 +104,6 @@ export default function ActivityHistory({ entityType, entityId }: ActivityHistor
     }
   }
 
-  const formatActionType = (actionType: string) => {
-    return actionType.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase())
-  }
-
   const getActionIcon = (actionType: string) => {
     if (actionType.includes("created")) return "➕"
     if (actionType.includes("edited") || actionType.includes("updated")) return "✏️"
@@ -139,17 +143,17 @@ export default function ActivityHistory({ entityType, entityId }: ActivityHistor
                 <div className="flex-1">
                   <div className="flex items-center gap-2 mb-1">
                     <span className="font-semibold text-gray-900 dark:text-white text-sm">
-                      {formatActionType(log.action_type)}
+                      {formatAuditAction(log)}
                     </span>
                     <span className="text-xs text-gray-500 dark:text-gray-400">
                       {formatTimestamp(log.created_at)}
                     </span>
                   </div>
-                  {log.description && (
-                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">{log.description}</p>
+                  {formatAuditSummary(log) !== "—" && (
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">{formatAuditSummary(log)}</p>
                   )}
                   <p className="text-xs text-gray-500 dark:text-gray-400">
-                    by {log.user ? log.user.email : "System"}
+                    by {auditActorLabel(log)}
                   </p>
                   {(log.old_values || log.new_values) && (
                     <button
@@ -163,8 +167,15 @@ export default function ActivityHistory({ entityType, entityId }: ActivityHistor
               </div>
             </div>
             {expandedLog === log.id && (log.old_values || log.new_values) && (
-              <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700 grid grid-cols-2 gap-4">
-                {log.old_values && Object.keys(log.old_values).length > 0 && (
+              <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
+                <div className="text-xs text-gray-500 dark:text-gray-400 mb-3 space-y-1">
+                  <p><span className="font-medium">Audit ID:</span> {log.id}</p>
+                  <p><span className="font-medium">User ID:</span> {log.user_id ?? "—"}</p>
+                  <p><span className="font-medium">Raw action:</span> {log.action_type}</p>
+                  <p><span className="font-medium">Raw entity:</span> {log.entity_type} {log.entity_id ?? ""}</p>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  {log.old_values && Object.keys(log.old_values).length > 0 && (
                   <div>
                     <h4 className="font-semibold text-xs text-gray-700 dark:text-gray-300 mb-1">Before:</h4>
                     <pre className="bg-gray-50 dark:bg-gray-900 p-2 rounded text-xs overflow-auto max-h-32 border border-gray-200 dark:border-gray-600">
@@ -180,6 +191,7 @@ export default function ActivityHistory({ entityType, entityId }: ActivityHistor
                     </pre>
                   </div>
                 )}
+                </div>
               </div>
             )}
           </div>

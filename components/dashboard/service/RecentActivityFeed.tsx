@@ -44,6 +44,8 @@ const TYPE_DOT: Record<string, string> = {
   loan_drawdown: "bg-teal-500",
   loan_repayment: "bg-orange-500",
   loan_interest: "bg-amber-600",
+  manual_journal: "bg-slate-500",
+  reversal: "bg-rose-600",
 }
 
 const DEFAULT_MAX_ITEMS = 5

@@ -134,6 +134,105 @@ describe("buildJournalActivityItems credit-note posting vs reclass", () => {
     expect(reclass!.amount).toBe(40)
   })
 
+  it("labels manual journals by source_type and links to the exact ledger entry", async () => {
+    const businessId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    const items = await buildJournalActivityItems(
+      mockSupabase({}),
+      [
+        {
+          id: "je-manual-expense",
+          created_at: "2026-10-24T10:00:00.000Z",
+          description: "Office supplies paid from cash",
+          source_type: "service_manual",
+          reference_type: "manual",
+          reference_id: "draft-expense",
+          journal_amount: 1,
+        },
+        {
+          id: "je-manual-transfer",
+          created_at: "2026-10-24T10:05:00.000Z",
+          description: "Transfer from bank to mobile money",
+          source_type: "service_manual",
+          reference_type: "manual",
+          reference_id: "draft-transfer",
+          journal_amount: 5000,
+        },
+      ],
+      businessId
+    )
+
+    expect(items.map((item) => item.type)).toEqual([
+      "manual_journal",
+      "manual_journal",
+    ])
+    expect(items[0].description).toBe("Office supplies paid from cash")
+    expect(items[0].amount).toBe(1)
+    expect(items[0].href).toBe(
+      `/service/ledger?business_id=${businessId}&reference_type=manual&reference_id=draft-expense`
+    )
+    expect(items[1].description).toBe("Transfer from bank to mobile money")
+    expect(items[1].amount).toBe(5000)
+    expect(items[1].href).toBe(
+      `/service/ledger?business_id=${businessId}&reference_type=manual&reference_id=draft-transfer`
+    )
+
+    for (const item of items) {
+      const label = formatServiceActivityDescription({
+        type: item.type,
+        description: item.description,
+      })
+      expect(label).toMatch(/^Manual journal/)
+      expect(label).not.toMatch(/Expense recorded/i)
+    }
+  })
+
+  it("labels both Service and generic manual-journal reversals as Reversal", async () => {
+    const businessId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    const items = await buildJournalActivityItems(
+      mockSupabase({}),
+      [
+        {
+          id: "je-service-reversal",
+          created_at: "2026-10-24T11:00:00.000Z",
+          description: "Reversal of manual journal ea817b81: mistake by me",
+          source_type: "service_manual_reversal",
+          reference_type: "reversal",
+          reference_id: "ea817b81",
+          journal_amount: 1,
+        },
+        {
+          id: "je-generic-reversal",
+          created_at: "2026-10-24T11:05:00.000Z",
+          description: "Reversal of JE ea817b81: mistake by me",
+          source_type: null,
+          reference_type: "reversal",
+          reference_id: "ea817b81",
+          journal_amount: 1,
+        },
+      ],
+      businessId
+    )
+
+    expect(items.map((item) => item.type)).toEqual(["reversal", "reversal"])
+    expect(items[0].amount).toBe(1)
+    expect(items[1].amount).toBe(1)
+    expect(items[0].href).toBe(
+      `/service/ledger?business_id=${businessId}&reference_type=reversal&reference_id=ea817b81`
+    )
+    expect(items[1].href).toBe(
+      `/service/ledger?business_id=${businessId}&reference_type=reversal&reference_id=ea817b81`
+    )
+
+    for (const item of items) {
+      const label = formatServiceActivityDescription({
+        type: item.type,
+        description: item.description,
+      })
+      expect(label).toMatch(/^Reversal/)
+      expect(label).not.toMatch(/Expense recorded/i)
+    }
+  })
+
   it("keeps ordinary invoice posting as Invoice created with the invoice destination", async () => {
     const items = await buildJournalActivityItems(
       mockSupabase({
