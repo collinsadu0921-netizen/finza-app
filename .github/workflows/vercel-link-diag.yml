@@ -1,0 +1,52 @@
+name: Vercel link diagnostics
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+
+      - name: Diagnose Vercel link
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          set +e
+          TEAM=team_oWPGv9x9bpRD2nRmUM2lKpzJ
+          PROJECT=prj_BxbfIgXTl1PAX6W3635Nsc8KXuW1
+          echo "=== token presence ==="
+          if [ -n "$VERCEL_TOKEN" ]; then echo "VERCEL_TOKEN present"; else echo "VERCEL_TOKEN MISSING"; fi
+          echo "=== env ids match guards ==="
+          [ "$VERCEL_ORG_ID" = "$TEAM" ] && echo "org id OK" || echo "org id MISMATCH"
+          [ "$VERCEL_PROJECT_ID" = "$PROJECT" ] && echo "project id OK" || echo "project id MISMATCH"
+          echo "=== CLI version ==="
+          npx --yes vercel --version
+          echo "=== whoami ==="
+          npx --yes vercel whoami
+          echo "=== teams ==="
+          npx --yes vercel teams ls
+          echo "=== project ls ==="
+          npx --yes vercel project ls --scope "$TEAM"
+          echo "=== link (correct env) ==="
+          npx --yes vercel link --yes --scope "$TEAM" --project "$PROJECT"
+          echo "link_exit=$?"
+          echo "=== project.json ==="
+          cat .vercel/project.json 2>/dev/null || echo "NO project.json"
+          echo "=== link (no env ids) ==="
+          rm -rf .vercel
+          env -u VERCEL_ORG_ID -u VERCEL_PROJECT_ID npx --yes vercel link --yes --scope "$TEAM" --project "$PROJECT"
+          echo "link_noenv_exit=$?"
+          cat .vercel/project.json 2>/dev/null || echo "NO project.json"
