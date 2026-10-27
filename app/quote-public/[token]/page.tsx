@@ -6,6 +6,7 @@ import dynamic from "next/dynamic"
 import type { SignaturePadHandle } from "@/components/SignaturePad"
 import { taxLinesFromEstimateRow } from "@/lib/documents/estimateTaxLinesForDocument"
 import BusinessLogoDisplay from "@/components/BusinessLogoDisplay"
+import { normalizeCurrencySymbol } from "@/lib/currency/normalizeCurrencySymbol"
 
 // Lazy-load signature pad (canvas — SSR-incompatible)
 const SignaturePad = dynamic(() => import("@/components/SignaturePad"), { ssr: false })
@@ -155,7 +156,7 @@ export default function QuotePublicPage() {
     document.title = `Quote ${estimate.estimate_number} — ${issuer}`
   }, [estimate, business])
 
-  const sym = estimate?.currency_symbol ?? "₵"
+  const sym = normalizeCurrencySymbol(estimate?.currency_symbol, estimate?.currency_code)
   const quoteTokenEnc = token ? encodeURIComponent(token) : ""
 
   const handleAccept = async () => {
@@ -414,9 +415,7 @@ export default function QuotePublicPage() {
               <div className="px-6 py-4">
                 <p className="text-xs uppercase tracking-wider text-slate-400 font-semibold mb-1">Currency</p>
                 <p className="text-sm font-semibold text-slate-800">
-                  {estimate.currency_code && estimate.currency_symbol
-                    ? `${estimate.currency_code} (${estimate.currency_symbol})`
-                    : estimate.currency_code ?? estimate.currency_symbol ?? "—"}
+                  {estimate.currency_code ? `${estimate.currency_code} (${sym})` : sym}
                 </p>
               </div>
             </div>

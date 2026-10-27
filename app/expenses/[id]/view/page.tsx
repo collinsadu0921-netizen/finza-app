@@ -7,6 +7,7 @@ import ProtectedLayout from "@/components/ProtectedLayout"
 
 const FragmentWrapper = ({ children }: { children: React.ReactNode }) => <>{children}</>
 import { getCurrencySymbol } from "@/lib/currency"
+import { normalizeCurrencySymbol } from "@/lib/currency/normalizeCurrencySymbol"
 import { receiptFileKind, receiptPublicUrl } from "@/lib/storage/receiptFileUrl"
 import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
 
@@ -131,7 +132,10 @@ export default function ViewExpensePage() {
   )
   const docCode = isFx ? expense.currency_code! : homeCode
   const docSymbol =
-    expense.currency_symbol || getCurrencySymbol(docCode) || docCode || "₵"
+    normalizeCurrencySymbol(expense.currency_symbol, docCode) ||
+    getCurrencySymbol(docCode) ||
+    docCode ||
+    "₵"
   const homeSymbol = getCurrencySymbol(homeCode) || homeCode || "₵"
 
   return (

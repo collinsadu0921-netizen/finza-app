@@ -5,6 +5,7 @@ import {
   enforceServiceWorkspaceAccess,
   enforceServiceWorkspaceWriteAccess,
 } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
+import { repairMojibake } from "@/lib/text/repairMojibake"
 import { vatPaymentState } from "@/lib/vat/vatReturnPayment"
 
 export async function GET(
@@ -157,11 +158,23 @@ export async function GET(
         sub_type: account.sub_type,
       }))
 
+    // Repair legacy mojibake at the read boundary so the UI and exports never
+    // receive corrupt notes, payment references, or adjustment reasons.
+    const safeVatReturn = {
+      ...vatReturn,
+      payment_state: vatPaymentState(vatReturn),
+      notes: vatReturn.notes ? repairMojibake(vatReturn.notes) : vatReturn.notes,
+      payment_reference: vatReturn.payment_reference
+        ? repairMojibake(vatReturn.payment_reference)
+        : vatReturn.payment_reference,
+      adjustment_reason: vatReturn.adjustment_reason
+        ? repairMojibake(vatReturn.adjustment_reason)
+        : vatReturn.adjustment_reason,
+      status: vatReturn.status ? repairMojibake(vatReturn.status) : vatReturn.status,
+    }
+
     return NextResponse.json({
-      vatReturn: {
-        ...vatReturn,
-        payment_state: vatPaymentState(vatReturn),
-      },
+      vatReturn: safeVatReturn,
       sourceData,
       paymentAccounts,
     })

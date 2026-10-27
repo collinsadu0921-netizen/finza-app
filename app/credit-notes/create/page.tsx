@@ -8,6 +8,7 @@ import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
 import { getCanonicalTaxResultFromLineItems, deriveLegacyTaxColumnsFromTaxLines } from "@/lib/taxEngine/helpers"
 import { normalizeCountry } from "@/lib/payments/eligibility"
+import { normalizeCurrencySymbol } from "@/lib/currency/normalizeCurrencySymbol"
 import { NativeSelect } from "@/components/ui/NativeSelect"
 import type { InvoiceCreditCapacity } from "@/lib/creditNotes/invoiceCreditCapacity"
 import {
@@ -483,7 +484,10 @@ function CreateCreditNoteContent() {
     )
   }
 
-  const currencyLabel = invoice?.currency_symbol?.trim() || "₵"
+  const currencyLabel = normalizeCurrencySymbol(
+    invoice?.currency_symbol,
+    invoice?.currency_code
+  )
 
   return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">

@@ -8,8 +8,12 @@ import LoadingScreen from "@/components/ui/LoadingScreen"
 import PageHeader from "@/components/ui/PageHeader"
 import EmptyState from "@/components/ui/EmptyState"
 import { StatusBadge } from "@/components/ui/StatusBadge"
-import type { LedgerLine, MonthlyVatReturn } from "@/app/api/vat-returns/monthly/route"
+import { formatDate } from "@/lib/exportUtils"
+import type { MonthlyVatReturn } from "@/app/api/vat-returns/monthly/route"
 import { vatCreateHref, vatFilingHref } from "@/lib/vat/vatRoutes"
+import { formatMoney } from "@/lib/money"
+import { repairMojibake } from "@/lib/text/repairMojibake"
+import { ledgerReferenceLabel, ledgerSourceLabel } from "@/lib/vat/ledgerDisplay"
 
 type FiledReturn = {
   id: string
@@ -17,6 +21,10 @@ type FiledReturn = {
   period_end_date: string
   status: string
   payment_state?: "unpaid" | "paid_recorded" | "paid_without_payment"
+}
+
+function formatCedi(value: number | null | undefined): string {
+  return formatMoney(Number(value ?? 0), "GHS")
 }
 
 export default function VatReturnsPage() {
@@ -79,14 +87,6 @@ export default function VatReturnsPage() {
   const handleMonthClick = (monthReturn: MonthlyVatReturn) => {
     setSelectedMonth(monthReturn)
     setShowDetailsModal(true)
-  }
-
-  const sourceLabel = (line: LedgerLine) => {
-    if (line.reference_type && line.reference_id)
-      return `${line.reference_type.replace(/_/g, " ")} #${line.reference_id}`
-    if (line.reference_type) return line.reference_type.replace(/_/g, " ")
-    if (line.source_type) return line.source_type.replace(/_/g, " ")
-    return "—"
   }
 
   if (loading) {
@@ -155,21 +155,20 @@ export default function VatReturnsPage() {
                               {formatMonth(monthReturn.month)}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-semibold text-gray-700">
-                              ₵{outputTotal.toFixed(2)}
+                              {formatCedi(outputTotal)}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-semibold text-gray-700">
-                              ₵{inputTotal.toFixed(2)}
+                              {formatCedi(inputTotal)}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-right">
                               <span className={`font-bold ${monthReturn.net_vat >= 0 ? "text-red-600" : "text-green-600"}`}>
-                                {monthReturn.net_vat >= 0 ? "₵" : "-₵"}
-                                {Math.abs(monthReturn.net_vat).toFixed(2)}
+                                {formatCedi(monthReturn.net_vat)}
                               </span>
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-center">
                               {filed ? (
                                 <div className="flex flex-col items-center gap-1">
-                                  <StatusBadge status={filed.status} />
+                                  <StatusBadge status={repairMojibake(filed.status)} />
                                   {filed.payment_state === "paid_without_payment" && (
                                     <span
                                       className="inline-flex items-center rounded bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-200"
@@ -244,8 +243,7 @@ export default function VatReturnsPage() {
                     </p>
                   </div>
                   <span className={`text-2xl font-bold ${grandTotalNetVat >= 0 ? "text-red-600" : "text-green-600"}`}>
-                    {grandTotalNetVat >= 0 ? "₵" : "-₵"}
-                    {Math.abs(grandTotalNetVat).toFixed(2)}
+                    {formatCedi(grandTotalNetVat)}
                   </span>
                 </div>
               </div>
@@ -319,15 +317,15 @@ export default function VatReturnsPage() {
                     <div className="space-y-1 text-sm">
                       <div className="flex justify-between">
                         <span className="text-gray-500">NHIL <span className="text-xs">(levy)</span></span>
-                        <span>₵{selectedMonth.output_nhil.toFixed(2)}</span>
+                        <span>{formatCedi(selectedMonth.output_nhil)}</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-gray-500">GETFund <span className="text-xs">(levy)</span></span>
-                        <span>₵{selectedMonth.output_getfund.toFixed(2)}</span>
+                        <span>{formatCedi(selectedMonth.output_getfund)}</span>
                       </div>
                       <div className="flex justify-between font-semibold border-t pt-1 mt-1">
                         <span>VAT (15%)</span>
-                        <span>₵{selectedMonth.output_vat.toFixed(2)}</span>
+                        <span>{formatCedi(selectedMonth.output_vat)}</span>
                       </div>
                     </div>
                   </div>
@@ -336,15 +334,15 @@ export default function VatReturnsPage() {
                     <div className="space-y-1 text-sm">
                       <div className="flex justify-between">
                         <span className="text-gray-500">NHIL <span className="text-xs">(levy)</span></span>
-                        <span>₵{selectedMonth.input_nhil.toFixed(2)}</span>
+                        <span>{formatCedi(selectedMonth.input_nhil)}</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-gray-500">GETFund <span className="text-xs">(levy)</span></span>
-                        <span>₵{selectedMonth.input_getfund.toFixed(2)}</span>
+                        <span>{formatCedi(selectedMonth.input_getfund)}</span>
                       </div>
                       <div className="flex justify-between font-semibold border-t pt-1 mt-1">
                         <span>VAT (15%)</span>
-                        <span>₵{selectedMonth.input_vat.toFixed(2)}</span>
+                        <span>{formatCedi(selectedMonth.input_vat)}</span>
                       </div>
                     </div>
                   </div>
@@ -354,8 +352,7 @@ export default function VatReturnsPage() {
                 <div className="bg-gray-50 rounded-lg p-4 border border-gray-200 flex justify-between items-center">
                   <p className="text-base font-semibold text-gray-900">Net VAT Payable</p>
                   <span className={`text-2xl font-bold ${selectedMonth.net_vat >= 0 ? "text-red-600" : "text-green-600"}`}>
-                    {selectedMonth.net_vat >= 0 ? "₵" : "-₵"}
-                    {Math.abs(selectedMonth.net_vat).toFixed(2)}
+                    {formatCedi(selectedMonth.net_vat)}
                   </span>
                 </div>
 
@@ -367,46 +364,144 @@ export default function VatReturnsPage() {
                   {selectedMonth.entries.length === 0 ? (
                     <p className="text-sm text-gray-500">No ledger entries for this month</p>
                   ) : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
+                    <>
+                    <div className="hidden overflow-x-auto md:block">
+                      <table className="w-full min-w-[860px] text-sm">
+                        <caption className="sr-only">
+                          VAT ledger entries with invoice and bill references
+                        </caption>
                         <thead className="bg-gray-50">
                           <tr>
-                            <th className="px-4 py-2 text-left text-xs font-semibold text-gray-600">Date</th>
-                            <th className="px-4 py-2 text-left text-xs font-semibold text-gray-600">Source</th>
-                            <th className="px-4 py-2 text-left text-xs font-semibold text-gray-600">Description</th>
-                            <th className="px-4 py-2 text-left text-xs font-semibold text-gray-600">Tax</th>
-                            <th className="px-4 py-2 text-right text-xs font-semibold text-gray-600">Credit (Output)</th>
-                            <th className="px-4 py-2 text-right text-xs font-semibold text-gray-600">Debit (Input)</th>
+                            <th scope="col" className="px-4 py-2 text-left text-xs font-semibold text-gray-600">Date</th>
+                            <th scope="col" className="px-4 py-2 text-left text-xs font-semibold text-gray-600">Type</th>
+                            <th scope="col" className="px-4 py-2 text-left text-xs font-semibold text-gray-600">Reference</th>
+                            <th scope="col" className="px-4 py-2 text-left text-xs font-semibold text-gray-600">Description</th>
+                            <th scope="col" className="px-4 py-2 text-left text-xs font-semibold text-gray-600">Tax</th>
+                            <th scope="col" className="px-4 py-2 text-right text-xs font-semibold text-gray-600">Credit (Output)</th>
+                            <th scope="col" className="px-4 py-2 text-right text-xs font-semibold text-gray-600">Debit (Input)</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
-                          {selectedMonth.entries.map((entry) => (
-                            <tr key={entry.id} className="hover:bg-gray-50 transition-colors">
-                              <td className="px-4 py-2 text-gray-600 whitespace-nowrap">
-                                {new Date(entry.date).toLocaleDateString("en-GH")}
-                              </td>
-                              <td className="px-4 py-2 text-gray-500 whitespace-nowrap text-xs">
-                                {sourceLabel(entry)}
-                              </td>
-                              <td className="px-4 py-2 text-gray-700 max-w-xs truncate">
-                                {entry.description || "—"}
-                              </td>
-                              <td className="px-4 py-2">
-                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700">
-                                  {entry.tax_code}
-                                </span>
-                              </td>
-                              <td className="px-4 py-2 text-right text-blue-700 font-medium">
-                                {entry.credit > 0 ? `₵${entry.credit.toFixed(2)}` : "—"}
-                              </td>
-                              <td className="px-4 py-2 text-right text-green-700 font-medium">
-                                {entry.debit > 0 ? `₵${entry.debit.toFixed(2)}` : "—"}
-                              </td>
-                            </tr>
-                          ))}
+                          {selectedMonth.entries.map((entry) => {
+                            const reference = ledgerReferenceLabel(entry)
+                            return (
+                              <tr key={entry.id} className="hover:bg-gray-50 transition-colors">
+                                <td className="px-4 py-2 text-gray-600 whitespace-nowrap tabular-nums">
+                                  {formatDate(entry.date)}
+                                </td>
+                                <td className="px-4 py-2 text-gray-500 whitespace-nowrap text-xs">
+                                  {ledgerSourceLabel(entry)}
+                                </td>
+                                <td className="px-4 py-2 text-gray-700 whitespace-nowrap text-xs font-medium">
+                                  <span
+                                    className={reference.startsWith("#") ? "font-mono" : ""}
+                                    title={entry.reference_id ?? reference}
+                                  >
+                                    {reference}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-2 text-gray-700 min-w-[16rem] max-w-md whitespace-normal break-words">
+                                  {repairMojibake(entry.description || "—")}
+                                </td>
+                                <td className="px-4 py-2">
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700">
+                                    {entry.tax_code}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-2 text-right text-blue-700 font-medium whitespace-nowrap tabular-nums">
+                                  {entry.credit > 0 ? formatCedi(entry.credit) : "—"}
+                                </td>
+                                <td className="px-4 py-2 text-right text-green-700 font-medium whitespace-nowrap tabular-nums">
+                                  {entry.debit > 0 ? formatCedi(entry.debit) : "—"}
+                                </td>
+                              </tr>
+                            )
+                          })}
                         </tbody>
+                        <tfoot className="border-t-2 border-gray-200 bg-gray-50">
+                          <tr>
+                            <th scope="row" colSpan={5} className="px-4 py-2 text-right text-xs font-semibold uppercase tracking-wider text-gray-600">
+                              Month totals
+                            </th>
+                            <td className="px-4 py-2 text-right font-bold text-blue-700 whitespace-nowrap tabular-nums">
+                              {formatCedi(
+                                selectedMonth.entries.reduce(
+                                  (sum, entry) => sum + Number(entry.credit || 0),
+                                  0
+                                )
+                              )}
+                            </td>
+                            <td className="px-4 py-2 text-right font-bold text-green-700 whitespace-nowrap tabular-nums">
+                              {formatCedi(
+                                selectedMonth.entries.reduce(
+                                  (sum, entry) => sum + Number(entry.debit || 0),
+                                  0
+                                )
+                              )}
+                            </td>
+                          </tr>
+                        </tfoot>
                       </table>
                     </div>
+                    <div className="space-y-2 md:hidden">
+                      {selectedMonth.entries.map((entry) => (
+                        <div
+                          key={entry.id}
+                          className="rounded-lg border border-gray-200 bg-white p-3"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="text-xs text-gray-500">
+                                {formatDate(entry.date)} · {ledgerSourceLabel(entry)}
+                              </p>
+                              <p className="mt-0.5 text-sm font-medium text-gray-900 break-words">
+                                {repairMojibake(entry.description || "—")}
+                              </p>
+                              <p className="mt-0.5 text-xs text-gray-500 break-words">
+                                {ledgerReferenceLabel(entry)}
+                              </p>
+                            </div>
+                            <span className="shrink-0 rounded bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700">
+                              {entry.tax_code}
+                            </span>
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm tabular-nums">
+                            <span className="text-blue-700">
+                              Output: {entry.credit > 0 ? formatCedi(entry.credit) : "—"}
+                            </span>
+                            <span className="text-green-700">
+                              Input: {entry.debit > 0 ? formatCedi(entry.debit) : "—"}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                      <div className="flex items-center justify-between gap-3 rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm font-semibold">
+                        <span className="text-xs uppercase tracking-wider text-gray-600">
+                          Month totals
+                        </span>
+                        <span className="flex flex-wrap gap-x-4 gap-y-1 tabular-nums">
+                          <span className="text-blue-700">
+                            Output:{" "}
+                            {formatCedi(
+                              selectedMonth.entries.reduce(
+                                (sum, entry) => sum + Number(entry.credit || 0),
+                                0
+                              )
+                            )}
+                          </span>
+                          <span className="text-green-700">
+                            Input:{" "}
+                            {formatCedi(
+                              selectedMonth.entries.reduce(
+                                (sum, entry) => sum + Number(entry.debit || 0),
+                                0
+                              )
+                            )}
+                          </span>
+                        </span>
+                      </div>
+                    </div>
+                    </>
                   )}
                 </div>
               </div>

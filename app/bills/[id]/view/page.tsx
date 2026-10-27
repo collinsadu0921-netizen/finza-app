@@ -5,6 +5,7 @@ import { useRouter, useParams } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { normalizeCountry, getAllowedMethods, getMobileMoneyLabel } from "@/lib/payments/eligibility"
 import { getCurrencySymbol } from "@/lib/currency"
+import { normalizeCurrencySymbol } from "@/lib/currency/normalizeCurrencySymbol"
 import { resolveCurrencyDisplay } from "@/lib/currency/resolveCurrencyDisplay"
 import { buildWhatsAppLink } from "@/lib/communication/whatsappLink"
 import { useToast } from "@/components/ui/ToastProvider"
@@ -76,7 +77,7 @@ function billAmountCurrencyDisplay(
   )
   if (isDocForeign && b.currency_code) {
     return (
-      b.currency_symbol ||
+      normalizeCurrencySymbol(b.currency_symbol, b.currency_code) ||
       getCurrencySymbol(b.currency_code) ||
       b.currency_code ||
       homeDisplay
