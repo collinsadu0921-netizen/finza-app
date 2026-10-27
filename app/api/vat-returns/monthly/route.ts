@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { normalizeCountry } from "@/lib/payments/eligibility"
 import { resolveProfessionalVatBusinessId } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
+import { repairMojibake } from "@/lib/text/repairMojibake"
 
 export type LedgerLine = {
   id: string
@@ -12,6 +13,8 @@ export type LedgerLine = {
   reference: string | null
   reference_type?: string | null
   reference_id?: string | null
+  /** Human-readable invoice/bill/credit-note reference resolved from the source row. */
+  reference_label?: string | null
   tax_code: string
   debit: number
   credit: number
@@ -123,6 +126,91 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: linesError.message }, { status: 500 })
     }
 
+    // Resolve human document numbers for ledger references (never show raw UUIDs).
+    const REFERENCE_QUERY_TYPES = new Set([
+      "invoice",
+      "bill",
+      "credit_note",
+      "expense",
+      "payment",
+      "payroll",
+      "asset",
+    ])
+    const referencedIds = new Map<string, Set<string>>()
+    for (const line of rawLines || []) {
+      const je = (line as any).journal_entries
+      const refType = je?.reference_type as string | null | undefined
+      const refId = je?.reference_id as string | null | undefined
+      if (!refType || !refId || !REFERENCE_QUERY_TYPES.has(refType)) continue
+      if (!referencedIds.has(refType)) referencedIds.set(refType, new Set())
+      referencedIds.get(refType)!.add(refId)
+    }
+
+    const idsFor = (type: string) => Array.from(referencedIds.get(type) ?? [])
+    const fetchReferenceRows = async (table: string, ids: string[], select: string) => {
+      if (ids.length === 0) return [] as any[]
+      const { data, error } = await supabase
+        .from(table)
+        .select(select)
+        .eq("business_id", businessId)
+        .in("id", ids)
+      if (error) {
+        console.error(`Error resolving ${table} references:`, error)
+        return [] as any[]
+      }
+      return (data ?? []) as any[]
+    }
+
+    const [invoiceRows, billRows, creditNoteRows, expenseRows, paymentRows, payrollRows, assetRows] =
+      await Promise.all([
+        fetchReferenceRows("invoices", idsFor("invoice"), "id, invoice_number"),
+        fetchReferenceRows("bills", idsFor("bill"), "id, bill_number, supplier_name"),
+        fetchReferenceRows("credit_notes", idsFor("credit_note"), "id, credit_number"),
+        fetchReferenceRows("expenses", idsFor("expense"), "id, supplier"),
+        fetchReferenceRows("payments", idsFor("payment"), "id, reference, invoice_id"),
+        fetchReferenceRows("payroll_runs", idsFor("payroll"), "id, payroll_month"),
+        fetchReferenceRows("assets", idsFor("asset"), "id, asset_code"),
+      ])
+
+    const invoiceNumberById = new Map<string, string>()
+    for (const row of invoiceRows) {
+      if (row.id && row.invoice_number) invoiceNumberById.set(row.id, String(row.invoice_number))
+    }
+
+    const referenceLabels = new Map<string, string>()
+    const rememberReference = (type: string, id: string, label: string | null | undefined) => {
+      const clean = label ? repairMojibake(String(label)).trim() : ""
+      if (clean) referenceLabels.set(`${type}:${id}`, clean)
+    }
+
+    for (const row of invoiceRows) {
+      rememberReference("invoice", row.id, row.invoice_number ? `Invoice ${row.invoice_number}` : null)
+    }
+    for (const row of billRows) {
+      const supplier = row.supplier_name ? ` · ${row.supplier_name}` : ""
+      rememberReference("bill", row.id, row.bill_number ? `Bill ${row.bill_number}${supplier}` : null)
+    }
+    for (const row of creditNoteRows) {
+      rememberReference(
+        "credit_note",
+        row.id,
+        row.credit_number ? `Credit note ${row.credit_number}` : null
+      )
+    }
+    for (const row of expenseRows) {
+      rememberReference("expense", row.id, row.supplier ? `Expense · ${row.supplier}` : "Expense")
+    }
+    for (const row of paymentRows) {
+      const detail = row.reference || invoiceNumberById.get(row.invoice_id) || null
+      rememberReference("payment", row.id, detail ? `Payment · ${detail}` : "Payment")
+    }
+    for (const row of payrollRows) {
+      rememberReference("payroll", row.id, row.payroll_month ? `Payroll · ${row.payroll_month}` : "Payroll")
+    }
+    for (const row of assetRows) {
+      rememberReference("asset", row.id, row.asset_code ? `Asset ${row.asset_code}` : "Asset")
+    }
+
     // Group lines by month (YYYY-MM)
     const byMonth: Record<
       string,
@@ -162,18 +250,22 @@ export async function GET(request: NextRequest) {
       if (taxCode === "GETFund")  { byMonth[month].output_getfund += credit; byMonth[month].input_getfund += debit }
       if (taxCode === "COVID")    { byMonth[month].output_covid   += credit; byMonth[month].input_covid   += debit }
 
-      const refType = je.reference_type ?? null
+      const refType = je.reference_type ? repairMojibake(je.reference_type) : null
       const refId = je.reference_id ?? null
       const reference = refType && refId ? `${refType}:${refId}` : refType || null
+      const referenceLabel =
+        refType && refId ? referenceLabels.get(`${refType}:${refId}`) ?? null : null
+      const description = repairMojibake(line.description || je.description || "").trim() || null
       byMonth[month].entries.push({
         id:               line.id,
         date,
         journal_entry_id: je.id,
-        description:      line.description || je.description || null,
-        source_type:      je.source_type || null,
+        description,
+        source_type:      je.source_type ? repairMojibake(je.source_type) : null,
         reference,
         reference_type:   refType,
         reference_id:      refId,
+        reference_label:   referenceLabel,
         tax_code:         taxCode,
         debit,
         credit,

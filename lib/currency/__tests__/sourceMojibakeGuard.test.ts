@@ -1,6 +1,6 @@
 import { readFileSync, readdirSync, statSync } from "node:fs"
 import { join, relative } from "node:path"
-import { MOJIBAKE_GHS_CEDI } from "../normalizeCurrencySymbol"
+import { containsMojibake } from "../../text/repairMojibake"
 
 const ROOT = join(__dirname, "..", "..", "..")
 
@@ -17,6 +17,7 @@ const ALLOWLIST = new Set([
   "lib/currency/__tests__/normalizeCurrencySymbol.test.ts",
   "lib/currency/__tests__/ghsDocumentRendering.test.ts",
   "lib/currency/__tests__/sourceMojibakeGuard.test.ts",
+  "lib/text/__tests__/repairMojibake.test.ts",
 ])
 
 const SCAN_DIRS = ["app", "components", "lib", "supabase/migrations"]
@@ -36,7 +37,7 @@ function walk(dir: string, out: string[] = []): string[] {
 }
 
 describe("source mojibake guard", () => {
-  it("does not contain hardcoded Latin-1 cedi mojibake outside allowlist", () => {
+  it("does not contain hardcoded CP850 or Windows-1252 mojibake outside allowlist", () => {
     const offenders: string[] = []
 
     for (const scanDir of SCAN_DIRS) {
@@ -46,7 +47,7 @@ describe("source mojibake guard", () => {
         if (rel.includes("__tests__/") && rel.endsWith(".test.ts")) continue
 
         const text = readFileSync(file, "utf8")
-        if (text.includes(MOJIBAKE_GHS_CEDI)) {
+        if (containsMojibake(text)) {
           offenders.push(rel)
         }
       }

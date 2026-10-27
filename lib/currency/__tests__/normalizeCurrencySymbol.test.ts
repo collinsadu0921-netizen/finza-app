@@ -1,6 +1,7 @@
 import {
   isCorruptedGhsSymbol,
   MOJIBAKE_GHS_CEDI,
+  MOJIBAKE_GHS_CEDI_CP850,
   normalizeCurrencySymbol,
   resolveDocumentCurrencySymbol,
 } from "../normalizeCurrencySymbol"
@@ -11,8 +12,15 @@ describe("normalizeCurrencySymbol", () => {
     expect(normalizeCurrencySymbol(MOJIBAKE_GHS_CEDI)).toBe("₵")
   })
 
+  it("repairs CP850 mojibake to canonical cedi", () => {
+    expect(normalizeCurrencySymbol(MOJIBAKE_GHS_CEDI_CP850, "GHS")).toBe("₵")
+    expect(normalizeCurrencySymbol(MOJIBAKE_GHS_CEDI_CP850)).toBe("₵")
+    expect(isCorruptedGhsSymbol(MOJIBAKE_GHS_CEDI_CP850)).toBe(true)
+  })
+
   it("prefers mapped symbol from ISO code over stored mojibake", () => {
     expect(normalizeCurrencySymbol(MOJIBAKE_GHS_CEDI, "USD")).toBe("$")
+    expect(normalizeCurrencySymbol(MOJIBAKE_GHS_CEDI_CP850, "USD")).toBe("$")
   })
 
   it("returns canonical GHS symbol when only code is provided", () => {
@@ -37,7 +45,7 @@ describe("normalizeCurrencySymbol", () => {
 describe("isCorruptedGhsSymbol", () => {
   it("detects mojibake cedi variants", () => {
     expect(isCorruptedGhsSymbol(MOJIBAKE_GHS_CEDI)).toBe(true)
-    expect(isCorruptedGhsSymbol("GHâ‚µ")).toBe(true)
+    expect(isCorruptedGhsSymbol(`GH${MOJIBAKE_GHS_CEDI}`)).toBe(true)
   })
 
   it("does not flag unrelated currency symbols", () => {

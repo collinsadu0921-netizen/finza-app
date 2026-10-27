@@ -369,4 +369,28 @@ describe("apply-production-migrations runner", () => {
     })
     expect(() => runner.resolveMigrationFiles(["536"], dir)).toThrow(/test migration/i)
   })
+
+  it("applies 602 even when 5990 and 5991 are already recorded", async () => {
+    const dir = makeMigrationsDir({
+      "5990_drop_obsolete_payroll_payment_overloads.sql": "SELECT '5990';",
+      "5991_payroll_reversal_mutation_context.sql": "SELECT '5991';",
+      "602_repair_stored_cedi_mojibake.sql": "SELECT '602';",
+    })
+    const { client, recorded } = mockClient({
+      recorded: new Set(["5990", "5991"]),
+    })
+
+    const result = await runner.main(["--execute-production", "602"], {
+      env: { PRODUCTION_DATABASE_URL: prodUrl() },
+      migrationsDir: dir,
+      createClient: () => client,
+      logger: { trackSecret() {}, log() {} },
+      confirmProductionRef: async () => undefined,
+      stdin: { isTTY: true } as NodeJS.ReadStream,
+    })
+
+    expect(result.applied).toEqual(["602"])
+    expect(recorded.has("602")).toBe(true)
+    expect([...recorded].sort()).toEqual(["5990", "5991", "602"])
+  })
 })

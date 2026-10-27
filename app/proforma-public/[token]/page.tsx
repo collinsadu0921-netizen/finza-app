@@ -5,6 +5,7 @@ import { useParams } from "next/navigation"
 import dynamic from "next/dynamic"
 import type { SignaturePadHandle } from "@/components/SignaturePad"
 import BusinessLogoDisplay from "@/components/BusinessLogoDisplay"
+import { normalizeCurrencySymbol } from "@/lib/currency/normalizeCurrencySymbol"
 
 const SignaturePad = dynamic(() => import("@/components/SignaturePad"), { ssr: false })
 
@@ -168,7 +169,7 @@ export default function ProformaPublicPage() {
     document.title = `Proforma Invoice ${num} — ${issuer}`
   }, [proforma, business])
 
-  const sym = proforma?.currency_symbol ?? "₵"
+  const sym = normalizeCurrencySymbol(proforma?.currency_symbol, proforma?.currency_code)
 
   const handleAccept = async () => {
     setAcceptError("")
@@ -455,9 +456,7 @@ export default function ProformaPublicPage() {
               <div className="px-6 py-4">
                 <p className="text-xs uppercase tracking-wider text-slate-400 font-semibold mb-1">Currency</p>
                 <p className="text-sm font-semibold text-slate-800">
-                  {proforma.currency_code && proforma.currency_symbol
-                    ? `${proforma.currency_code} (${proforma.currency_symbol})`
-                    : proforma.currency_code ?? proforma.currency_symbol ?? "—"}
+                  {proforma.currency_code ? `${proforma.currency_code} (${sym})` : sym}
                 </p>
               </div>
             </div>
