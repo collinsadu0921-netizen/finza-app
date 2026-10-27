@@ -15,6 +15,7 @@ type FiledReturn = {
   period_start_date: string
   period_end_date: string
   status: string
+  payment_state?: "unpaid" | "paid_recorded" | "paid_without_payment"
 }
 
 export default function VatReturnsPage() {
@@ -166,7 +167,25 @@ export default function VatReturnsPage() {
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-center">
                               {filed ? (
-                                <StatusBadge status={filed.status} />
+                                <div className="flex flex-col items-center gap-1">
+                                  <StatusBadge status={filed.status} />
+                                  {filed.payment_state === "paid_without_payment" && (
+                                    <span
+                                      className="inline-flex items-center rounded bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-200"
+                                      title="Paid status was recorded without a linked payment journal. The tax liabilities remain in the ledger."
+                                    >
+                                      Paid · no journal
+                                    </span>
+                                  )}
+                                  {filed.payment_state === "paid_recorded" && (
+                                    <span
+                                      className="inline-flex items-center rounded bg-green-100 px-2 py-0.5 text-[11px] font-semibold text-green-800 dark:bg-green-900/40 dark:text-green-200"
+                                      title="Payment journal posted and linked."
+                                    >
+                                      Payment recorded
+                                    </span>
+                                  )}
+                                </div>
                               ) : (
                                 <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-500">
                                   Not filed

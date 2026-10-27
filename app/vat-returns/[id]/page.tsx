@@ -15,6 +15,7 @@ import { GRA_VAT3_BOXES, isPost2026Period } from "@/lib/gra/vatForm"
 
 type VatReturn = {
   id: string
+  business_id: string
   period_start_date: string
   period_end_date: string
   status: string
@@ -38,8 +39,37 @@ type VatReturn = {
   submission_date: string | null
   payment_date: string | null
   payment_reference: string | null
+  payment_journal_entry_id: string | null
+  payment_account_id: string | null
+  payment_amount: number | null
+  payment_posted_at: string | null
+  payment_state: "unpaid" | "paid_recorded" | "paid_without_payment"
   notes: string | null
   ledger_authority?: boolean
+}
+
+type PaymentAccount = {
+  id: string
+  code: string
+  name: string
+  sub_type: string | null
+}
+
+type PaymentReconciliation = {
+  filing_total?: number
+  ledger_total?: number
+  difference?: number
+  accounts?: Array<{
+    code: string
+    name: string
+    filing: number
+    ledger: number
+    difference: number
+  }>
+}
+
+function todayIso() {
+  return new Date().toISOString().slice(0, 10)
 }
 
 export default function VatReturnViewPage() {
@@ -53,6 +83,15 @@ export default function VatReturnViewPage() {
   const [ledgerEntries, setLedgerEntries] = useState<LedgerLine[]>([])
   const [updating, setUpdating] = useState(false)
   const [exportingPdf, setExportingPdf] = useState(false)
+  const [paymentAccounts, setPaymentAccounts] = useState<PaymentAccount[]>([])
+  const [showPaymentModal, setShowPaymentModal] = useState(false)
+  const [paymentDate, setPaymentDate] = useState(todayIso())
+  const [paymentAccountId, setPaymentAccountId] = useState("")
+  const [paymentReference, setPaymentReference] = useState("")
+  const [postingPayment, setPostingPayment] = useState(false)
+  const [paymentError, setPaymentError] = useState("")
+  const [paymentReconciliation, setPaymentReconciliation] =
+    useState<PaymentReconciliation | null>(null)
 
   useEffect(() => {
     loadReturn()
@@ -65,12 +104,17 @@ export default function VatReturnViewPage() {
 
       if (response.ok) {
         setVatReturn(data.vatReturn)
+        const accounts: PaymentAccount[] = data.paymentAccounts || []
+        setPaymentAccounts(accounts)
+        setPaymentAccountId((current) => current || accounts[0]?.id || "")
 
         // Fetch ledger entries for this period from the monthly endpoint
         const startMonth = (data.vatReturn.period_start_date as string).substring(0, 7)
         const endMonth = (data.vatReturn.period_end_date as string).substring(0, 7)
         try {
-          const monthlyRes = await fetch("/api/vat-returns/monthly")
+          const monthlyRes = await fetch(
+            `/api/vat-returns/monthly?business_id=${encodeURIComponent(data.vatReturn.business_id)}`
+          )
           if (monthlyRes.ok) {
             const monthlyData = await monthlyRes.json()
             const entries: LedgerLine[] = []
@@ -82,7 +126,7 @@ export default function VatReturnViewPage() {
             setLedgerEntries(entries)
           }
         } catch {
-          // non-critical — ledger entries will just be empty
+          // non-critical ÔÇö ledger entries will just be empty
         }
       } else {
         console.error("Error loading VAT return:", data.error)
@@ -126,12 +170,76 @@ export default function VatReturnViewPage() {
     }
   }
 
+  const openPaymentModal = () => {
+    setPaymentDate(todayIso())
+    setPaymentAccountId(paymentAccounts[0]?.id || "")
+    setPaymentReference("")
+    setPaymentError("")
+    setPaymentReconciliation(null)
+    setShowPaymentModal(true)
+  }
+
+  const handleRecordPayment = async () => {
+    if (postingPayment) return
+    if (!paymentDate) {
+      setPaymentError("Payment date is required.")
+      return
+    }
+    if (!paymentAccountId) {
+      setPaymentError("Select the bank, cash, or mobile-money account paid from.")
+      return
+    }
+
+    setPostingPayment(true)
+    setPaymentError("")
+    setPaymentReconciliation(null)
+
+    try {
+      const response = await fetch(`/api/vat-returns/${returnId}/payment`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          payment_date: paymentDate,
+          payment_account_id: paymentAccountId,
+          payment_reference: paymentReference || null,
+        }),
+      })
+      const data = await response.json().catch(() => ({}))
+
+      if (!response.ok) {
+        setPaymentError(data.message || data.error || "Could not post VAT payment.")
+        if (
+          data.accounts ||
+          data.difference !== undefined ||
+          data.filing_total !== undefined
+        ) {
+          setPaymentReconciliation(data as PaymentReconciliation)
+        }
+        return
+      }
+
+      setShowPaymentModal(false)
+      setPaymentReconciliation(null)
+      toast.showToast(
+        `VAT payment of ÔéÁ${Number(data.payment_amount || 0).toFixed(2)} posted`,
+        "success"
+      )
+      await loadReturn()
+    } catch (error) {
+      setPaymentError(
+        error instanceof Error ? error.message : "Could not post VAT payment."
+      )
+    } finally {
+      setPostingPayment(false)
+    }
+  }
+
   const handleRecalculate = async () => {
     if (!vatReturn) return
     openConfirm({
       title: "Recalculate VAT filing",
       description:
-        "This will re-read the tax control accounts (2100–2130) from the immutable ledger for this period and update all totals. Continue?",
+        "This will re-read the tax control accounts (2100ÔÇô2130) from the immutable ledger for this period and update all totals. Continue?",
       onConfirm: () => runRecalculate(),
     })
   }
@@ -215,8 +323,8 @@ export default function VatReturnViewPage() {
       date: e.date,
       source: e.reference_type
         ? `${e.reference_type.replace(/_/g, " ")}${e.reference_id ? ` #${e.reference_id}` : ""}`
-        : (e.source_type?.replace(/_/g, " ") || "—"),
-      description: e.description || "—",
+        : (e.source_type?.replace(/_/g, " ") || "ÔÇö"),
+      description: e.description || "ÔÇö",
       tax_code: e.tax_code,
       credit: Number(e.credit) || 0,
       debit: Number(e.debit) || 0,
@@ -319,10 +427,10 @@ export default function VatReturnViewPage() {
   const formatPeriod = (start: string) =>
     new Date(start).toLocaleDateString("en-GH", { month: "long", year: "numeric" })
 
-  // GRA regime flag — determines whether COVID rows and NHIL/GETFund credits apply
+  // GRA regime flag ÔÇö determines whether COVID rows and NHIL/GETFund credits apply
   const isPost2026 = isPost2026Period(vatReturn.period_end_date)
 
-  // Compute totals — handle legacy rows where total_output_tax may be 0
+  // Compute totals ÔÇö handle legacy rows where total_output_tax may be 0
   const outputTax =
     Number(vatReturn.total_output_tax) ||
     (Number(vatReturn.total_output_nhil || 0) +
@@ -346,7 +454,7 @@ export default function VatReturnViewPage() {
     if (e.reference_type)
       return `${e.reference_type.replace(/_/g, " ")}${e.reference_id ? ` #${e.reference_id}` : ""}`
     if (e.source_type) return e.source_type.replace(/_/g, " ")
-    return "—"
+    return "ÔÇö"
   }
 
   return (
@@ -370,15 +478,15 @@ export default function VatReturnViewPage() {
             <div className="flex items-start justify-between gap-4 flex-wrap">
               <div>
                 <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
-                  VAT filing — {formatPeriod(vatReturn.period_start_date)}
+                  VAT filing ÔÇö {formatPeriod(vatReturn.period_start_date)}
                 </h1>
                 <div className="flex items-center gap-3 flex-wrap">
                   <StatusBadge status={vatReturn.status} />
                   <span className="text-xs font-mono text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-800">
-                    LEDGER SOURCE ✓
+                    LEDGER SOURCE Ô£ô
                   </span>
                   <span className="text-xs text-slate-400">
-                    {vatReturn.period_start_date} → {vatReturn.period_end_date}
+                    {vatReturn.period_start_date} ÔåÆ {vatReturn.period_end_date}
                   </span>
                 </div>
               </div>
@@ -390,7 +498,7 @@ export default function VatReturnViewPage() {
                     disabled={updating}
                     className="px-4 py-2 bg-amber-100 text-amber-800 border border-amber-300 rounded-lg text-sm font-medium hover:bg-amber-200 disabled:opacity-50 transition-colors"
                   >
-                    {updating ? "Recalculating..." : "↻ Recalculate"}
+                    {updating ? "Recalculating..." : "Ôå╗ Recalculate"}
                   </button>
                 )}
                 <Button
@@ -437,16 +545,51 @@ export default function VatReturnViewPage() {
                 )}
                 {vatReturn.status === "submitted" && (
                   <button
-                    onClick={() => handleStatusUpdate("paid")}
+                    onClick={openPaymentModal}
                     disabled={updating}
                     className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50 transition-colors"
                   >
-                    Mark Paid
+                    Record payment
                   </button>
                 )}
               </div>
             </div>
           </div>
+
+          {vatReturn.payment_state === "paid_without_payment" && (
+            <div className="mb-6 rounded-xl border border-amber-300 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/30">
+              <p className="text-sm font-semibold text-amber-900 dark:text-amber-100">
+                Paid status recorded without a payment journal
+              </p>
+              <p className="mt-1 text-sm text-amber-800 dark:text-amber-200">
+                This filing is marked paid, but no journal entry is linked and the
+                tax liabilities remain in the ledger. It has not been repaired
+                automatically. Review the payment and post a correcting journal in
+                an open period if the payment left the bank.
+              </p>
+            </div>
+          )}
+
+          {vatReturn.payment_state === "paid_recorded" && (
+            <div className="mb-6 rounded-xl border border-green-300 bg-green-50 p-4 dark:border-green-800 dark:bg-green-950/30">
+              <p className="text-sm font-semibold text-green-900 dark:text-green-100">
+                Payment recorded and linked to the ledger
+              </p>
+              <p className="mt-1 text-sm text-green-800 dark:text-green-200">
+                ÔéÁ{Number(vatReturn.payment_amount || 0).toFixed(2)} posted on{" "}
+                {vatReturn.payment_date
+                  ? new Date(vatReturn.payment_date).toLocaleDateString("en-GH")
+                  : "the recorded payment date"}
+                . Journal entry:{" "}
+                <span className="font-mono text-xs">
+                  {vatReturn.payment_journal_entry_id}
+                </span>
+                {vatReturn.payment_reference
+                  ? ` ┬À Ref: ${vatReturn.payment_reference}`
+                  : ""}
+              </p>
+            </div>
+          )}
 
           {/* Output / Input Tax cards */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
@@ -461,21 +604,21 @@ export default function VatReturnViewPage() {
                     Taxable Sales (derived)
                     <span className="text-xs font-mono text-gray-400">[Box {GRA_VAT3_BOXES.box2.boxNumber}]</span>
                   </span>
-                  <span className="font-medium text-gray-700">₵{Number(vatReturn.total_taxable_sales).toFixed(2)}</span>
+                  <span className="font-medium text-gray-700">ÔéÁ{Number(vatReturn.total_taxable_sales).toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between text-gray-500">
                   <span className="flex items-center gap-1.5">
                     NHIL (2.5%)
                     <span className="text-xs font-mono text-gray-400">[Box {GRA_VAT3_BOXES.box4.boxNumber}]</span>
                   </span>
-                  <span>₵{Number(vatReturn.total_output_nhil).toFixed(2)}</span>
+                  <span>ÔéÁ{Number(vatReturn.total_output_nhil).toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between text-gray-500">
                   <span className="flex items-center gap-1.5">
                     GETFund (2.5%)
                     <span className="text-xs font-mono text-gray-400">[Box {GRA_VAT3_BOXES.box5.boxNumber}]</span>
                   </span>
-                  <span>₵{Number(vatReturn.total_output_getfund).toFixed(2)}</span>
+                  <span>ÔéÁ{Number(vatReturn.total_output_getfund).toFixed(2)}</span>
                 </div>
                 {(!isPost2026 || Number(vatReturn.total_output_covid) > 0) && (
                   <div className="flex justify-between text-gray-500">
@@ -483,7 +626,7 @@ export default function VatReturnViewPage() {
                       COVID-19 Levy (1%)
                       <span className="text-xs font-mono text-gray-400">[Box {GRA_VAT3_BOXES.box6.boxNumber}]</span>
                     </span>
-                    <span>₵{Number(vatReturn.total_output_covid).toFixed(2)}</span>
+                    <span>ÔéÁ{Number(vatReturn.total_output_covid).toFixed(2)}</span>
                   </div>
                 )}
                 <div className="flex justify-between text-gray-500">
@@ -491,14 +634,14 @@ export default function VatReturnViewPage() {
                     VAT (15%)
                     <span className="text-xs font-mono text-gray-400">[Box {GRA_VAT3_BOXES.box3.boxNumber}]</span>
                   </span>
-                  <span>₵{Number(vatReturn.total_output_vat).toFixed(2)}</span>
+                  <span>ÔéÁ{Number(vatReturn.total_output_vat).toFixed(2)}</span>
                 </div>
                 <div className="pt-2 border-t border-gray-200 dark:border-gray-700 flex justify-between font-bold text-gray-900 dark:text-white">
                   <span className="flex items-center gap-1.5">
                     Total Output Tax
                     <span className="text-xs font-mono text-gray-400 font-normal">[Box {GRA_VAT3_BOXES.box7.boxNumber}]</span>
                   </span>
-                  <span className="text-lg">₵{outputTax.toFixed(2)}</span>
+                  <span className="text-lg">ÔéÁ{outputTax.toFixed(2)}</span>
                 </div>
               </div>
             </div>
@@ -514,7 +657,7 @@ export default function VatReturnViewPage() {
                     Taxable Purchases (derived)
                     <span className="text-xs font-mono text-gray-400">[Box {GRA_VAT3_BOXES.box9.boxNumber}]</span>
                   </span>
-                  <span className="font-medium text-gray-700">₵{Number(vatReturn.total_taxable_purchases).toFixed(2)}</span>
+                  <span className="font-medium text-gray-700">ÔéÁ{Number(vatReturn.total_taxable_purchases).toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between text-gray-500">
                   <span className="flex items-center gap-1.5">
@@ -522,7 +665,7 @@ export default function VatReturnViewPage() {
                     {isPost2026 && <span className="text-xs text-green-600 dark:text-green-400">(creditable)</span>}
                     <span className="text-xs font-mono text-gray-400">[Box {GRA_VAT3_BOXES.box11.boxNumber}]</span>
                   </span>
-                  <span>₵{Number(vatReturn.total_input_nhil).toFixed(2)}</span>
+                  <span>ÔéÁ{Number(vatReturn.total_input_nhil).toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between text-gray-500">
                   <span className="flex items-center gap-1.5">
@@ -530,7 +673,7 @@ export default function VatReturnViewPage() {
                     {isPost2026 && <span className="text-xs text-green-600 dark:text-green-400">(creditable)</span>}
                     <span className="text-xs font-mono text-gray-400">[Box {GRA_VAT3_BOXES.box12.boxNumber}]</span>
                   </span>
-                  <span>₵{Number(vatReturn.total_input_getfund).toFixed(2)}</span>
+                  <span>ÔéÁ{Number(vatReturn.total_input_getfund).toFixed(2)}</span>
                 </div>
                 {(!isPost2026 || Number(vatReturn.total_input_covid) > 0) && (
                   <div className="flex justify-between text-gray-500">
@@ -538,7 +681,7 @@ export default function VatReturnViewPage() {
                       COVID-19 Levy (1%)
                       <span className="text-xs font-mono text-gray-400">[Box {GRA_VAT3_BOXES.box13.boxNumber}]</span>
                     </span>
-                    <span>₵{Number(vatReturn.total_input_covid).toFixed(2)}</span>
+                    <span>ÔéÁ{Number(vatReturn.total_input_covid).toFixed(2)}</span>
                   </div>
                 )}
                 <div className="flex justify-between text-gray-500">
@@ -546,14 +689,14 @@ export default function VatReturnViewPage() {
                     VAT (15%)
                     <span className="text-xs font-mono text-gray-400">[Box {GRA_VAT3_BOXES.box10.boxNumber}]</span>
                   </span>
-                  <span>₵{Number(vatReturn.total_input_vat).toFixed(2)}</span>
+                  <span>ÔéÁ{Number(vatReturn.total_input_vat).toFixed(2)}</span>
                 </div>
                 <div className="pt-2 border-t border-gray-200 dark:border-gray-700 flex justify-between font-bold text-gray-900 dark:text-white">
                   <span className="flex items-center gap-1.5">
                     Total Input Tax
                     <span className="text-xs font-mono text-gray-400 font-normal">[Box {GRA_VAT3_BOXES.box14.boxNumber}]</span>
                   </span>
-                  <span className="text-lg">₵{inputTax.toFixed(2)}</span>
+                  <span className="text-lg">ÔéÁ{inputTax.toFixed(2)}</span>
                 </div>
               </div>
             </div>
@@ -569,7 +712,7 @@ export default function VatReturnViewPage() {
                     Adjustments: Output {Number(vatReturn.output_adjustment) > 0 ? "+" : ""}
                     {Number(vatReturn.output_adjustment).toFixed(2)}, Input {Number(vatReturn.input_adjustment) > 0 ? "+" : ""}
                     {Number(vatReturn.input_adjustment).toFixed(2)}
-                    {vatReturn.adjustment_reason && ` — ${vatReturn.adjustment_reason}`}
+                    {vatReturn.adjustment_reason && ` ÔÇö ${vatReturn.adjustment_reason}`}
                   </p>
                 )}
               </div>
@@ -577,17 +720,17 @@ export default function VatReturnViewPage() {
                 {netPayable > 0 ? (
                   <>
                     <p className="text-xs text-gray-500 mb-1">Net VAT Payable (to GRA)</p>
-                    <p className="text-3xl font-bold text-red-600 dark:text-red-400">₵{netPayable.toFixed(2)}</p>
+                    <p className="text-3xl font-bold text-red-600 dark:text-red-400">ÔéÁ{netPayable.toFixed(2)}</p>
                   </>
                 ) : netRefund > 0 ? (
                   <>
                     <p className="text-xs text-gray-500 mb-1">Net VAT Refund Due</p>
-                    <p className="text-3xl font-bold text-green-600 dark:text-green-400">₵{netRefund.toFixed(2)}</p>
+                    <p className="text-3xl font-bold text-green-600 dark:text-green-400">ÔéÁ{netRefund.toFixed(2)}</p>
                   </>
                 ) : (
                   <>
                     <p className="text-xs text-gray-500 mb-1">Net VAT Payable</p>
-                    <p className="text-3xl font-bold text-gray-600 dark:text-gray-400">₵0.00</p>
+                    <p className="text-3xl font-bold text-gray-600 dark:text-gray-400">ÔéÁ0.00</p>
                   </>
                 )}
               </div>
@@ -633,7 +776,7 @@ export default function VatReturnViewPage() {
                   Ledger Entries ({ledgerEntries.length})
                 </h2>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  Journal entry lines on accounts 2100–2130 for this period
+                  Journal entry lines on accounts 2100ÔÇô2130 for this period
                 </p>
               </div>
             </div>
@@ -667,7 +810,7 @@ export default function VatReturnViewPage() {
                           {entrySourceLabel(entry)}
                         </td>
                         <td className="px-4 py-2 text-gray-700 dark:text-gray-300 max-w-xs truncate">
-                          {entry.description || "—"}
+                          {entry.description || "ÔÇö"}
                         </td>
                         <td className="px-4 py-2">
                           <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300">
@@ -675,10 +818,10 @@ export default function VatReturnViewPage() {
                           </span>
                         </td>
                         <td className="px-4 py-2 text-right font-medium text-blue-700 dark:text-blue-400">
-                          {Number(entry.credit) > 0 ? `₵${Number(entry.credit).toFixed(2)}` : "—"}
+                          {Number(entry.credit) > 0 ? `ÔéÁ${Number(entry.credit).toFixed(2)}` : "ÔÇö"}
                         </td>
                         <td className="px-4 py-2 text-right font-medium text-green-700 dark:text-green-400">
-                          {Number(entry.debit) > 0 ? `₵${Number(entry.debit).toFixed(2)}` : "—"}
+                          {Number(entry.debit) > 0 ? `ÔéÁ${Number(entry.debit).toFixed(2)}` : "ÔÇö"}
                         </td>
                       </tr>
                     ))}
@@ -698,6 +841,150 @@ export default function VatReturnViewPage() {
 
         </div>
       </div>
+
+      {showPaymentModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div
+            className="w-full max-w-xl overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-gray-800"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="vat-payment-title"
+          >
+            <div className="border-b border-gray-200 px-6 py-4 dark:border-gray-700">
+              <h2
+                id="vat-payment-title"
+                className="text-lg font-bold text-gray-900 dark:text-white"
+              >
+                Record VAT payment
+              </h2>
+              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                The filing tax split must match the tax liabilities posted to the
+                ledger for this filing period. Nothing is posted if they differ.
+              </p>
+            </div>
+
+            <div className="max-h-[70vh] space-y-4 overflow-y-auto px-6 py-5">
+              {paymentError && (
+                <div className="rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200">
+                  {paymentError}
+                </div>
+              )}
+
+              {paymentReconciliation && (
+                <div className="rounded-lg border border-red-300 bg-red-50 p-3 text-sm dark:border-red-800 dark:bg-red-950/40">
+                  <div className="grid grid-cols-3 gap-2 font-semibold text-red-900 dark:text-red-100">
+                    <span>Filing</span>
+                    <span className="text-right">Ledger period</span>
+                    <span className="text-right">Difference</span>
+                  </div>
+                  <div className="mt-1 grid grid-cols-3 gap-2 text-red-800 dark:text-red-200">
+                    <span>
+                      ÔéÁ{Number(paymentReconciliation.filing_total || 0).toFixed(2)}
+                    </span>
+                    <span className="text-right">
+                      ÔéÁ{Number(paymentReconciliation.ledger_total || 0).toFixed(2)}
+                    </span>
+                    <span className="text-right font-semibold">
+                      ÔéÁ{Number(paymentReconciliation.difference || 0).toFixed(2)}
+                    </span>
+                  </div>
+                  {paymentReconciliation.accounts && (
+                    <div className="mt-3 divide-y divide-red-200 border-t border-red-200 pt-2 dark:divide-red-900 dark:border-red-900">
+                      {paymentReconciliation.accounts.map((account) => (
+                        <div
+                          key={account.code}
+                          className="grid grid-cols-4 gap-2 py-1 text-xs"
+                        >
+                          <span>
+                            {account.code} {account.name}
+                          </span>
+                          <span className="text-right">
+                            ÔéÁ{Number(account.filing || 0).toFixed(2)}
+                          </span>
+                          <span className="text-right">
+                            ÔéÁ{Number(account.ledger || 0).toFixed(2)}
+                          </span>
+                          <span className="text-right font-semibold">
+                            ÔéÁ{Number(account.difference || 0).toFixed(2)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <label className="block text-sm">
+                <span className="mb-1 block font-medium text-gray-700 dark:text-gray-300">
+                  Payment date
+                </span>
+                <input
+                  type="date"
+                  value={paymentDate}
+                  onChange={(event) => setPaymentDate(event.target.value)}
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-900 dark:text-white"
+                />
+              </label>
+
+              <label className="block text-sm">
+                <span className="mb-1 block font-medium text-gray-700 dark:text-gray-300">
+                  Paid from
+                </span>
+                <select
+                  value={paymentAccountId}
+                  onChange={(event) => setPaymentAccountId(event.target.value)}
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-900 dark:text-white"
+                >
+                  <option value="">Select account</option>
+                  {paymentAccounts.map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.code} ┬À {account.name}
+                    </option>
+                  ))}
+                </select>
+                {paymentAccounts.length === 0 && (
+                  <span className="mt-1 block text-xs text-red-600 dark:text-red-400">
+                    No active cash/bank/mobile-money account found.
+                  </span>
+                )}
+              </label>
+
+              <label className="block text-sm">
+                <span className="mb-1 block font-medium text-gray-700 dark:text-gray-300">
+                  Payment reference (optional)
+                </span>
+                <input
+                  type="text"
+                  value={paymentReference}
+                  onChange={(event) => setPaymentReference(event.target.value)}
+                  maxLength={200}
+                  placeholder="Bank transfer ref / GRA receipt"
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-900 dark:text-white"
+                />
+              </label>
+            </div>
+
+            <div className="flex justify-end gap-2 border-t border-gray-200 bg-gray-50 px-6 py-4 dark:border-gray-700 dark:bg-gray-900/50">
+              <button
+                type="button"
+                onClick={() => setShowPaymentModal(false)}
+                disabled={postingPayment}
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleRecordPayment}
+                disabled={postingPayment || paymentAccounts.length === 0}
+                className="rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
+              >
+                {postingPayment ? "PostingÔÇª" : "Post payment"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </ProtectedLayout>
     </TierGate>
   )
