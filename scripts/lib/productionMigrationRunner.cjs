@@ -347,6 +347,50 @@ async function isVersionRecorded(client, version) {
   return (res.rowCount || 0) > 0
 }
 
+/**
+ * Post-apply guard: refuse to report a successful production migration run
+ * if a critical payroll RPC has an ambiguous name-subset+defaults overload.
+ * This is the class of defect that left both the 8-arg and 11-arg
+ * record_payroll_payment_atomic functions on production after migration 563.
+ */
+async function assertNoAmbiguousFinancialRpcOverloads(client) {
+  const { rows } = await client.query(`
+    WITH protected(proname, critical) AS (
+      VALUES
+        ('record_payroll_payment_atomic', true),
+        ('record_payroll_batch_item_payment_atomic', true),
+        ('lock_payroll_run_atomic', true)
+    )
+    SELECT
+      a.proname,
+      pg_get_function_identity_arguments(a.oid) AS shorter_args,
+      pg_get_function_identity_arguments(b.oid) AS longer_args
+    FROM pg_proc a
+    JOIN protected p ON p.proname = a.proname
+    JOIN pg_proc b
+      ON b.proname = a.proname
+     AND b.oid <> a.oid
+     AND b.pronargs > a.pronargs
+     AND b.pronargdefaults >= (b.pronargs - a.pronargs)
+     AND a.proargnames IS NOT NULL
+     AND b.proargnames IS NOT NULL
+     AND a.proargnames <@ b.proargnames
+    JOIN pg_namespace n ON n.oid = a.pronamespace
+    WHERE n.nspname = 'public'
+    ORDER BY a.proname
+  `)
+
+  if (rows.length > 0) {
+    const detail = rows
+      .map((r) => `${r.proname}: ${r.shorter_args} < ${r.longer_args}`)
+      .join(" | ")
+    throw new RunnerError(
+      `Ambiguous critical financial RPC overload(s) detected after migration: ${detail}`,
+      "FINANCIAL_RPC_OVERLOAD"
+    )
+  }
+}
+
 async function recordMigrationVersion(client, item) {
   await client.query(
     `insert into supabase_migrations.schema_migrations (version, name, statements)
@@ -469,6 +513,9 @@ async function runExecute({
           throw err
         }
       }
+
+      await assertNoAmbiguousFinancialRpcOverloads(client)
+      logger.log("financial_rpc_overload_guard=passed")
     } finally {
       if (lockHeld) {
         try {
@@ -552,6 +599,7 @@ module.exports = {
   releaseAdvisoryLock,
   isVersionRecorded,
   recordMigrationVersion,
+  assertNoAmbiguousFinancialRpcOverloads,
   runDryRun,
   runExecute,
   main,

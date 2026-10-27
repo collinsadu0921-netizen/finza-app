@@ -217,6 +217,7 @@ export async function PUT(
         "status, journal_entry_id, payroll_frequency, calculation_engine_version, paye_rate_version, pension_rate_version, calculation_jurisdiction, statutory_period_basis"
       )
       .eq("id", runId)
+      .eq("business_id", business.id)
       .single()
 
     if (!existingRun) {
@@ -226,9 +227,15 @@ export async function PUT(
       )
     }
 
-    // Permission check — depends on the requested status transition
-    // Approve retries (idempotent) still require PAYROLL_APPROVE.
-    if (status === "approved" || (status && status !== existingRun.status)) {
+    // Permission check — depends on the requested mutation.
+    // Idempotent approve/lock retries still require their respective permission.
+    const isNotesOnlyUpdate = status === undefined && notes !== undefined
+    if (
+      status === "approved" ||
+      status === "locked" ||
+      (status && status !== existingRun.status) ||
+      isNotesOnlyUpdate
+    ) {
       const permissionRequired =
         status === "locked"   ? PERMISSIONS.PAYROLL_LOCK    :
         status === "approved" ? PERMISSIONS.PAYROLL_APPROVE :
@@ -240,6 +247,23 @@ export async function PUT(
       if (!allowed) {
         return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 })
       }
+    }
+
+    // Locked runs are immutable. Only the canonical lock RPC (for lock/replay)
+    // or the idempotent approval retry may proceed; notes/status edits are
+    // rejected before any table update.
+    if (
+      existingRun.status === "locked" &&
+      (notes !== undefined ||
+        (status !== undefined && status !== "locked" && status !== "approved"))
+    ) {
+      return NextResponse.json(
+        {
+          error: "Locked payroll runs cannot be edited",
+          code: "PAYROLL_RUN_IMMUTABLE",
+        },
+        { status: 409 }
+      )
     }
 
     // Validate status transitions (enforce workflow: draft → approved → locked)
@@ -430,6 +454,7 @@ export async function PUT(
         .from("payroll_runs")
         .select("*")
         .eq("id", runId)
+        .eq("business_id", business.id)
         .single()
 
       if (reloadError || !payrollRun) {
@@ -449,7 +474,10 @@ export async function PUT(
       })
     }
 
-    if (status === "locked" && existingRun.status === "approved") {
+    if (
+      status === "locked" &&
+      (existingRun.status === "approved" || existingRun.status === "locked")
+    ) {
       const { data: lockResult, error: lockError } = await supabase.rpc("lock_payroll_run_atomic", {
         p_business_id: business.id,
         p_payroll_run_id: runId,
@@ -465,6 +493,7 @@ export async function PUT(
         .from("payroll_runs")
         .select("*")
         .eq("id", runId)
+        .eq("business_id", business.id)
         .single()
 
       if (reloadError || !payrollRun) {
@@ -487,6 +516,7 @@ export async function PUT(
       .from("payroll_runs")
       .update(updateData)
       .eq("id", runId)
+      .eq("business_id", business.id)
       .select()
       .single()
 
