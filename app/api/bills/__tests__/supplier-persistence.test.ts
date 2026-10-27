@@ -310,6 +310,106 @@ describe("bill supplier persistence", () => {
     expect(lastInsert).toBeNull()
   })
 
+  it("ignores forged WHT rate and amount, calculating 7.5% on the pre-tax base", async () => {
+    const req = new NextRequest("http://localhost/api/bills/create", {
+      method: "POST",
+      body: JSON.stringify({
+        business_id: BUSINESS_ID,
+        supplier_id: SUPPLIER_A,
+        supplier_name: "Supplier A",
+        bill_number: "B-WHT-1",
+        issue_date: "2026-08-01",
+        apply_taxes: true,
+        apply_wht: true,
+        wht_rate_code: "GH_SVC_75",
+        wht_rate: 0.5,
+        wht_amount: 9999,
+        items: [{ description: "Service", qty: 1, unit_price: 121.9, discount_amount: 0 }],
+      }),
+    })
+    const res = await POST(req)
+    expect(res.status).toBe(201)
+    expect(lastInsert?.wht_rate_code).toBe("GH_SVC_75")
+    expect(lastInsert?.wht_rate).toBe(0.075)
+    const base = Number(lastInsert?.subtotal)
+    const total = Number(lastInsert?.total)
+    expect(base).toBeLessThan(total)
+    expect(lastInsert?.wht_amount).toBeCloseTo(Math.round(base * 0.075 * 100) / 100, 2)
+    expect(lastInsert?.wht_amount).not.toBeCloseTo(
+      Math.round(total * 0.075 * 100) / 100,
+      2
+    )
+  })
+
+  it("allows WHT below the reminder threshold and still calculates it", async () => {
+    const req = new NextRequest("http://localhost/api/bills/create", {
+      method: "POST",
+      body: JSON.stringify({
+        business_id: BUSINESS_ID,
+        supplier_id: SUPPLIER_A,
+        supplier_name: "Supplier A",
+        bill_number: "B-WHT-2",
+        issue_date: "2026-08-01",
+        apply_taxes: false,
+        apply_wht: true,
+        wht_rate_code: "GH_SVC_75",
+        items: [{ description: "Service", qty: 1, unit_price: 1000, discount_amount: 0 }],
+      }),
+    })
+    const res = await POST(req)
+    expect(res.status).toBe(201)
+    expect(lastInsert?.wht_rate).toBe(0.075)
+    expect(lastInsert?.wht_amount).toBe(75)
+  })
+
+  it("rejects an unknown or legacy WHT category for new withholding", async () => {
+    const req = new NextRequest("http://localhost/api/bills/create", {
+      method: "POST",
+      body: JSON.stringify({
+        business_id: BUSINESS_ID,
+        supplier_id: SUPPLIER_A,
+        supplier_name: "Supplier A",
+        bill_number: "B-WHT-3",
+        issue_date: "2026-08-01",
+        apply_taxes: false,
+        apply_wht: true,
+        wht_rate_code: "GH_SVC_5",
+        wht_rate: 0.075,
+        wht_amount: 75,
+        items: [{ description: "Service", qty: 1, unit_price: 1000, discount_amount: 0 }],
+      }),
+    })
+    const res = await POST(req)
+    expect(res.status).toBe(400)
+    const body = await res.json()
+    expect(body.code).toBe("WHT_CATEGORY_INVALID")
+    expect(lastInsert).toBeNull()
+  })
+
+  it("stores no WHT when the tenant leaves withholding off", async () => {
+    const req = new NextRequest("http://localhost/api/bills/create", {
+      method: "POST",
+      body: JSON.stringify({
+        business_id: BUSINESS_ID,
+        supplier_id: SUPPLIER_A,
+        supplier_name: "Supplier A",
+        bill_number: "B-WHT-4",
+        issue_date: "2026-08-01",
+        apply_taxes: false,
+        apply_wht: false,
+        wht_rate_code: "GH_SVC_75",
+        wht_rate: 0.075,
+        wht_amount: 75,
+        items: [{ description: "Service", qty: 1, unit_price: 1000, discount_amount: 0 }],
+      }),
+    })
+    const res = await POST(req)
+    expect(res.status).toBe(201)
+    expect(lastInsert?.wht_applicable).toBe(false)
+    expect(lastInsert?.wht_rate).toBeNull()
+    expect(lastInsert?.wht_amount).toBe(0)
+  })
+
   it("explicit null supplier_id on update clears the relationship", async () => {
     const req = new NextRequest(`http://localhost/api/bills/${BILL_ID}`, {
       method: "PUT",

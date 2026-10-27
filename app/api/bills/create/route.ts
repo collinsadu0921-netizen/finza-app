@@ -4,6 +4,10 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getUserRole } from "@/lib/userRoles"
 import { fireAfterAccountingPost } from "@/lib/server/fireAfterAccountingPost"
 import {
+  calculateWHTForRate,
+  getWHTRate,
+} from "@/lib/wht"
+import {
   getIncomingDocumentForBusiness,
   linkIncomingDocumentToEntity,
 } from "@/lib/documents/incomingDocumentsService"
@@ -84,8 +88,6 @@ export async function POST(request: NextRequest) {
       apply_taxes = true,
       apply_wht = false,
       wht_rate_code = null,
-      wht_rate = null,
-      wht_amount = 0,
       status = "draft",
       attachment_path,
       // Import bill fields
@@ -164,6 +166,28 @@ export async function POST(request: NextRequest) {
         { success: false, error: "CIF value is required for import bills" },
         { status: 400 }
       )
+    }
+    if (apply_wht) {
+      if (!wht_rate_code) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "Select a WHT category before applying withholding tax.",
+            code: "WHT_CATEGORY_REQUIRED",
+          },
+          { status: 400 }
+        )
+      }
+      if (!getWHTRate(wht_rate_code)) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "Select a valid WHT category.",
+            code: "WHT_CATEGORY_INVALID",
+          },
+          { status: 400 }
+        )
+      }
     }
 
     // Authorize the submitted business directly. The server cannot read the
@@ -288,6 +312,29 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Server-authoritative WHT: calculate on the pre-tax contract value, never
+    // on VAT/NHIL/GETFund. Submitted rate/amount values are ignored.
+    const whtCode = apply_wht ? wht_rate_code || null : null
+    const knownWhtRate = whtCode ? getWHTRate(whtCode) : undefined
+    const effectiveWhtRate = apply_wht ? knownWhtRate?.rate ?? 0 : 0
+    const whtBaseAmount = Number(taxResult.subtotalBeforeTax) || 0
+    const whtBaseGhs =
+      isFxBill && parsedFxRate
+        ? whtBaseAmount * parsedFxRate
+        : whtBaseAmount
+    const whtCalculation =
+      apply_wht && effectiveWhtRate > 0
+        ? calculateWHTForRate({
+            baseAmount: whtBaseAmount,
+            rate: effectiveWhtRate,
+            code: whtCode,
+            baseAmountGhs: whtBaseGhs,
+          })
+        : { whtAmount: 0, thresholdMet: true }
+
+    // The GHS 2,000 resident-contract threshold is informational only. The
+    // tenant may apply WHT to any document, including below the threshold.
+
     // Standard bills: always insert as draft, then insert lines, then open if requested
     // so the post trigger never runs before bill_items exist.
     const wantsOpen = status !== "draft"
@@ -314,9 +361,9 @@ export async function POST(request: NextRequest) {
         total_tax: taxResult.totalTax,
         total: taxResult.grandTotal,
         wht_applicable: apply_wht,
-        wht_rate_code: apply_wht ? wht_rate_code : null,
-        wht_rate: apply_wht ? wht_rate : null,
-        wht_amount: apply_wht ? wht_amount : 0,
+        wht_rate_code: apply_wht ? whtCode : null,
+        wht_rate: apply_wht ? effectiveWhtRate : null,
+        wht_amount: apply_wht ? whtCalculation.whtAmount : 0,
         status: insertStatus,
         attachment_path: attachment_path || null,
         // Import bill fields

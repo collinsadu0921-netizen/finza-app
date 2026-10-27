@@ -10,6 +10,7 @@ import {
 } from "@/components/invoices/ManualInvoicePaymentDetails"
 import BusinessLogoDisplay from "@/components/BusinessLogoDisplay"
 import { getTaxLinesForDisplay } from "@/lib/taxes/readTaxLines"
+import { formatWHTRate } from "@/lib/wht"
 
 type Business = {
   id: string
@@ -235,7 +236,7 @@ export default function InvoiceViewPage() {
   const netPayable = showWhtSummary ? Math.round((invoiceTotal - whtAmount) * 100) / 100 : invoiceTotal
   const whtLineLabel =
     whtRate > 0
-      ? `Less WHT (${(whtRate * 100).toFixed(0)}% withheld by customer)`
+      ? `Less WHT (${formatWHTRate(whtRate)} withheld by customer)`
       : "Less WHT (withheld by customer)"
 
   // Tax breakdown: canonical + legacy JSONB via getTaxLinesForDisplay (same policy as invoice detail UI)

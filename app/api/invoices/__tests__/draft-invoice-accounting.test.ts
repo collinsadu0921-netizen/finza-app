@@ -230,9 +230,25 @@ describe("I4 — Payment create API returns 400 for draft invoice", () => {
         return {
           select: jest.fn(() => ({
             eq: jest.fn(() => ({
+              is: jest.fn(() => ({
+                maybeSingle: jest.fn(() =>
+                  Promise.resolve({ data: { industry: "retail" }, error: null })
+                ),
+              })),
               single: jest.fn(() =>
                 Promise.resolve({ data: { id: "biz", address_country: "GH" }, error: null })
               ),
+            })),
+          })),
+        }
+      }
+      if (table === "accounting_firm_users") {
+        return {
+          select: jest.fn(() => ({
+            eq: jest.fn(() => ({
+              limit: jest.fn(() => ({
+                maybeSingle: jest.fn(() => Promise.resolve({ data: null, error: null })),
+              })),
             })),
           })),
         }

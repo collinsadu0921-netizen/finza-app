@@ -9,6 +9,7 @@
 import BusinessLogoDisplay from "@/components/BusinessLogoDisplay"
 import { StatusBadge } from "@/components/ui/StatusBadge"
 import { formatMoney } from "@/lib/money"
+import { formatWHTRate } from "@/lib/wht"
 import { getGhanaLegacyView, sumTaxLines } from "@/lib/taxes/readTaxLines"
 import {
   showTenantBankPaymentCard,
@@ -181,7 +182,7 @@ export function InvoiceDocument({
   const netPayable = showWhtSummary ? Math.round((invoiceTotal - whtAmount) * 100) / 100 : invoiceTotal
   const whtLineLabel =
     whtRate > 0
-      ? `Less WHT (${(whtRate * 100).toFixed(0)}% withheld by customer)`
+      ? `Less WHT (${formatWHTRate(whtRate)} withheld by customer)`
       : "Less WHT (withheld by customer)"
 
   const showBalanceStrip =

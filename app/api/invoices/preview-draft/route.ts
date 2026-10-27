@@ -14,6 +14,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { calculateTaxes } from "@/lib/taxEngine"
+import { calculateWHTForRate, getWHTRate } from "@/lib/wht"
 import {
   generateFinancialDocumentHTML,
   type BusinessInfo,
@@ -51,6 +52,8 @@ export async function POST(request: NextRequest) {
       currency_code,
       wht_applicable,
       wht_rate,
+      wht_code,
+      wht_base_ghs,
     } = body
 
     const supabase = await createSupabaseServerClient()
@@ -170,10 +173,24 @@ export async function POST(request: NextRequest) {
       }
     })
 
-    // WHT: applied on pre-tax base (subtotal), not on VAT-inclusive total
-    const whtAmount = (wht_applicable && wht_rate && subtotal > 0)
-      ? Math.round(subtotal * Number(wht_rate) * 100) / 100
+    // WHT: applied on pre-tax base (subtotal), not on VAT-inclusive total.
+    // The category determines the rate; a submitted rate is only a fallback
+    // for legacy preview callers that do not send a code.
+    const whtCode = wht_applicable ? wht_code || null : null
+    const knownWhtRate = whtCode ? getWHTRate(whtCode) : undefined
+    const effectiveWhtRate = wht_applicable
+      ? knownWhtRate?.rate ?? (Number(wht_rate) || 0)
       : 0
+    const whtAmount =
+      wht_applicable && effectiveWhtRate > 0 && subtotal > 0
+        ? calculateWHTForRate({
+            baseAmount: subtotal,
+            rate: effectiveWhtRate,
+            code: whtCode,
+            baseAmountGhs:
+              wht_base_ghs != null ? Number(wht_base_ghs) : subtotal,
+          }).whtAmount
+        : 0
 
     const documentTotals: DocumentTotals = {
       subtotal,
@@ -181,7 +198,7 @@ export async function POST(request: NextRequest) {
       total,
       ...(wht_applicable && whtAmount > 0 ? {
         wht_applicable: true,
-        wht_rate:       Number(wht_rate),
+        wht_rate:       effectiveWhtRate,
         wht_amount:     whtAmount,
         net_payable:    Math.round((total - whtAmount) * 100) / 100,
       } : {}),

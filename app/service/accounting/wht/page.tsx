@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
 import { formatMoney } from "@/lib/money"
+import { formatWHTRate } from "@/lib/wht"
 import { useToast } from "@/components/ui/ToastProvider"
 import TierGate from "@/components/service/TierGate"
 import { NativeSelect } from "@/components/ui/NativeSelect"
@@ -436,7 +437,7 @@ export default function WHTRegisterPage() {
                           <td className="px-4 py-3 text-sm text-right font-semibold text-orange-600 dark:text-orange-400">
                             {formatMoney(Number(bill.wht_amount), currencyCode || null)}
                             <span className="text-xs text-gray-400 ml-1">
-                              ({((bill.wht_rate ?? 0) * 100).toFixed(0)}%)
+                              ({formatWHTRate(bill.wht_rate ?? 0)})
                             </span>
                           </td>
                           {supplierTab === "remitted" && (

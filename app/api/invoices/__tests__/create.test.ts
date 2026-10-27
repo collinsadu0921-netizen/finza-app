@@ -136,6 +136,17 @@ describe('POST /api/invoices/create - Canonical Tax Engine', () => {
             })),
           }
         }
+        if (table === 'accounting_firm_users') {
+          return {
+            select: jest.fn(() => ({
+              eq: jest.fn(() => ({
+                limit: jest.fn(() => ({
+                  maybeSingle: jest.fn(() => Promise.resolve({ data: null, error: null })),
+                })),
+              })),
+            })),
+          }
+        }
         if (table === 'invoices') {
           return invoicesTableMock
         }
@@ -338,5 +349,91 @@ describe('POST /api/invoices/create - Canonical Tax Engine', () => {
     // Verify legacy columns sum matches total_tax
     const legacyTaxSum = invoiceData.nhil + invoiceData.getfund + invoiceData.covid + invoiceData.vat
     expect(legacyTaxSum).toBeCloseTo(invoiceData.total_tax, 2)
+  })
+
+  it('ignores forged customer WHT rate/amount and calculates 7.5% on the pre-tax base', async () => {
+    const request = new NextRequest('http://localhost/api/invoices/create', {
+      method: 'POST',
+      body: JSON.stringify({
+        business_id: 'test-business',
+        issue_date: '2025-12-31',
+        items: [{ qty: 1, unit_price: 121.90, discount_amount: 0 }],
+        apply_taxes: true,
+        wht_receivable_applicable: true,
+        wht_receivable_rate_code: 'GH_SVC_75',
+        wht_receivable_rate: 0.5,
+        wht_receivable_amount: 9999,
+      }),
+    })
+
+    const res = await POST(request)
+    expect(res.status).toBe(201)
+
+    const invoiceData = invoicesTableMock.insert.mock.calls[0][0]
+    expect(invoiceData.wht_receivable_rate).toBe(0.075)
+    expect(invoiceData.wht_receivable_amount).toBe(7.5)
+    expect(invoiceData.wht_receivable_amount).not.toBe(9.14)
+  })
+
+  it('allows customer WHT below the reminder threshold', async () => {
+    const request = new NextRequest('http://localhost/api/invoices/create', {
+      method: 'POST',
+      body: JSON.stringify({
+        business_id: 'test-business',
+        issue_date: '2025-12-31',
+        items: [{ qty: 1, unit_price: 121.90, discount_amount: 0 }],
+        apply_taxes: true,
+        wht_receivable_applicable: true,
+        wht_receivable_rate_code: 'GH_SVC_75',
+      }),
+    })
+
+    const res = await POST(request)
+    expect(res.status).toBe(201)
+    expect(invoicesTableMock.insert.mock.calls[0][0].wht_receivable_amount).toBe(7.5)
+  })
+
+  it('rejects an unknown or legacy customer WHT category', async () => {
+    const request = new NextRequest('http://localhost/api/invoices/create', {
+      method: 'POST',
+      body: JSON.stringify({
+        business_id: 'test-business',
+        issue_date: '2025-12-31',
+        items: [{ qty: 1, unit_price: 121.90, discount_amount: 0 }],
+        apply_taxes: true,
+        wht_receivable_applicable: true,
+        wht_receivable_rate_code: 'GH_SVC_5',
+        wht_receivable_rate: 0.075,
+        wht_receivable_amount: 7.5,
+      }),
+    })
+
+    const res = await POST(request)
+    expect(res.status).toBe(400)
+    expect((await res.json()).code).toBe('WHT_CATEGORY_INVALID')
+    expect(invoicesTableMock.insert).not.toHaveBeenCalled()
+  })
+
+  it('stores no customer WHT when the tenant leaves withholding off', async () => {
+    const request = new NextRequest('http://localhost/api/invoices/create', {
+      method: 'POST',
+      body: JSON.stringify({
+        business_id: 'test-business',
+        issue_date: '2025-12-31',
+        items: [{ qty: 1, unit_price: 121.90, discount_amount: 0 }],
+        apply_taxes: true,
+        wht_receivable_applicable: false,
+        wht_receivable_rate_code: 'GH_SVC_75',
+        wht_receivable_rate: 0.075,
+        wht_receivable_amount: 7.5,
+      }),
+    })
+
+    const res = await POST(request)
+    expect(res.status).toBe(201)
+    const invoiceData = invoicesTableMock.insert.mock.calls[0][0]
+    expect(invoiceData.wht_receivable_applicable).toBe(false)
+    expect(invoiceData.wht_receivable_rate).toBeNull()
+    expect(invoiceData.wht_receivable_amount).toBe(0)
   })
 })
