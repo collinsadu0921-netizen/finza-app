@@ -3,6 +3,16 @@
  * Pure helpers — no network, no credentials, no side effects.
  */
 
+/**
+ * Pinned Vercel CLI. Release jobs must not silently change CLI behavior.
+ * Keep this in sync with the version validated by the auth-check workflow.
+ */
+const VERCEL_CLI_VERSION = "65.4.0"
+
+function vercelCliArgs(args) {
+  return ["--yes", `vercel@${VERCEL_CLI_VERSION}`, ...args]
+}
+
 const PRODUCTION = {
   projectName: "finza-app",
   projectId: "prj_BxbfIgXTl1PAX6W3635Nsc8KXuW1",
@@ -507,6 +517,8 @@ function assertCleanWorktree(porcelain) {
 
 module.exports = {
   PRODUCTION,
+  VERCEL_CLI_VERSION,
+  vercelCliArgs,
   ReleaseGuardError,
   assertExpectedSha,
   assertShaMatch,

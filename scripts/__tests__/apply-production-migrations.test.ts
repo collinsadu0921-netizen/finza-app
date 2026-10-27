@@ -9,9 +9,32 @@ import { createRequire } from "module"
 
 const nodeRequire = createRequire(__filename)
 const runner = nodeRequire("../lib/productionMigrationRunner.cjs") as {
-  parseProductionDatabaseUrl: (url: string) => unknown
+  parseProductionDatabaseUrl: (url: string) => {
+    productionRef: string
+    host: string
+    port: number
+    database: string
+    user: string
+    password: string
+    hostIsPooler: boolean
+    hostIsDirect: boolean
+  }
   parseCliArgs: (argv: string[]) => unknown
   resolveMigrationFiles: (versions: string[], dir: string) => unknown
+  buildPgConfig: (identity: {
+    host: string
+    port: number
+    database: string
+    user: string
+    password: string
+  }) => {
+    host: string
+    port: number
+    database: string
+    user: string
+    password: string
+    ssl: { rejectUnauthorized: boolean }
+  }
   createSafeLogger: (stream?: NodeJS.WritableStream) => {
     trackSecret: (v: string) => void
     log: (line: string) => void
@@ -392,5 +415,140 @@ describe("apply-production-migrations runner", () => {
     expect(result.applied).toEqual(["602"])
     expect(recorded.has("602")).toBe(true)
     expect([...recorded].sort()).toEqual(["5990", "5991", "602"])
+  })
+})
+
+describe("PRODUCTION_DATABASE_URL password decoding", () => {
+  function encodedUrl(
+    encodedPassword: string,
+    opts?: { host?: string; user?: string; port?: number; query?: string }
+  ) {
+    const host = opts?.host ?? "aws-1-eu-north-1.pooler.supabase.com"
+    const user = opts?.user ?? `postgres.${PRODUCTION_REF}`
+    const port = opts?.port ?? 5432
+    const query = opts?.query ?? ""
+    return `postgresql://${user}:${encodedPassword}@${host}:${port}/postgres${query}`
+  }
+
+  it("keeps ordinary passwords unchanged", () => {
+    const parsed = runner.parseProductionDatabaseUrl(prodUrl())
+    expect(parsed).toMatchObject({
+      productionRef: PRODUCTION_REF,
+      host: "aws-1-eu-north-1.pooler.supabase.com",
+      port: 5432,
+      database: "postgres",
+      user: `postgres.${PRODUCTION_REF}`,
+      password: "TestPassword1234",
+      hostIsPooler: true,
+      hostIsDirect: false,
+    })
+  })
+
+  it("decodes percent-encoded special characters exactly once", () => {
+    const original = "p@ss:word/with#all?and%percent"
+    const parsed = runner.parseProductionDatabaseUrl(
+      encodedUrl(encodeURIComponent(original))
+    )
+    expect(parsed.password).toBe(original)
+    expect(parsed.host).toBe("aws-1-eu-north-1.pooler.supabase.com")
+    expect(parsed.port).toBe(5432)
+    expect(parsed.database).toBe("postgres")
+    expect(parsed.user).toBe(`postgres.${PRODUCTION_REF}`)
+  })
+
+  it("does not double decode a literal percent sequence", () => {
+    expect(
+      runner.parseProductionDatabaseUrl(encodedUrl("%2540")).password
+    ).toBe("%40")
+    expect(
+      runner.parseProductionDatabaseUrl(encodedUrl("a%25b")).password
+    ).toBe("a%b")
+  })
+
+  it("rejects invalid percent-encoding without echoing the password", () => {
+    const secret = "TotallySecret%E0%A4%A"
+    let message = ""
+    try {
+      runner.parseProductionDatabaseUrl(encodedUrl(secret))
+    } catch (error) {
+      message = (error as Error).message
+    }
+    expect(message).toMatch(/percent-encoding/i)
+    expect(message).not.toContain("TotallySecret")
+  })
+
+  it("rejects non-Postgres schemes", () => {
+    expect(() =>
+      runner.parseProductionDatabaseUrl(
+        `mysql://postgres.${PRODUCTION_REF}:pass@aws-1-eu-north-1.pooler.supabase.com:5432/postgres`
+      )
+    ).toThrow(/postgres/i)
+  })
+
+  it("parses production pooler URLs with query parameters and secure SSL", () => {
+    const parsed = runner.parseProductionDatabaseUrl(
+      encodedUrl("p%40ss", {
+        port: 6543,
+        query: "?sslmode=require&pgbouncer=true",
+      })
+    )
+    expect(parsed).toMatchObject({
+      host: "aws-1-eu-north-1.pooler.supabase.com",
+      port: 6543,
+      database: "postgres",
+      user: `postgres.${PRODUCTION_REF}`,
+      password: "p@ss",
+      hostIsPooler: true,
+    })
+    const config = runner.buildPgConfig(parsed)
+    expect(config).toMatchObject({
+      host: "aws-1-eu-north-1.pooler.supabase.com",
+      port: 6543,
+      database: "postgres",
+      user: `postgres.${PRODUCTION_REF}`,
+      password: "p@ss",
+      ssl: { rejectUnauthorized: false },
+    })
+  })
+
+  it("parses direct production URLs with the postgres user", () => {
+    const parsed = runner.parseProductionDatabaseUrl(
+      encodedUrl("p%40ss", {
+        host: `db.${PRODUCTION_REF}.supabase.co`,
+        user: "postgres",
+      })
+    )
+    expect(parsed).toMatchObject({
+      host: `db.${PRODUCTION_REF}.supabase.co`,
+      user: "postgres",
+      password: "p@ss",
+      hostIsDirect: true,
+      hostIsPooler: false,
+    })
+  })
+
+  it("uses the decoded password in the existing execution path", async () => {
+    const original = "p@ss:word/with#all?and%percent"
+    const dir = makeMigrationsDir({ "535_a.sql": "SELECT 1;" })
+    const { client } = mockClient()
+    let seenConfig: Record<string, unknown> | null = null
+
+    const result = await runner.main(["--execute-production", "535"], {
+      env: {
+        PRODUCTION_DATABASE_URL: encodedUrl(encodeURIComponent(original)),
+      },
+      migrationsDir: dir,
+      createClient: (config: Record<string, unknown>) => {
+        seenConfig = config
+        return client
+      },
+      logger: { trackSecret() {}, log() {} },
+      confirmProductionRef: async () => undefined,
+      stdin: { isTTY: true } as NodeJS.ReadStream,
+    })
+
+    expect(result.applied).toEqual(["535"])
+    expect(seenConfig).not.toBeNull()
+    expect(seenConfig?.password).toBe(original)
   })
 })

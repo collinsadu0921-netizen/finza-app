@@ -1,0 +1,34 @@
+name: Vercel authentication check
+
+# Non-destructive check for the repository VERCEL_TOKEN. It never deploys.
+# Run this manually after rotating the token, or let it run when the auth
+# configuration itself changes.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/vercel-auth-check.yml
+      - scripts/verify-vercel-auth.mjs
+      - scripts/lib/productionReleaseGuards.cjs
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify VERCEL_TOKEN
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+
+      - name: Verify Vercel authentication and production project access
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: node scripts/verify-vercel-auth.mjs
