@@ -327,6 +327,7 @@ export default function PayrollRunViewPage() {
   const [selectedObligation, setSelectedObligation] = useState<PayrollObligation | null>(null)
   const [recordingObligationPayment, setRecordingObligationPayment] = useState(false)
   const [obligationPaymentError, setObligationPaymentError] = useState("")
+  const [obligationPaymentIdempotencyKey, setObligationPaymentIdempotencyKey] = useState("")
   const [obligationPaymentForm, setObligationPaymentForm] = useState({
     payment_date: new Date().toISOString().split("T")[0],
     amount: "",
@@ -585,8 +586,12 @@ export default function PayrollRunViewPage() {
 
   const openObligationPaymentModal = (obligation: PayrollObligation) => {
     const defaultAccountId = paymentAccounts[0]?.id || ""
+    const idempotencyKey =
+      globalThis.crypto?.randomUUID?.() ||
+      `payroll-obligation-${Date.now()}-${Math.random().toString(36).slice(2)}`
     setSelectedObligation(obligation)
     setObligationPaymentError("")
+    setObligationPaymentIdempotencyKey(idempotencyKey)
     setObligationPaymentForm({
       payment_date: new Date().toISOString().split("T")[0],
       amount: Number(obligation.outstanding_amount || 0).toFixed(2),
@@ -626,6 +631,7 @@ export default function PayrollRunViewPage() {
             payment_account_id: obligationPaymentForm.payment_account_id,
             reference: obligationPaymentForm.reference || null,
             notes: obligationPaymentForm.notes || null,
+            idempotency_key: obligationPaymentIdempotencyKey,
           }),
         }
       )
@@ -636,6 +642,7 @@ export default function PayrollRunViewPage() {
       }
       setShowObligationPaymentModal(false)
       setSelectedObligation(null)
+      setObligationPaymentIdempotencyKey("")
       await loadObligations()
       toast.showToast("Obligation payment/remittance recorded", "success")
     } catch {

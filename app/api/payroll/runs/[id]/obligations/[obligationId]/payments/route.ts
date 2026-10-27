@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto"
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
@@ -5,11 +6,40 @@ import { requirePermission } from "@/lib/userPermissions"
 import { PERMISSIONS } from "@/lib/permissions"
 import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
 
-function deriveStatus(amountDue: number, amountPaid: number): "unpaid" | "partially_paid" | "paid" {
-  const outstanding = Math.max(0, amountDue - amountPaid)
-  if (amountDue <= 0 || outstanding <= 0.01) return "paid"
-  if (amountPaid > 0) return "partially_paid"
-  return "unpaid"
+function mapObligationPaymentError(message: string): { status: number; code: string; error: string } {
+  const text = String(message || "")
+  if (text.includes("PAYROLL_OBLIGATION_PAYMENT_PERMISSION_DENIED")) {
+    return { status: 403, code: "PAYROLL_OBLIGATION_PAYMENT_PERMISSION_DENIED", error: "You do not have permission to record this payroll payment." }
+  }
+  if (text.includes("PAYROLL_OBLIGATION_PAYMENT_NOT_FOUND")) {
+    return { status: 404, code: "PAYROLL_OBLIGATION_PAYMENT_NOT_FOUND", error: "Payroll obligation not found." }
+  }
+  if (text.includes("PAYROLL_OBLIGATION_PAYMENT_OBLIGATION_REVERSED")) {
+    return { status: 409, code: "PAYROLL_OBLIGATION_PAYMENT_OBLIGATION_REVERSED", error: "Reversed payroll obligations cannot accept payments." }
+  }
+  if (text.includes("PAYROLL_OBLIGATION_PAYMENT_IDEMPOTENCY_CONFLICT")) {
+    return { status: 409, code: "PAYROLL_OBLIGATION_PAYMENT_IDEMPOTENCY_CONFLICT", error: "This payment request was already used with different details." }
+  }
+  if (text.includes("PAYROLL_OBLIGATION_PAYMENT_ALREADY_PAID")) {
+    return { status: 400, code: "PAYROLL_OBLIGATION_PAYMENT_ALREADY_PAID", error: "This payroll obligation has no outstanding balance." }
+  }
+  if (text.includes("PAYROLL_OBLIGATION_PAYMENT_EXCEEDS_OUTSTANDING")) {
+    return { status: 400, code: "PAYROLL_OBLIGATION_PAYMENT_EXCEEDS_OUTSTANDING", error: "Payment amount exceeds the outstanding obligation." }
+  }
+  if (text.includes("PAYROLL_OBLIGATION_PAYMENT_SALARY_NET_REQUIRES_SALARY_PAYMENT")) {
+    return { status: 400, code: "PAYROLL_OBLIGATION_PAYMENT_SALARY_NET_REQUIRES_SALARY_PAYMENT", error: "Net salary must be paid through the salary payment action." }
+  }
+  if (
+    text.includes("PAYROLL_OBLIGATION_PAYMENT_INVALID_INPUT") ||
+    text.includes("PAYROLL_OBLIGATION_PAYMENT_RUN_NOT_PAYABLE") ||
+    text.includes("PAYROLL_OBLIGATION_PAYMENT_INVALID_ACCOUNT") ||
+    text.includes("PAYROLL_OBLIGATION_PAYMENT_LIABILITY_ACCOUNT_MISSING") ||
+    text.includes("PAYROLL_OBLIGATION_PAYMENT_PERIOD_CLOSED") ||
+    text.includes("PAYROLL_OBLIGATION_PAYMENT_IDEMPOTENCY_REQUIRED")
+  ) {
+    return { status: 400, code: "PAYROLL_OBLIGATION_PAYMENT_INVALID", error: text.replace(/^.*?:\s*/, "") }
+  }
+  return { status: 500, code: "PAYROLL_OBLIGATION_PAYMENT_FAILED", error: "Unable to record the payroll obligation payment." }
 }
 
 export async function POST(
@@ -46,6 +76,9 @@ export async function POST(
     const paymentAccountId = String(body.payment_account_id || "")
     const reference = body.reference ? String(body.reference).trim() : null
     const notes = body.notes ? String(body.notes).trim() : null
+    const idempotencyKey =
+      String(request.headers.get("idempotency-key") || body.idempotency_key || "").trim() ||
+      randomUUID()
 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(paymentDate)) {
       return NextResponse.json({ error: "payment_date must be YYYY-MM-DD" }, { status: 400 })
@@ -99,17 +132,8 @@ export async function POST(
       )
     }
 
-    const obligationDue = Number(obligation.amount_due || 0)
-    const obligationPaid = Number(obligation.amount_paid || 0)
-
-    // Salary-advance recoveries are internal 2241→1110 clearing, not obligation payments.
-    const outstanding = Math.max(0, obligationDue - obligationPaid)
-    if (amount - outstanding > 0.01) {
-      return NextResponse.json(
-        { error: `Payment amount exceeds outstanding obligation (outstanding: ${outstanding.toFixed(2)})` },
-        { status: 400 }
-      )
-    }
+    // The atomic RPC re-reads the obligation and posted-payment total under a
+    // row lock, so a stale amount_paid cannot block or permit a payment here.
 
     const { data: paymentAccount } = await supabase
       .from("accounts")
@@ -133,74 +157,65 @@ export async function POST(
       )
     }
 
-    const { data: payment, error: insertError } = await supabase
-      .from("payroll_obligation_payments")
-      .insert({
+    const { data: result, error: rpcError } = await supabase.rpc(
+      "record_payroll_obligation_payment_atomic",
+      {
+        p_business_id: business.id,
+        p_payroll_run_id: runId,
+        p_payroll_obligation_id: obligationId,
+        p_payment_date: paymentDate,
+        p_amount: amount,
+        p_payment_account_id: paymentAccountId,
+        p_reference: reference,
+        p_notes: notes,
+        p_idempotency_key: idempotencyKey,
+      }
+    )
+
+    if (rpcError || !result) {
+      const mapped = mapObligationPaymentError(rpcError?.message || "")
+      return NextResponse.json({ error: mapped.error, code: mapped.code }, { status: mapped.status })
+    }
+
+    const recorded = result as {
+      payment_id: string
+      journal_entry_id: string
+      amount: number | string
+      amount_paid: number | string
+      outstanding: number | string
+      obligation_status: string
+      latest_payment_date: string | null
+      latest_payment_reference: string | null
+      reused?: boolean
+    }
+    const amountPaid = Number(recorded.amount_paid || 0)
+    const outstanding = Number(recorded.outstanding || 0)
+
+    return NextResponse.json({
+      payment: {
+        id: recorded.payment_id,
         business_id: business.id,
         payroll_run_id: runId,
         payroll_obligation_id: obligationId,
         payment_date: paymentDate,
-        amount,
+        amount: Number(recorded.amount || amount),
         payment_account_id: paymentAccountId,
         reference: reference || null,
         notes: notes || null,
+        journal_entry_id: recorded.journal_entry_id,
         created_by: user.id,
-      })
-      .select("*")
-      .single()
-
-    if (insertError || !payment) {
-      return NextResponse.json({ error: insertError?.message || "Failed to create obligation payment" }, { status: 500 })
-    }
-
-    const { data: journalEntryId, error: postError } = await supabase.rpc(
-      "post_payroll_obligation_payment_to_ledger",
-      { p_payroll_obligation_payment_id: payment.id }
-    )
-    if (postError || !journalEntryId) {
-      await supabase.from("payroll_obligation_payments").delete().eq("id", payment.id)
-      return NextResponse.json(
-        { error: postError?.message || "Failed to post obligation payment to ledger" },
-        { status: 500 }
-      )
-    }
-
-    const { data: paidRows } = await supabase
-      .from("payroll_obligation_payments")
-      .select("amount,payment_date,reference")
-      .eq("business_id", business.id)
-      .eq("payroll_obligation_id", obligationId)
-      .is("deleted_at", null)
-      .order("payment_date", { ascending: false })
-      .order("created_at", { ascending: false })
-
-    const totalPaid = (paidRows || []).reduce((sum, row: any) => sum + Number(row.amount || 0), 0)
-    const effectiveTotalPaid = totalPaid
-    const newStatus = deriveStatus(obligationDue, effectiveTotalPaid)
-    const latest = (paidRows || [])[0]
-
-    await supabase
-      .from("payroll_obligations")
-      .update({
-        amount_paid: effectiveTotalPaid,
-        status: newStatus,
-        payment_account_id: paymentAccountId,
-        latest_payment_date: latest?.payment_date ?? paymentDate,
-        latest_payment_reference: latest?.reference ?? reference ?? null,
-        journal_entry_id: journalEntryId,
-      })
-      .eq("id", obligationId)
-
-    return NextResponse.json({
-      payment: { ...payment, journal_entry_id: journalEntryId },
+      },
       obligation: {
         ...obligation,
-        amount_paid: effectiveTotalPaid,
-        outstanding_amount: Math.max(0, obligationDue - effectiveTotalPaid),
-        status: newStatus,
-        latest_payment_date: latest?.payment_date ?? paymentDate,
-        latest_payment_reference: latest?.reference ?? reference ?? null,
+        amount_paid: amountPaid,
+        outstanding_amount: outstanding,
+        status: recorded.obligation_status,
+        latest_payment_date: recorded.latest_payment_date,
+        latest_payment_reference: recorded.latest_payment_reference,
+        payment_account_id: paymentAccountId,
+        journal_entry_id: recorded.journal_entry_id,
       },
+      reused: Boolean(recorded.reused),
     }, { status: 201 })
   } catch (error: any) {
     return NextResponse.json({ error: error.message || "Internal server error" }, { status: 500 })
