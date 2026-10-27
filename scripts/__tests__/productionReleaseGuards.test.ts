@@ -3,6 +3,8 @@ import { createRequire } from "module"
 const nodeRequire = createRequire(__filename)
 const guards = nodeRequire("../lib/productionReleaseGuards.cjs") as {
   PRODUCTION: { projectId: string; projectName: string; crons: { path: string; schedule: string }[] }
+  VERCEL_CLI_VERSION: string
+  vercelCliArgs: (args: string[]) => string[]
   ReleaseGuardError: new (code: string, message: string) => Error
   assertExpectedSha: (sha: string) => string
   assertShaMatch: (expected: string, actual: string) => void
@@ -52,6 +54,8 @@ const guards = nodeRequire("../lib/productionReleaseGuards.cjs") as {
 
 const {
   PRODUCTION,
+  VERCEL_CLI_VERSION,
+  vercelCliArgs,
   ReleaseGuardError,
   assertExpectedSha,
   assertShaMatch,
@@ -99,6 +103,15 @@ function expectCode(fn: () => unknown, code: string) {
 }
 
 describe("production release guards", () => {
+  it("pins the Vercel CLI and forces non-interactive installs", () => {
+    expect(VERCEL_CLI_VERSION).toMatch(/^\d+\.\d+\.\d+$/)
+    expect(vercelCliArgs(["whoami"])).toEqual([
+      "--yes",
+      `vercel@${VERCEL_CLI_VERSION}`,
+      "whoami",
+    ])
+  })
+
   it("fails the wrong project", () => {
     expectCode(
       () => assertProject({ id: "prj_v1ReATVM7fae5NqoexqTKYtBuWwU", name: "finza-app-perf-arn" }),

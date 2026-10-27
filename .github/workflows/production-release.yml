@@ -35,6 +35,13 @@ jobs:
       - name: Release-guard unit tests
         run: npx jest --testPathPatterns=productionReleaseGuards --runInBand
 
+      # Fail before the expensive build when VERCEL_TOKEN is invalid or lacks
+      # access to the exact production project. No deployment is started.
+      - name: Verify Vercel authentication
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: node scripts/verify-vercel-auth.mjs
+
       - name: Load Production public Supabase build configuration
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -105,7 +112,7 @@ jobs:
 
       - name: Deploy production with ARN1 guards
         env:
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          # The release script pins the project/team from productionReleaseGuards.cjs.
+          # Only the credential comes from repository secrets.
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: node scripts/release-production.mjs --expected-sha ${{ github.sha }}
