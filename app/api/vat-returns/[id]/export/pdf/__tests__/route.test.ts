@@ -116,6 +116,7 @@ describe("GET VAT 3 PDF", () => {
       "gra-vat3-2026-10-01-2026-10-31.pdf"
     )
     expect(buffer.subarray(0, 4).toString()).toBe("%PDF")
+    expect(parsed.numpages).toBe(1)
 
     expect(parsed.text).toContain("PAID - PAYMENT RECORDED")
     expect(parsed.text).toContain("Payment recorded 2026-10-27")
