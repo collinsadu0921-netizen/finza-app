@@ -4,6 +4,12 @@
  * Sources (authoritative):
  * - GRA PAYE monthly bands effective 1 Jan 2024 (Income Tax (Amendment) (No. 2) Act, 2023 / Act 1111;
  *   GRA PAYE page Year 2024 table).
+ * - Income Tax (Amendment) Act, 2026 (Act 1178) and GRA notice "Amendments – Income Tax Act, 2026":
+ *   new resident monthly/annual PAYE rates effective 1 September 2026. Monthly bands: first
+ *   GH¢588 at 0%; next GH¢80 at 5%; next GH¢100 at 10%; next GH¢2,900 at 17.5%; next GH¢16,000
+ *   at 25%; next GH¢30,332 at 30%; above GH¢50,000 at 35%. Annual bands are exactly 12× monthly.
+ *   Act 1178 also raises the Modified Taxation Scheme turnover threshold (not a payroll rule).
+ *   It does not change SSNIT, bonus, overtime, casual-worker, or non-resident rates.
  * - SSNIT Public Notice 13 Jan 2026: 2026 min/max insurable earnings GH¢587.80 / GH¢69,000;
  *   prior (2025) levels GH¢539.19 / GH¢61,000 cited in that notice.
  * - 2024 SSNIT ceilings: min GH¢490.05 / max GH¢52,000 (Tier 1 bounds GH¢66.16 / GH¢7,020).
@@ -73,7 +79,7 @@ export type GhanaStatutoryRateBundle = {
   periodBasis: string
 }
 
-/** Official GRA monthly resident PAYE "Next" bands from 1 Jan 2024. */
+/** Official GRA monthly resident PAYE "Next" bands from 1 Jan 2024 (superseded 1 Sep 2026). */
 export const GHANA_PAYE_2024_01_BANDS: readonly GhanaPayeBand[] = [
   { taxableAmount: 490, rate: 0 },
   { taxableAmount: 110, rate: 0.05 },
@@ -84,12 +90,32 @@ export const GHANA_PAYE_2024_01_BANDS: readonly GhanaPayeBand[] = [
   { taxableAmount: null, rate: 0.35 },
 ] as const
 
+/** Official GRA monthly resident PAYE "Next" bands from 1 Sep 2026 (Act 1178). */
+export const GHANA_PAYE_2026_09_BANDS: readonly GhanaPayeBand[] = [
+  { taxableAmount: 588, rate: 0 },
+  { taxableAmount: 80, rate: 0.05 },
+  { taxableAmount: 100, rate: 0.1 },
+  { taxableAmount: 2900, rate: 0.175 },
+  { taxableAmount: 16000, rate: 0.25 },
+  { taxableAmount: 30332, rate: 0.3 },
+  { taxableAmount: null, rate: 0.35 },
+] as const
+
+export const GHANA_PAYE_2024_01_VERSION = "gh-paye-2024-01"
+export const GHANA_PAYE_2026_09_VERSION = "gh-paye-2026-09"
+
 const GHANA_PAYE_VERSIONS: GhanaPayeRates[] = [
   {
-    version: "gh-paye-2024-01",
+    version: GHANA_PAYE_2024_01_VERSION,
     effectiveFrom: "2024-01-01",
-    effectiveTo: GHANA_STATUTORY_VERIFIED_THROUGH,
+    effectiveTo: "2026-08-31",
     bands: [...GHANA_PAYE_2024_01_BANDS],
+  },
+  {
+    version: GHANA_PAYE_2026_09_VERSION,
+    effectiveFrom: "2026-09-01",
+    effectiveTo: GHANA_STATUTORY_VERIFIED_THROUGH,
+    bands: [...GHANA_PAYE_2026_09_BANDS],
   },
 ]
 
@@ -233,22 +259,29 @@ export function resolveGhanaStatutoryRatesByVersions(opts: {
 
 /**
  * Progressive PAYE from official "Next" band widths.
- * Rounds once at the end via roundPayroll.
+ *
+ * Accumulates in integer cents × rate basis points so binary floating-point
+ * error cannot move a half-pesewa result to the wrong side of the statutory
+ * half-up boundary (e.g. GH¢44.975 must become GH¢44.98, never GH¢44.97).
+ * Rounds once at the end, half-up, to two decimals.
  */
 export function calculateGhanaPayeFromBands(taxableIncome: number, bands: readonly GhanaPayeBand[]): number {
   const income = Number(taxableIncome)
   if (!Number.isFinite(income) || income <= 0) return 0
 
-  let remaining = income
-  let tax = 0
+  let remainingCents = Math.round(income * 100)
+  let taxUnits = 0
   for (const band of bands) {
-    if (remaining <= 0) break
-    const width =
-      band.taxableAmount == null ? remaining : Math.min(remaining, Math.max(0, band.taxableAmount))
-    tax += width * band.rate
-    remaining -= width
+    if (remainingCents <= 0) break
+    const widthCents =
+      band.taxableAmount == null
+        ? remainingCents
+        : Math.min(remainingCents, Math.round(Math.max(0, band.taxableAmount) * 100))
+    const rateUnits = Math.round(band.rate * 10000)
+    taxUnits += widthCents * rateUnits
+    remainingCents -= widthCents
   }
-  return roundPayroll(tax)
+  return Math.round(taxUnits / 10000) / 100
 }
 
 export function clampGhanaPensionableBase(

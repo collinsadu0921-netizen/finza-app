@@ -92,7 +92,7 @@ const approvedRun = {
     journal_entry_id: "je-1",
     payroll_frequency: "monthly",
     calculation_engine_version: "finza-ghana-v2",
-    paye_rate_version: "gh-paye-2024-01",
+    paye_rate_version: "gh-paye-2026-09",
     pension_rate_version: "gh-pension-2026-01",
     calculation_jurisdiction: "GH",
     statutory_period_basis: "2026-10-01",

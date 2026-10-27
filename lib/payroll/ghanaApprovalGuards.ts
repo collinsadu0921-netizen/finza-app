@@ -185,11 +185,12 @@ function resolveExpectedPension(
     }
   | null {
   if (!isFiniteNumber(entry.basic_salary) || !entry.pension_rate_version) return null
+  if (!entry.paye_rate_version) return null
   if (typeof profile.staff_is_pensionable !== "boolean") return null
 
   try {
     const rates = resolveGhanaStatutoryRatesByVersions({
-      payeRateVersion: entry.paye_rate_version || "gh-paye-2024-01",
+      payeRateVersion: entry.paye_rate_version,
       pensionRateVersion: entry.pension_rate_version,
       periodBasis: periodDate,
     })
@@ -250,12 +251,13 @@ function validateResidentGraduatedTax(
   employeePension: number
 ): string | null {
   if (!hasEarningsSnapshot(entry) || !hasIncomeTaxBases(entry)) return null
+  if (!entry.paye_rate_version || !entry.pension_rate_version) return null
 
   let payeBands
   try {
     const rates = resolveGhanaStatutoryRatesByVersions({
-      payeRateVersion: entry.paye_rate_version || "gh-paye-2024-01",
-      pensionRateVersion: entry.pension_rate_version || "gh-pension-2026-01",
+      payeRateVersion: entry.paye_rate_version,
+      pensionRateVersion: entry.pension_rate_version,
       periodBasis: periodDate,
     })
     payeBands = rates.paye.bands
