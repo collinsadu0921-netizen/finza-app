@@ -15,6 +15,7 @@
 
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
+import { createSupabaseAdminClient } from "@/lib/supabaseAdmin"
 import { getCurrentBusiness } from "@/lib/business"
 import { requirePermission } from "@/lib/userPermissions"
 import { PERMISSIONS } from "@/lib/permissions"
@@ -172,6 +173,10 @@ export async function POST(request: NextRequest) {
     const { allowed } = await requirePermission(supabase, user.id, business.id, PERMISSIONS.PAYROLL_CREATE)
     if (!allowed) return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 })
 
+    // Ledger writes are server-authorized above; use the trusted server client
+    // because authenticated direct INSERT is intentionally disabled.
+    const ledger = createSupabaseAdminClient()
+
     const body = await request.json().catch(() => null)
     if (!body) return NextResponse.json({ error: "Invalid JSON" }, { status: 400 })
 
@@ -258,7 +263,7 @@ export async function POST(request: NextRequest) {
     const description = `Salary Advance — ${staffMember.name}`
 
     // Insert journal entry header
-    const { data: je, error: jeError } = await supabase
+    const { data: je, error: jeError } = await ledger
       .from("journal_entries")
       .insert({
         business_id: business.id,
@@ -279,7 +284,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Insert journal entry lines: Dr Staff Advances (1110), Cr Bank/Cash
-    const { error: linesError } = await supabase
+    const { error: linesError } = await ledger
       .from("journal_entry_lines")
       .insert([
         {
@@ -301,7 +306,7 @@ export async function POST(request: NextRequest) {
     if (linesError) {
       console.error("JE lines insert error:", linesError)
       // Clean up the orphaned JE header
-      await supabase.from("journal_entries").delete().eq("id", je.id)
+      await ledger.from("journal_entries").delete().eq("id", je.id)
       return NextResponse.json({ error: linesError.message }, { status: 500 })
     }
 
@@ -325,7 +330,7 @@ export async function POST(request: NextRequest) {
 
     if (advError) {
       console.error("Advance insert error:", advError)
-      await supabase.from("journal_entries").delete().eq("id", je.id)
+      await ledger.from("journal_entries").delete().eq("id", je.id)
       return NextResponse.json(
         {
           success: false,
@@ -350,7 +355,7 @@ export async function POST(request: NextRequest) {
     if (dedError) {
       console.error("Deduction creation failed:", dedError)
       await supabase.from("salary_advances").delete().eq("id", advance.id)
-      await supabase.from("journal_entries").delete().eq("id", je.id)
+      await ledger.from("journal_entries").delete().eq("id", je.id)
       return NextResponse.json({ error: dedError.message }, { status: 500 })
     }
 

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
+import { createSupabaseAdminClient } from "@/lib/supabaseAdmin"
 import { getCurrentBusiness } from "@/lib/business"
-import { enforceServiceIndustryBusinessTierForAccountingApi } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
+import { enforceServiceIndustryBusinessTierForAccountingWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
 
 export async function POST(
   request: NextRequest,
@@ -21,12 +22,16 @@ export async function POST(
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
 
-    const tierBlockUm = await enforceServiceIndustryBusinessTierForAccountingApi(
+    const tierBlockUm = await enforceServiceIndustryBusinessTierForAccountingWrite(
       supabase,
       user.id,
       business.id
     )
     if (tierBlockUm) return tierBlockUm
+
+    // Ledger writes are server-authorized above; use the trusted server client
+    // because authenticated direct INSERT is intentionally disabled.
+    const ledger = createSupabaseAdminClient()
 
     const body = await request.json()
     const { bank_transaction_id } = body
@@ -75,7 +80,7 @@ export async function POST(
 
         if (period) {
           // Post a reversing entry (swap debit/credit)
-          const { data: reverseJe } = await supabase
+          const { data: reverseJe } = await ledger
             .from("journal_entries")
             .insert({
               business_id: business.id,
@@ -92,7 +97,7 @@ export async function POST(
             .single()
 
           if (reverseJe) {
-            await supabase
+            await ledger
               .from("journal_entry_lines")
               .insert(
                 feeLines.map((line: any) => ({

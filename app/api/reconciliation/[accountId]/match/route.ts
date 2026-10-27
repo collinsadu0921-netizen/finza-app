@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
+import { createSupabaseAdminClient } from "@/lib/supabaseAdmin"
 import { getCurrentBusiness } from "@/lib/business"
-import { enforceServiceIndustryBusinessTierForAccountingApi } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
+import { enforceServiceIndustryBusinessTierForAccountingWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
 
 export async function POST(
   request: NextRequest,
@@ -21,12 +22,16 @@ export async function POST(
       return NextResponse.json({ error: "Business not found" }, { status: 404 })
     }
 
-    const tierBlockMt = await enforceServiceIndustryBusinessTierForAccountingApi(
+    const tierBlockMt = await enforceServiceIndustryBusinessTierForAccountingWrite(
       supabase,
       user.id,
       business.id
     )
     if (tierBlockMt) return tierBlockMt
+
+    // Ledger writes are server-authorized above; use the trusted server client
+    // because authenticated direct INSERT is intentionally disabled.
+    const ledger = createSupabaseAdminClient()
 
     const body = await request.json()
     const {
@@ -82,7 +87,7 @@ export async function POST(
       }
 
       // Post fee JE: Dr fee_account (expense) / Cr bank account
-      const { data: je, error: jeError } = await supabase
+      const { data: je, error: jeError } = await ledger
         .from("journal_entries")
         .insert({
           business_id: business.id,
@@ -103,7 +108,7 @@ export async function POST(
       }
 
       // Dr expense account (the fee cost) / Cr bank account (net settlement reduces the system balance)
-      const { error: linesError } = await supabase
+      const { error: linesError } = await ledger
         .from("journal_entry_lines")
         .insert([
           {
@@ -123,7 +128,7 @@ export async function POST(
         ])
 
       if (linesError) {
-        await supabase.from("journal_entries").delete().eq("id", je.id)
+        await ledger.from("journal_entries").delete().eq("id", je.id)
         return NextResponse.json({ error: linesError.message }, { status: 500 })
       }
 
