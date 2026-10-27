@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { supabase } from "@/lib/supabaseClient"
+import { createSupabaseAdminClient } from "@/lib/supabaseAdmin"
 import { getCurrentBusiness } from "@/lib/business"
 
 /**
@@ -132,8 +133,10 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Post to ledger using RPC function
-    const { data: journalId, error: ledgerError } = await supabase.rpc(
+    // Post to ledger using the trusted server client after the route has
+    // authenticated and business-scoped the request.
+    const ledger = createSupabaseAdminClient()
+    const { data: journalId, error: ledgerError } = await ledger.rpc(
       "post_supplier_payment_to_ledger",
       { p_supplier_payment_id: payment.id }
     )
