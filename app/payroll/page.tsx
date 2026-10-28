@@ -24,6 +24,8 @@ type PayrollRun = {
   total_net_salary: number
   total_gross_salary: number
   total_paye: number
+  pension_limits_provisional?: boolean | null
+  provisional_ssnit_acknowledged_at?: string | null
   created_at: string
 }
 
@@ -183,6 +185,11 @@ export default function PayrollPage() {
                           >
                             {run.status}
                           </span>
+                          {run.pension_limits_provisional ? (
+                            <span className="ml-2 px-2 py-1 text-[11px] font-semibold rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">
+                              SSNIT provisional
+                            </span>
+                          ) : null}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                           <div className="inline-flex items-center gap-3">

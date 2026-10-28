@@ -386,13 +386,15 @@ describe("Ghana statutory golden — versioning and annual pension horizon", () 
     ["2025-12-31", true],
     ["2026-01-01", true],
     ["2026-12-31", true],
-    ["2027-01-01", false],
-  ] as const)("horizon %s accepted=%s", (period, accepted) => {
+    ["2027-01-01", true],
+    ["2027-12-31", true],
+    ["2028-01-01", false],
+  ] as const)("pension horizon %s accepted=%s", (period, accepted) => {
     if (accepted) {
       expect(() => resolveGhanaStatutoryRatesForPeriod(period)).not.toThrow()
     } else {
       expect(() => resolveGhanaStatutoryRatesForPeriod(period)).toThrow(
-        /outside the verified|No Ghana|does not cover|before the verified/
+        /outside the verified|No Ghana|No verified annual|does not cover|before the verified/
       )
     }
   })

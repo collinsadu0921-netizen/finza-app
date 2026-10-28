@@ -11,9 +11,12 @@ import { ghanaPayrollEngine } from "@/lib/payrollEngine/jurisdictions/ghana"
 import {
   GHANA_PAYE_2024_01_VERSION,
   GHANA_PAYE_2026_09_VERSION,
+  GHANA_PENSION_2026_01_VERSION,
+  GHANA_PENSION_2027_PROVISIONAL_VERSION,
   calculateGhanaPayeFromBands,
   getGhanaPayeRatesForPeriod,
   getGhanaPensionRatesForPeriod,
+  isGhanaPensionPeriodProvisional,
   resolveGhanaStatutoryRatesByVersions,
   resolveGhanaStatutoryRatesForPeriod,
 } from "@/lib/payrollEngine/jurisdictions/ghanaStatutoryRates"
@@ -101,20 +104,34 @@ describe("Ghana PAYE Act 1178 — effective-date selection", () => {
     expect(calculateGhanaPayeFromBands(1000, rates2027.bands)).toBe(54.6)
   })
 
-  it("blocks 2027 full payroll only because annual SSNIT limits are unverified", () => {
-    expect(() => getGhanaPensionRatesForPeriod("2027-01-01")).toThrow(
-      /SSNIT|pension.*does not cover/i
-    )
-    expect(() => resolveGhanaStatutoryRatesForPeriod("2027-01-01")).toThrow(
-      /SSNIT|pension.*does not cover/i
-    )
+  it("uses the latest published SSNIT limits provisionally in 2027", () => {
+    const pension2027 = getGhanaPensionRatesForPeriod("2027-01-01")
+    expect(pension2027.version).toBe(GHANA_PENSION_2027_PROVISIONAL_VERSION)
+    expect(pension2027.isProvisional).toBe(true)
+    expect(pension2027.minimumInsurableEarnings).toBe(587.8)
+    expect(pension2027.maximumInsurableEarnings).toBe(69000)
+    expect(pension2027.provisionalBaseVersion).toBe(GHANA_PENSION_2026_01_VERSION)
+    expect(isGhanaPensionPeriodProvisional("2027-01-01")).toBe(true)
+
+    const bundle = resolveGhanaStatutoryRatesForPeriod("2027-01-01")
+    expect(bundle.pension.isProvisional).toBe(true)
+    expect(bundle.paye.version).toBe(GHANA_PAYE_2026_09_VERSION)
+  })
+
+  it("keeps the explicit 2026 pension version usable for historical recalculation", () => {
     expect(() =>
       resolveGhanaStatutoryRatesByVersions({
         payeRateVersion: GHANA_PAYE_2026_09_VERSION,
-        pensionRateVersion: "gh-pension-2026-01",
-        periodBasis: "2027-01-01",
+        pensionRateVersion: GHANA_PENSION_2026_01_VERSION,
+        periodBasis: "2026-12-01",
       })
-    ).toThrow(/SSNIT|pension.*does not cover/i)
+    ).not.toThrow()
+  })
+
+  it("fails closed for a future year with no confirmed or provisional SSNIT limits", () => {
+    expect(() => getGhanaPensionRatesForPeriod("2028-01-01")).toThrow(
+      /No verified annual SSNIT\/pension limits/i
+    )
   })
 })
 
@@ -321,6 +338,27 @@ describe("Ghana PAYE Act 1178 — full payroll", () => {
     ])
   })
 
+  it("calculates January 2027 payroll with provisional SSNIT limits", () => {
+    const result = ghanaPayrollEngine.calculate({
+      jurisdiction: "GH",
+      effectiveDate: "2027-01-01",
+      basicSalary: 1000,
+      allowances: 0,
+      otherDeductions: 0,
+    })
+    expect(result.statutoryDeductions.find((d) => d.code === "SSNIT_EMPLOYEE")?.amount).toBe(55)
+    expect(result.totals.taxableIncome).toBe(945)
+    expect(result.statutoryDeductions.find((d) => d.code === "PAYE")?.amount).toBe(44.98)
+    expect(result.totals.netSalary).toBe(900.02)
+    expect(result.complianceBreakdown?.pensionLimitsProvisional).toBe(true)
+    expect(result.complianceBreakdown?.pensionMinimumInsurableEarnings).toBe(587.8)
+    expect(result.complianceBreakdown?.pensionMaximumInsurableEarnings).toBe(69000)
+    expect(result.complianceBreakdown?.pensionLimitsEffectiveFrom).toBe("2026-01-01")
+    expect(result.complianceBreakdown?.pensionRateVersion).toBe(
+      GHANA_PENSION_2027_PROVISIONAL_VERSION
+    )
+  })
+
   it("uses only basic salary for the SSNIT base and preserves the 2026 caps", () => {
     const result = ghanaPayrollEngine.calculate({
       jurisdiction: "GH",
@@ -415,6 +453,59 @@ describe("Ghana PAYE Act 1178 — approval containment", () => {
     calculation_jurisdiction: entry.calculation_jurisdiction,
     statutory_period_basis: entry.statutory_period_basis,
     payroll_frequency: "monthly",
+  })
+
+  const provisionalRunFor = (entry: ReturnType<typeof calculateEntry>) => ({
+    ...runFor(entry),
+    pension_limits_provisional: true,
+    pension_minimum_insurable_earnings: 587.8,
+    pension_maximum_insurable_earnings: 69000,
+    pension_limits_effective_from: "2026-01-01",
+    provisional_ssnit_acknowledged_at: null,
+  })
+
+  it("requires employer acknowledgement for provisional 2027 SSNIT payroll", () => {
+    const entry = calculateEntry("2027-01-01")
+    expect(entry.pension_rate_version).toBe(GHANA_PENSION_2027_PROVISIONAL_VERSION)
+
+    const blocked = validateGhanaPayrollRunForApproval({
+      businessCountry: "GH",
+      run: provisionalRunFor(entry),
+      entries: [entry],
+    })
+    expect(blocked.ok).toBe(false)
+    if (!blocked.ok) {
+      expect(blocked.affectedEmployees[0].unsupportedClassification).toBe(
+        "provisional_ssnit_acknowledgement_required"
+      )
+    }
+
+    const approved = validateGhanaPayrollRunForApproval({
+      businessCountry: "GH",
+      run: provisionalRunFor(entry),
+      provisionalSsnitAcknowledged: true,
+      entries: [entry],
+    })
+    expect(approved).toEqual({ ok: true })
+  })
+
+  it("blocks a provisional run with an incomplete limits snapshot", () => {
+    const entry = calculateEntry("2027-01-01")
+    const result = validateGhanaPayrollRunForApproval({
+      businessCountry: "GH",
+      run: {
+        ...provisionalRunFor(entry),
+        pension_maximum_insurable_earnings: 70000,
+      },
+      provisionalSsnitAcknowledged: true,
+      entries: [entry],
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.affectedEmployees[0].unsupportedClassification).toBe(
+        "provisional_ssnit_snapshot_mismatch"
+      )
+    }
   })
 
   it("approves a correctly calculated September run", () => {

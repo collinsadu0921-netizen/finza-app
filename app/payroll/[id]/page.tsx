@@ -103,6 +103,12 @@ type PayrollRun = {
   total_ssnit_employer: number
   total_paye: number
   total_net_salary: number
+  pension_rate_version?: string | null
+  pension_limits_provisional?: boolean | null
+  pension_minimum_insurable_earnings?: number | null
+  pension_maximum_insurable_earnings?: number | null
+  pension_limits_effective_from?: string | null
+  provisional_ssnit_acknowledged_at?: string | null
   notes: string | null
 }
 
@@ -265,6 +271,7 @@ export default function PayrollRunViewPage() {
   const [entries, setEntries] = useState<PayrollEntry[]>([])
   const [payslips, setPayslips] = useState<Payslip[]>([])
   const [updating, setUpdating] = useState(false)
+  const [provisionalSsnitAcknowledged, setProvisionalSsnitAcknowledged] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [sendingAll, setSendingAll] = useState(false)
@@ -472,7 +479,10 @@ export default function PayrollRunViewPage() {
       const response = await fetch(`/api/payroll/runs/${runId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "approved" }),
+        body: JSON.stringify({
+          status: "approved",
+          provisional_ssnit_acknowledged: provisionalSsnitAcknowledged,
+        }),
       })
       const data = await response.json()
       if (response.ok) {
@@ -1342,12 +1352,17 @@ export default function PayrollRunViewPage() {
                     disabled={
                       updating ||
                       deleting ||
-                      (String(payrollRun.payroll_frequency || "monthly") !== "monthly")
+                      (String(payrollRun.payroll_frequency || "monthly") !== "monthly") ||
+                      (payrollRun.pension_limits_provisional === true &&
+                        !provisionalSsnitAcknowledged)
                     }
                     title={
                       String(payrollRun.payroll_frequency || "monthly") !== "monthly"
                         ? "Approval blocked: Ghana statutory calculations use monthly PAYE bands"
-                        : undefined
+                        : payrollRun.pension_limits_provisional === true &&
+                            !provisionalSsnitAcknowledged
+                          ? "Acknowledge provisional SSNIT limits before approval"
+                          : undefined
                     }
                     className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50"
                   >
@@ -1364,6 +1379,42 @@ export default function PayrollRunViewPage() {
             <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
               This {payrollRun.payroll_frequency} draft can be reviewed, but approval is blocked while
               Ghana PAYE/SSNIT use monthly statutory bands.
+            </div>
+          )}
+
+          {payrollRun.pension_limits_provisional === true && (
+            <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
+              <p className="font-semibold">Provisional SSNIT limits</p>
+              <p className="mt-1">
+                The annual SSNIT insurable-earnings notice for this period has not been
+                published. This payroll uses{" "}
+                {payrollRun.pension_minimum_insurable_earnings != null &&
+                payrollRun.pension_maximum_insurable_earnings != null
+                  ? `GH₵${Number(payrollRun.pension_minimum_insurable_earnings).toFixed(2)}–GH₵${Number(payrollRun.pension_maximum_insurable_earnings).toFixed(2)}`
+                  : "the latest published limits"}{" "}
+                from the last confirmed notice. Figures may change when the official notice is
+                published.
+              </p>
+              {payrollRun.status === "draft" ? (
+                <label className="mt-3 flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={provisionalSsnitAcknowledged}
+                    onChange={(e) => setProvisionalSsnitAcknowledged(e.target.checked)}
+                  />
+                  <span>
+                    I acknowledge that this payroll uses provisional SSNIT limits and understand
+                    that an adjustment may be required after the official notice is published.
+                  </span>
+                </label>
+              ) : (
+                <p className="mt-2 text-xs">
+                  {payrollRun.provisional_ssnit_acknowledged_at
+                    ? `Employer acknowledgement recorded ${new Date(payrollRun.provisional_ssnit_acknowledged_at).toLocaleString()}.`
+                    : "Approved before provisional acknowledgement was recorded."}
+                </p>
+              )}
             </div>
           )}
 

@@ -66,6 +66,16 @@ BEGIN
     RAISE EXCEPTION 'Act 1178 PAYE mismatch at 1000';
   END IF;
 
+  -- 2027 uses the latest published 2026 SSNIT limits provisionally.
+  IF public.payroll_ghana_confirmed_pension_version_for_period(DATE '2027-01-01') IS NOT NULL THEN
+    RAISE EXCEPTION '2027 unexpectedly has a confirmed SSNIT version';
+  END IF;
+  IF (public.payroll_ghana_expected_pension(
+        1000, 'gh-pension-2027-provisional', TRUE
+      )->>'employee')::NUMERIC <> 55.00 THEN
+    RAISE EXCEPTION 'provisional 2027 SSNIT employee contribution mismatch';
+  END IF;
+
   -- The non-annual casual/non-resident profile-tax rates also remain valid.
   IF NOT public.payroll_ghana_profile_tax_version_covers_period(
     'gh-profile-tax-2024-01', DATE '2027-01-01'

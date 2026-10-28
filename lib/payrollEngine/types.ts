@@ -299,6 +299,11 @@ export interface PayrollCalculationResult {
     pensionRateVersion?: string
     statutoryPeriodBasis?: string
     pensionableBase?: number
+    pensionLimitsProvisional?: boolean
+    pensionMinimumInsurableEarnings?: number
+    pensionMaximumInsurableEarnings?: number
+    pensionLimitsEffectiveFrom?: string
+    pensionLimitsProvisionalBaseVersion?: string | null
     tier1SsnitRemittance?: number
     tier2PensionRemittance?: number
   }

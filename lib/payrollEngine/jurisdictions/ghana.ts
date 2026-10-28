@@ -208,6 +208,12 @@ export const ghanaPayrollEngine: PayrollEngine = {
         pensionRateVersion: rates.pension.version,
         statutoryPeriodBasis: dateToUse,
         pensionableBase: roundPayroll(pensionableBase),
+        pensionLimitsProvisional: rates.pension.isProvisional === true,
+        pensionMinimumInsurableEarnings: rates.pension.minimumInsurableEarnings,
+        pensionMaximumInsurableEarnings: rates.pension.maximumInsurableEarnings,
+        pensionLimitsEffectiveFrom:
+          rates.pension.limitsEffectiveFrom ?? rates.pension.effectiveFrom,
+        pensionLimitsProvisionalBaseVersion: rates.pension.provisionalBaseVersion ?? null,
         tier1SsnitRemittance: pensionAmounts.tier1,
         tier2PensionRemittance: pensionAmounts.tier2,
       },

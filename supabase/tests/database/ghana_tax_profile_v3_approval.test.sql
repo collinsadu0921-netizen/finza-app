@@ -423,7 +423,7 @@ BEGIN
     v_business, DATE '2027-01-01', v_profile, 'gh_resident_graduated'
   );
   PERFORM pg_temp.assert_approval_rejected(
-    v_business, v_run, 'SSNIT insurable-earnings limits'
+    v_business, v_run, 'does not have a configured annual SSNIT'
   );
 
   -- Component mismatch and mixed v2/v3 entry/run evidence.

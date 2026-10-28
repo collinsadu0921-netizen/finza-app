@@ -80,6 +80,12 @@ export type GhanaPensionRates = {
   tier2Rate: number
   minimumInsurableEarnings: number
   maximumInsurableEarnings: number
+  /** Statutory effective date of the limits themselves (may predate a provisional period). */
+  limitsEffectiveFrom?: string
+  /** True when these are the latest published limits reused before the next annual notice. */
+  isProvisional?: boolean
+  /** Confirmed version whose limits are reused for a provisional period. */
+  provisionalBaseVersion?: string
 }
 
 export type GhanaPayeRates = {
@@ -120,6 +126,8 @@ export const GHANA_PAYE_2026_09_BANDS: readonly GhanaPayeBand[] = [
 
 export const GHANA_PAYE_2024_01_VERSION = "gh-paye-2024-01"
 export const GHANA_PAYE_2026_09_VERSION = "gh-paye-2026-09"
+export const GHANA_PENSION_2026_01_VERSION = "gh-pension-2026-01"
+export const GHANA_PENSION_2027_PROVISIONAL_VERSION = "gh-pension-2027-provisional"
 
 const GHANA_PAYE_VERSIONS: GhanaPayeRates[] = [
   {
@@ -147,6 +155,7 @@ const GHANA_PENSION_VERSIONS: GhanaPensionRates[] = [
     tier2Rate: 0.05,
     minimumInsurableEarnings: 490.05,
     maximumInsurableEarnings: 52000,
+    limitsEffectiveFrom: "2024-01-01",
   },
   {
     version: "gh-pension-2025-01",
@@ -158,6 +167,7 @@ const GHANA_PENSION_VERSIONS: GhanaPensionRates[] = [
     tier2Rate: 0.05,
     minimumInsurableEarnings: 539.19,
     maximumInsurableEarnings: 61000,
+    limitsEffectiveFrom: "2025-01-01",
   },
   {
     version: "gh-pension-2026-01",
@@ -169,6 +179,25 @@ const GHANA_PENSION_VERSIONS: GhanaPensionRates[] = [
     tier2Rate: 0.05,
     minimumInsurableEarnings: 587.8,
     maximumInsurableEarnings: 69000,
+    limitsEffectiveFrom: "2026-01-01",
+  },
+  {
+    // Interim 2027 configuration: SSNIT has not yet published the 2027 annual
+    // minimum/maximum insurable earnings. Reuse the latest published 2026 limits
+    // provisionally. Approval requires explicit employer acknowledgement, and the
+    // run snapshot records the actual limits and provisional status.
+    version: GHANA_PENSION_2027_PROVISIONAL_VERSION,
+    effectiveFrom: "2027-01-01",
+    effectiveTo: "2027-12-31",
+    employeeRate: 0.055,
+    employerRate: 0.13,
+    tier1TotalRate: 0.135,
+    tier2Rate: 0.05,
+    minimumInsurableEarnings: 587.8,
+    maximumInsurableEarnings: 69000,
+    limitsEffectiveFrom: "2026-01-01",
+    isProvisional: true,
+    provisionalBaseVersion: GHANA_PENSION_2026_01_VERSION,
   },
 ]
 
@@ -200,11 +229,6 @@ export function assertGhanaPensionPeriodWithinVerifiedHorizon(periodDate: string
       `Ghana pension/SSNIT period ${date} is before the verified start ${GHANA_PENSION_VERIFIED_FROM}.`
     )
   }
-  if (date > GHANA_PENSION_VERIFIED_THROUGH) {
-    throw new GhanaStatutoryVersionError(
-      `Ghana pension/SSNIT rate version does not cover payroll period ${date}; annual insurable-earnings limits are verified only through ${GHANA_PENSION_VERIFIED_THROUGH}. Ghana PAYE remains valid, but the next SSNIT annual notice is required before pensionable payroll can be calculated.`
-    )
-  }
   return date
 }
 
@@ -229,13 +253,22 @@ export function getGhanaPayeRatesForPeriod(periodDate: string): GhanaPayeRates {
 
 export function getGhanaPensionRatesForPeriod(periodDate: string): GhanaPensionRates {
   const date = assertGhanaPensionPeriodWithinVerifiedHorizon(periodDate)
-  const match = GHANA_PENSION_VERSIONS.find((v) => versionCoversDate(v, date))
-  if (!match) {
-    throw new GhanaStatutoryVersionError(
-      `Ghana pension/SSNIT rate version does not cover payroll period ${date}; annual insurable-earnings limits are verified only through ${GHANA_PENSION_VERIFIED_THROUGH}.`
-    )
-  }
-  return match
+  const confirmed = GHANA_PENSION_VERSIONS.find(
+    (v) => !v.isProvisional && versionCoversDate(v, date)
+  )
+  if (confirmed) return confirmed
+  const provisional = GHANA_PENSION_VERSIONS.find(
+    (v) => v.isProvisional === true && versionCoversDate(v, date)
+  )
+  if (provisional) return provisional
+  throw new GhanaStatutoryVersionError(
+    `No verified annual SSNIT/pension limits cover payroll period ${date}; the latest confirmed limits are through ${GHANA_PENSION_VERIFIED_THROUGH}, and no provisional version is configured for this period.`
+  )
+}
+
+/** True when the period has no confirmed annual SSNIT notice and would use provisional limits. */
+export function isGhanaPensionPeriodProvisional(periodDate: string): boolean {
+  return getGhanaPensionRatesForPeriod(periodDate).isProvisional === true
 }
 
 export function getGhanaPayeRatesByVersion(versionId: string): GhanaPayeRates {
