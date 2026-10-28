@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { useParams } from "next/navigation"
 import { getCurrencySymbol } from "@/lib/currency"
+import { GHANA_PAYE_RELIEF_SCOPE_NOTICE } from "@/lib/payroll/ghanaIncomeTaxDisplay"
 import { formatPayrollRunLabel } from "@/lib/payroll/payrollRunLabels"
 import GhanaV3IncomeTaxBreakdown from "@/components/payroll/GhanaV3IncomeTaxBreakdown"
 
@@ -324,6 +325,9 @@ export default function PublicPayslipPage() {
                 Taxable income: {fmt(entry.taxable_income, sym)}
               </p>
             )}
+            <p className="text-[11px] text-slate-400 text-center leading-relaxed">
+              {GHANA_PAYE_RELIEF_SCOPE_NOTICE}
+            </p>
           </div>
 
           {/* Footer */}

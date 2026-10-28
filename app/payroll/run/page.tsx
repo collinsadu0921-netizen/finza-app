@@ -15,6 +15,7 @@ import {
   PHASE_1B_PAYROLL_FREQUENCIES,
   type Phase1BPayrollFrequency,
 } from "@/lib/payroll/salaryBasis"
+import { GHANA_PAYE_RELIEF_SCOPE_NOTICE } from "@/lib/payroll/ghanaIncomeTaxDisplay"
 
 type StaffRow = {
   id: string
@@ -186,6 +187,10 @@ export default function PayrollRunPage() {
 
           <p className="text-sm text-gray-500 dark:text-gray-400">
             Custom payroll periods are not yet available.
+          </p>
+
+          <p className="text-xs text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2">
+            {GHANA_PAYE_RELIEF_SCOPE_NOTICE}
           </p>
 
           {formData.payroll_frequency !== "monthly" && (

@@ -15,8 +15,15 @@
  * - 2024 SSNIT ceilings: min GH¢490.05 / max GH¢52,000 (Tier 1 bounds GH¢66.16 / GH¢7,020).
  * - National Pensions Act, 2008 (Act 766): employee 5.5%, employer 13%; Tier 1 13.5%, Tier 2 5%.
  *
- * Selection uses the payroll period date, never "today". Fail closed when no version covers the period
- * or the period is outside the verified support horizon (2024-01-01 … 2026-12-31).
+ * Selection uses the payroll period date, never "today". Fail closed when no version covers the period.
+ *
+ * Legal horizon (do not conflate these):
+ * - PAYE: Act 1178 amended the First Schedule to Act 896. The schedule has a statutory
+ *   commencement (1 September 2026) but no statutory expiry; it continues until Parliament
+ *   amends it. Finza therefore treats `gh-paye-2026-09` as open-ended.
+ * - SSNIT/SSNIT-style pension: minimum and maximum insurable earnings are annual values.
+ *   The latest verified values are the 2026 SSNIT notice (1 January 2026). The 2027 values
+ *   are not published/verified, so pension resolution fails closed from 2027-01-01 onward.
  */
 
 import { extractDatePart, roundPayroll, validateEffectiveDate } from "../versioning"
@@ -32,9 +39,19 @@ export {
   isSupportedGhanaEngineVersion,
 } from "./ghanaProfileTax"
 
-/** Inclusive verified statutory configuration window for Finza Ghana payroll. */
-export const GHANA_STATUTORY_VERIFIED_FROM = "2024-01-01"
-export const GHANA_STATUTORY_VERIFIED_THROUGH = "2026-12-31"
+/** Inclusive verified PAYE support start. The Act 1178 schedule has no statutory expiry. */
+export const GHANA_PAYE_VERIFIED_FROM = "2024-01-01"
+/** Inclusive start for verified annual SSNIT/pension insurable-earnings limits. */
+export const GHANA_PENSION_VERIFIED_FROM = "2024-01-01"
+/** Latest annual SSNIT/pension insurable-earnings limits verified by an official notice. */
+export const GHANA_PENSION_VERIFIED_THROUGH = "2026-12-31"
+
+/**
+ * Legacy names kept for external callers. These describe the pension verification
+ * horizon, not a PAYE expiry.
+ */
+export const GHANA_STATUTORY_VERIFIED_FROM = GHANA_PAYE_VERIFIED_FROM
+export const GHANA_STATUTORY_VERIFIED_THROUGH = GHANA_PENSION_VERIFIED_THROUGH
 
 export const GHANA_STATUTORY_VERSION_ERROR_CODE = "GHANA_PAYROLL_UNKNOWN_RATE_VERSION"
 
@@ -114,7 +131,7 @@ const GHANA_PAYE_VERSIONS: GhanaPayeRates[] = [
   {
     version: GHANA_PAYE_2026_09_VERSION,
     effectiveFrom: "2026-09-01",
-    effectiveTo: GHANA_STATUTORY_VERIFIED_THROUGH,
+    // No effectiveTo: Act 1178's First Schedule remains in force until amended.
     bands: [...GHANA_PAYE_2026_09_BANDS],
   },
 ]
@@ -164,34 +181,58 @@ function versionCoversDate(
   return true
 }
 
-export function assertGhanaPeriodWithinVerifiedHorizon(periodDate: string): string {
+export function assertGhanaPayePeriodSupported(periodDate: string): string {
   validateEffectiveDate(periodDate)
   const date = extractDatePart(periodDate)
-  if (date < GHANA_STATUTORY_VERIFIED_FROM || date > GHANA_STATUTORY_VERIFIED_THROUGH) {
+  if (date < GHANA_PAYE_VERIFIED_FROM) {
     throw new GhanaStatutoryVersionError(
-      `Ghana payroll period ${date} is outside the verified statutory support window (${GHANA_STATUTORY_VERIFIED_FROM} through ${GHANA_STATUTORY_VERIFIED_THROUGH}).`
+      `Ghana PAYE period ${date} is before the verified start ${GHANA_PAYE_VERIFIED_FROM}.`
     )
   }
   return date
 }
 
+export function assertGhanaPensionPeriodWithinVerifiedHorizon(periodDate: string): string {
+  validateEffectiveDate(periodDate)
+  const date = extractDatePart(periodDate)
+  if (date < GHANA_PENSION_VERIFIED_FROM) {
+    throw new GhanaStatutoryVersionError(
+      `Ghana pension/SSNIT period ${date} is before the verified start ${GHANA_PENSION_VERIFIED_FROM}.`
+    )
+  }
+  if (date > GHANA_PENSION_VERIFIED_THROUGH) {
+    throw new GhanaStatutoryVersionError(
+      `Ghana pension/SSNIT rate version does not cover payroll period ${date}; annual insurable-earnings limits are verified only through ${GHANA_PENSION_VERIFIED_THROUGH}. Ghana PAYE remains valid, but the next SSNIT annual notice is required before pensionable payroll can be calculated.`
+    )
+  }
+  return date
+}
+
+/**
+ * Legacy alias for the annual pension/SSNIT verification horizon.
+ * Do not use this to decide PAYE schedule validity.
+ */
+export function assertGhanaPeriodWithinVerifiedHorizon(periodDate: string): string {
+  return assertGhanaPensionPeriodWithinVerifiedHorizon(periodDate)
+}
+
 export function getGhanaPayeRatesForPeriod(periodDate: string): GhanaPayeRates {
-  const date = assertGhanaPeriodWithinVerifiedHorizon(periodDate)
+  const date = assertGhanaPayePeriodSupported(periodDate)
   const match = GHANA_PAYE_VERSIONS.find((v) => versionCoversDate(v, date))
   if (!match) {
     throw new GhanaStatutoryVersionError(
-      `No Ghana PAYE rate version covers payroll period ${date}. Supported from ${GHANA_STATUTORY_VERIFIED_FROM} through ${GHANA_STATUTORY_VERIFIED_THROUGH}.`
+      `No Ghana PAYE rate version covers payroll period ${date}. Supported from ${GHANA_PAYE_VERIFIED_FROM} onward.`
     )
   }
   return match
 }
 
 export function getGhanaPensionRatesForPeriod(periodDate: string): GhanaPensionRates {
-  const date = assertGhanaPeriodWithinVerifiedHorizon(periodDate)
+  const date = assertGhanaPensionPeriodWithinVerifiedHorizon(periodDate)
   const match = GHANA_PENSION_VERSIONS.find((v) => versionCoversDate(v, date))
   if (!match) {
     throw new GhanaStatutoryVersionError(
-      `No Ghana pension/SSNIT rate version covers payroll period ${date}. Supported from ${GHANA_STATUTORY_VERIFIED_FROM} through ${GHANA_STATUTORY_VERIFIED_THROUGH}.`
+      `Ghana pension/SSNIT rate version does not cover payroll period ${date}; annual insurable-earnings limits are verified only through ${GHANA_PENSION_VERIFIED_THROUGH}.`
     )
   }
   return match
@@ -215,7 +256,7 @@ export function getGhanaPensionRatesByVersion(versionId: string): GhanaPensionRa
 
 /** Resolve PAYE + pension for a payroll period. Fail closed — no newest/oldest fallback. */
 export function resolveGhanaStatutoryRatesForPeriod(periodDate: string): GhanaStatutoryRateBundle {
-  const periodBasis = assertGhanaPeriodWithinVerifiedHorizon(periodDate)
+  const periodBasis = assertGhanaPayePeriodSupported(periodDate)
   return {
     paye: getGhanaPayeRatesForPeriod(periodBasis),
     pension: getGhanaPensionRatesForPeriod(periodBasis),
@@ -226,15 +267,17 @@ export function resolveGhanaStatutoryRatesForPeriod(periodDate: string): GhanaSt
 
 /**
  * Resolve by previously snapshotted version ids (draft recalc / historical stability).
- * Validates that both versions exist, are Ghana tables, and cover the stored period basis
- * within the verified support horizon. Does not fall back to any other version.
+ * Validates that both versions exist, are Ghana tables, and cover the stored period basis.
+ * PAYE coverage is open-ended from Act 1178; pension coverage remains limited to verified
+ * annual SSNIT insurable-earnings notices. Does not fall back to any other version.
  */
 export function resolveGhanaStatutoryRatesByVersions(opts: {
   payeRateVersion: string
   pensionRateVersion: string
   periodBasis: string
 }): GhanaStatutoryRateBundle {
-  const periodBasis = assertGhanaPeriodWithinVerifiedHorizon(opts.periodBasis)
+  validateEffectiveDate(opts.periodBasis)
+  const periodBasis = extractDatePart(opts.periodBasis)
   const paye = getGhanaPayeRatesByVersion(opts.payeRateVersion)
   const pension = getGhanaPensionRatesByVersion(opts.pensionRateVersion)
 
@@ -245,7 +288,7 @@ export function resolveGhanaStatutoryRatesByVersions(opts: {
   }
   if (!versionCoversDate(pension, periodBasis)) {
     throw new GhanaStatutoryVersionError(
-      `Ghana pension version "${pension.version}" does not cover stored period ${periodBasis}.`
+      `Ghana pension version "${pension.version}" does not cover stored period ${periodBasis}; annual SSNIT insurable-earnings limits are verified only through ${GHANA_PENSION_VERIFIED_THROUGH}. Ghana PAYE remains valid.`
     )
   }
 

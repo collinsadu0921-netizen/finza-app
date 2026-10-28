@@ -16,7 +16,10 @@ import {
 import { ALLOWANCE_TYPE_OPTIONS, DEDUCTION_TYPE_OPTIONS } from "@/lib/payrollTypes"
 import { assessGraFilingReadiness } from "@/lib/payroll/graDt107aPayeExport"
 import GhanaV3IncomeTaxBreakdown from "@/components/payroll/GhanaV3IncomeTaxBreakdown"
-import { hasGhanaV3IncomeTaxSnapshot } from "@/lib/payroll/ghanaIncomeTaxDisplay"
+import {
+  GHANA_PAYE_RELIEF_SCOPE_NOTICE,
+  hasGhanaV3IncomeTaxSnapshot,
+} from "@/lib/payroll/ghanaIncomeTaxDisplay"
 import { createPayrollPaymentIdempotencyKey } from "@/lib/payroll/createPayrollPaymentIdempotencyKey"
 import {
   BATCH_ITEM_PAYMENT_CONFLICT_MESSAGE,
@@ -1363,6 +1366,10 @@ export default function PayrollRunViewPage() {
               Ghana PAYE/SSNIT use monthly statutory bands.
             </div>
           )}
+
+          <div className="mb-4 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-xs text-gray-600 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-300">
+            {GHANA_PAYE_RELIEF_SCOPE_NOTICE}
+          </div>
 
           {shouldShowDraftBusinessTinWarning(payrollRun.status, filingContext?.currentBusinessTin) && (
             <PayrollBusinessTinWarning variant="draft_missing" payrollBasePath={payrollBase} className="mb-4" />

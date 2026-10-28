@@ -100,6 +100,10 @@ export const ghanaPayrollEngine: PayrollEngine = {
     const ssnitEmployeeAmount = pensionAmounts.employeeContribution
     const ssnitEmployerAmount = pensionAmounts.employerContribution
 
+    // Ghana chargeable income currently deducts only the employee SSNIT contribution.
+    // Mortgage-interest, provident-fund and donation reliefs are not modeled; the payroll
+    // UI and payslip show this scope so they cannot be mistaken for a comprehensive relief
+    // calculation. Do not treat post-tax staff deductions as pre-tax reliefs.
     const taxableIncome = roundPayroll(Math.max(0, grossSalary - ssnitEmployeeAmount))
 
     const calculatePaye = (income: number) => calculateGhanaPayeFromBands(income, rates.paye.bands)
@@ -193,6 +197,12 @@ export const ghanaPayrollEngine: PayrollEngine = {
         graduatedPayeBase: roundPayroll(Math.max(0, graduatedPayeBase)),
         graduatedPayeAmount: roundPayroll(graduatedPayeAmount),
         totalIncomeTax: roundPayroll(payeAmount),
+        payeChargeableIncomeBasis: "gross_less_employee_ssnit_only",
+        unsupportedPayeReliefs: [
+          "mortgage_interest",
+          "provident_fund",
+          "donations",
+        ],
         calculationEngineVersion: GHANA_CALCULATION_ENGINE_VERSION,
         payeRateVersion: rates.paye.version,
         pensionRateVersion: rates.pension.version,

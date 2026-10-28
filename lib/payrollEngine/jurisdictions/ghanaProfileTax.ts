@@ -6,7 +6,9 @@
  * - Non-resident regular employment: 25%
  * - Non-resident bonus / overtime: 20%
  *
- * Support horizon is a Finza verification window, not a claim that the law expires.
+ * These are statutory non-annual rates and remain in force until Act 896 is amended.
+ * They have no support-expiry date. Annual SSNIT insurable-earnings limits are handled
+ * separately in ghanaStatutoryRates.ts and still fail closed when a year is unverified.
  */
 
 import { extractDatePart, roundPayroll, validateEffectiveDate } from "../versioning"
@@ -42,7 +44,6 @@ export type GhanaProfileTaxRates = {
   version: string
   effectiveFrom: string
   verifiedThrough: string
-  productSupportEnd: string
   residentCasualRate: number
   nonResidentRegularRate: number
   nonResidentBonusRate: number
@@ -53,7 +54,6 @@ export const GHANA_PROFILE_TAX_2024_01: GhanaProfileTaxRates = {
   version: "gh-profile-tax-2024-01",
   effectiveFrom: "2024-01-01",
   verifiedThrough: "2026-07-30",
-  productSupportEnd: "2026-12-31",
   residentCasualRate: 0.05,
   nonResidentRegularRate: 0.25,
   nonResidentBonusRate: 0.2,
@@ -94,11 +94,9 @@ export function resolveGhanaProfileTaxRatesForPeriod(periodDate: string): GhanaP
       `No Ghana profile-tax version covers payroll period ${period} (before ${GHANA_PROFILE_TAX_2024_01.effectiveFrom}).`
     )
   }
-  if (period > GHANA_PROFILE_TAX_2024_01.productSupportEnd) {
-    throw new GhanaProfileTaxVersionError(
-      `Ghana profile-tax version ${GHANA_PROFILE_TAX_2024_01.version} does not cover payroll period ${period} (after product support end ${GHANA_PROFILE_TAX_2024_01.productSupportEnd}).`
-    )
-  }
+  // These statutory rates are not annual budget values and have no statutory expiry.
+  // They remain in force until Act 896 is amended. Annual SSNIT limits are handled
+  // separately and still fail closed when no verified year is available.
   return GHANA_PROFILE_TAX_2024_01
 }
 
@@ -109,7 +107,7 @@ export function assertGhanaProfileTaxVersionCoversPeriod(
   const rates = getGhanaProfileTaxRatesByVersion(version)
   validateEffectiveDate(periodDate)
   const period = extractDatePart(periodDate)
-  if (period < rates.effectiveFrom || period > rates.productSupportEnd) {
+  if (period < rates.effectiveFrom) {
     throw new GhanaProfileTaxVersionError(
       `Stored Ghana profile-tax version "${version}" does not cover payroll period ${period}.`
     )

@@ -370,7 +370,7 @@ describe("Ghana statutory golden — pension year caps", () => {
   })
 })
 
-describe("Ghana statutory golden — versioning and support horizon", () => {
+describe("Ghana statutory golden — versioning and annual pension horizon", () => {
   it("payroll period selects 2026 pension version", () => {
     const bundle = resolveGhanaStatutoryRatesForPeriod("2026-03-01")
     expect(bundle.pension.version).toBe("gh-pension-2026-01")
@@ -391,7 +391,9 @@ describe("Ghana statutory golden — versioning and support horizon", () => {
     if (accepted) {
       expect(() => resolveGhanaStatutoryRatesForPeriod(period)).not.toThrow()
     } else {
-      expect(() => resolveGhanaStatutoryRatesForPeriod(period)).toThrow(/outside the verified|No Ghana/)
+      expect(() => resolveGhanaStatutoryRatesForPeriod(period)).toThrow(
+        /outside the verified|No Ghana|does not cover|before the verified/
+      )
     }
   })
 
@@ -428,7 +430,7 @@ describe("Ghana statutory golden — versioning and support horizon", () => {
         pensionRateVersion: "gh-pension-2026-01",
         periodBasis: "2027-01-01",
       })
-    ).toThrow(/outside the verified/)
+    ).toThrow(/does not cover/)
 
     expect(() =>
       resolveGhanaStatutoryRatesByVersions({

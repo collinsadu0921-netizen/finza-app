@@ -13,6 +13,7 @@ import {
   GHANA_PAYE_2026_09_VERSION,
   calculateGhanaPayeFromBands,
   getGhanaPayeRatesForPeriod,
+  getGhanaPensionRatesForPeriod,
   resolveGhanaStatutoryRatesByVersions,
   resolveGhanaStatutoryRatesForPeriod,
 } from "@/lib/payrollEngine/jurisdictions/ghanaStatutoryRates"
@@ -94,8 +95,26 @@ describe("Ghana PAYE Act 1178 — effective-date selection", () => {
     ).toBe(GOLDEN_GHANA_PAYE_2026_09_THRESHOLDS.thirtyPercentEnds)
   })
 
-  it("fails closed after the verified support horizon", () => {
-    expect(() => getGhanaPayeRatesForPeriod("2027-01-01")).toThrow(/outside the verified/)
+  it("keeps the Act 1178 PAYE schedule available after 2026", () => {
+    const rates2027 = getGhanaPayeRatesForPeriod("2027-01-01")
+    expect(rates2027.version).toBe(GHANA_PAYE_2026_09_VERSION)
+    expect(calculateGhanaPayeFromBands(1000, rates2027.bands)).toBe(54.6)
+  })
+
+  it("blocks 2027 full payroll only because annual SSNIT limits are unverified", () => {
+    expect(() => getGhanaPensionRatesForPeriod("2027-01-01")).toThrow(
+      /SSNIT|pension.*does not cover/i
+    )
+    expect(() => resolveGhanaStatutoryRatesForPeriod("2027-01-01")).toThrow(
+      /SSNIT|pension.*does not cover/i
+    )
+    expect(() =>
+      resolveGhanaStatutoryRatesByVersions({
+        payeRateVersion: GHANA_PAYE_2026_09_VERSION,
+        pensionRateVersion: "gh-pension-2026-01",
+        periodBasis: "2027-01-01",
+      })
+    ).toThrow(/SSNIT|pension.*does not cover/i)
   })
 })
 
@@ -282,6 +301,24 @@ describe("Ghana PAYE Act 1178 — full payroll", () => {
     expect(result.complianceBreakdown?.overtimeTax10).toBe(0)
     expect(result.statutoryDeductions.find((d) => d.code === "PAYE")?.amount).toBe(49.98)
     expect(result.totals.netSalary).toBe(995.02)
+  })
+
+  it("labels the chargeable-income basis and unsupported reliefs explicitly", () => {
+    const result = ghanaPayrollEngine.calculate({
+      jurisdiction: "GH",
+      effectiveDate: "2026-09-01",
+      basicSalary: 1000,
+      allowances: 0,
+      otherDeductions: 0,
+    })
+    expect(result.complianceBreakdown?.payeChargeableIncomeBasis).toBe(
+      "gross_less_employee_ssnit_only"
+    )
+    expect(result.complianceBreakdown?.unsupportedPayeReliefs).toEqual([
+      "mortgage_interest",
+      "provident_fund",
+      "donations",
+    ])
   })
 
   it("uses only basic salary for the SSNIT base and preserves the 2026 caps", () => {

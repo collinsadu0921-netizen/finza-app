@@ -715,7 +715,7 @@ export function validateGhanaPayrollRunForApproval(opts: {
       return {
         ok: false,
         code: GHANA_PAYROLL_STATUTORY_VALIDATION_FAILED,
-        message: `Ghana statutory rate versions do not cover period ${runPeriod}. Approval is blocked.`,
+        message: `${message} Approval is blocked.`,
         affectedEmployees: [
           {
             staffId: "",

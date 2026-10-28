@@ -58,9 +58,31 @@ BEGIN
   IF public.payroll_ghana_calculate_paye_from_bands(1000, 'gh-paye-2024-01') <> 65.75 THEN
     RAISE EXCEPTION '2024 PAYE mismatch at 1000';
   END IF;
-  IF public.payroll_ghana_calculate_paye_from_bands(1000) <> 65.75 THEN
-    RAISE EXCEPTION 'legacy one-argument PAYE wrapper mismatch at 1000';
+
+  -- Act 1178 amended the First Schedule without a statutory expiry. The PAYE
+  -- schedule therefore remains available for 2027 even though annual SSNIT
+  -- limits for 2027 are not yet verified.
+  IF public.payroll_ghana_calculate_paye_from_bands(1000, 'gh-paye-2026-09') <> 54.60 THEN
+    RAISE EXCEPTION 'Act 1178 PAYE mismatch at 1000';
   END IF;
+
+  -- The non-annual casual/non-resident profile-tax rates also remain valid.
+  IF NOT public.payroll_ghana_profile_tax_version_covers_period(
+    'gh-profile-tax-2024-01', DATE '2027-01-01'
+  ) THEN
+    RAISE EXCEPTION 'profile-tax version unexpectedly expired for 2027';
+  END IF;
+
+  -- The legacy one-argument helper must not silently assume the 2024 schedule.
+  BEGIN
+    PERFORM public.payroll_ghana_calculate_paye_from_bands(1000);
+    RAISE EXCEPTION 'legacy one-argument PAYE helper unexpectedly calculated a value';
+  EXCEPTION
+    WHEN OTHERS THEN
+      IF SQLERRM NOT LIKE 'Ghana PAYE version is required%' THEN
+        RAISE;
+      END IF;
+  END;
 
   -- The new schedule must differ from the old one at the same income.
   IF public.payroll_ghana_calculate_paye_from_bands(945, 'gh-paye-2026-09') <> 44.98 THEN

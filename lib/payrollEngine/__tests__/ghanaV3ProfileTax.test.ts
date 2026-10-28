@@ -7,6 +7,7 @@ import {
   calculateGhanaNonResidentSplitTax,
   GHANA_PROFILE_TAX_2024_01,
   resolveGhanaIncomeTaxMethodFromProfile,
+  resolveGhanaProfileTaxRatesForPeriod,
 } from "@/lib/payrollEngine/jurisdictions/ghanaProfileTax"
 import { goldenCalculatePaye, goldenPensionFromBase } from "./fixtures/ghanaStatutoryGolden"
 
@@ -14,6 +15,15 @@ describe("Ghana v3 profile-tax — unit golden", () => {
   it("profile tax version covers 2026-01 payroll period", () => {
     expect(() =>
       assertGhanaProfileTaxVersionCoversPeriod(GHANA_PROFILE_TAX_2024_01.version, "2026-01-01")
+    ).not.toThrow()
+  })
+
+  it("non-annual profile-tax rates remain valid for 2027", () => {
+    expect(
+      resolveGhanaProfileTaxRatesForPeriod("2027-01-01").version
+    ).toBe(GHANA_PROFILE_TAX_2024_01.version)
+    expect(() =>
+      assertGhanaProfileTaxVersionCoversPeriod(GHANA_PROFILE_TAX_2024_01.version, "2027-01-01")
     ).not.toThrow()
   })
 
