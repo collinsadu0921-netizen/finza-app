@@ -46,6 +46,74 @@ type Deduction = {
   description: string | null
 }
 
+type SalaryHistoryPayment = {
+  id: string
+  amount: number
+  payment_date: string | null
+  reference: string | null
+}
+
+type SalaryHistoryRow = {
+  payroll_run_id: string
+  payroll_entry_id: string
+  payroll_month: string
+  pay_period_start: string | null
+  pay_period_end: string | null
+  payroll_frequency: string
+  run_type: string
+  run_status: string
+  is_reversed_run: boolean
+  basic_salary: number
+  allowances_total: number
+  deductions_total: number
+  gross_salary: number
+  paye: number
+  ssnit_employee: number
+  ssnit_employer: number
+  net_salary: number
+  payment_status: "paid" | "partially_paid" | "unpaid" | "unverified"
+  payment_status_label: string
+  confirmed_paid_amount: number
+  outstanding_amount: number | null
+  unverified_amount: number
+  has_unallocated_aggregate_payment: boolean
+  payments: SalaryHistoryPayment[]
+  aggregate_payments: SalaryHistoryPayment[]
+  payslip: {
+    id: string
+    public_token: string | null
+    created_at: string | null
+  } | null
+}
+
+type SalaryHistoryResponse = {
+  staff: {
+    id: string
+    name: string
+    basic_salary: number
+    salary_basis: string
+    employment_type: string
+    start_date: string
+    status: string
+  }
+  summary: {
+    total_net_salary: number
+    total_confirmed_paid: number
+    total_outstanding: number
+    total_unverified: number
+    total_reversed_net_salary: number
+    period_count: number
+    unallocated_aggregate_payment_total: number
+  }
+  history: SalaryHistoryRow[]
+  available_years: number[]
+  pagination: {
+    limit: number
+    offset: number
+    has_more: boolean
+  }
+}
+
 type StaffPaymentMethod = {
   id: string
   method_type: string
@@ -101,6 +169,137 @@ function MiniBadge({
   )
 }
 
+function salaryPeriodLabel(row: SalaryHistoryRow): string {
+  const raw = row.payroll_month || row.pay_period_start
+  if (!raw) return "Payroll period"
+  const d = new Date(`${String(raw).slice(0, 10)}T00:00:00`)
+  if (Number.isNaN(d.getTime())) return String(raw).slice(0, 10)
+  return d.toLocaleDateString("en-GH", { month: "short", year: "numeric" })
+}
+
+function paymentStatusClasses(status: SalaryHistoryRow["payment_status"]): string {
+  switch (status) {
+    case "paid":
+      return "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
+    case "partially_paid":
+      return "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+    case "unverified":
+      return "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300"
+    default:
+      return "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"
+  }
+}
+
+function SalaryHistoryMobileCard({
+  row,
+  payrollBase,
+}: {
+  row: SalaryHistoryRow
+  payrollBase: string
+}) {
+  const aggregateTotal = row.aggregate_payments.reduce(
+    (sum, payment) => sum + Number(payment.amount || 0),
+    0
+  )
+  const payslipToken = row.payslip?.public_token || null
+
+  return (
+    <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-4 space-y-3">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="font-semibold text-gray-900 dark:text-white">{salaryPeriodLabel(row)}</p>
+          {row.is_reversed_run && (
+            <span className="mt-1 inline-flex rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-medium text-rose-800 dark:bg-rose-900/40 dark:text-rose-300">
+              Reversed payroll
+            </span>
+          )}
+        </div>
+        <span
+          className={`inline-flex max-w-[190px] rounded-full px-2 py-0.5 text-[11px] font-medium ${paymentStatusClasses(
+            row.payment_status
+          )}`}
+        >
+          {row.payment_status_label}
+        </span>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 text-xs">
+        <div>
+          <p className="text-gray-500 dark:text-gray-400">Gross</p>
+          <p className="font-medium text-gray-900 dark:text-white">GHS {Number(row.gross_salary || 0).toFixed(2)}</p>
+        </div>
+        <div>
+          <p className="text-gray-500 dark:text-gray-400">Net salary</p>
+          <p className="font-semibold text-gray-900 dark:text-white">GHS {Number(row.net_salary || 0).toFixed(2)}</p>
+        </div>
+        <div>
+          <p className="text-gray-500 dark:text-gray-400">PAYE</p>
+          <p className="font-medium text-gray-900 dark:text-white">GHS {Number(row.paye || 0).toFixed(2)}</p>
+        </div>
+        <div>
+          <p className="text-gray-500 dark:text-gray-400">SSNIT</p>
+          <p className="font-medium text-gray-900 dark:text-white">GHS {Number(row.ssnit_employee || 0).toFixed(2)}</p>
+        </div>
+        <div>
+          <p className="text-gray-500 dark:text-gray-400">Outstanding</p>
+          <p className="font-medium text-gray-900 dark:text-white">
+            {row.outstanding_amount == null
+              ? "Not verified"
+              : `GHS ${Number(row.outstanding_amount || 0).toFixed(2)}`}
+          </p>
+        </div>
+        <div>
+          <p className="text-gray-500 dark:text-gray-400">Payslip</p>
+          {payslipToken ? (
+            <a
+              href={`/payslips/${encodeURIComponent(payslipToken)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-medium text-blue-600 dark:text-blue-400 hover:underline"
+            >
+              View / print
+            </a>
+          ) : (
+            <p className="text-gray-500 dark:text-gray-400">Not generated</p>
+          )}
+        </div>
+      </div>
+
+      {row.payments.length > 0 && (
+        <div className="text-xs text-gray-600 dark:text-gray-300">
+          {row.payments.map((payment) => (
+            <p key={payment.id}>
+              Paid GHS {Number(payment.amount || 0).toFixed(2)}
+              {payment.payment_date
+                ? ` on ${new Date(payment.payment_date).toLocaleDateString("en-GH")}`
+                : ""}
+              {payment.reference ? ` · ${payment.reference}` : ""}
+            </p>
+          ))}
+        </div>
+      )}
+
+      {aggregateTotal > 0 && (
+        <p className="text-xs text-blue-700 dark:text-blue-300">
+          Unallocated aggregate: GHS {aggregateTotal.toFixed(2)} ({row.aggregate_payments.length})
+        </p>
+      )}
+      {row.unverified_amount > 0 && (
+        <p className="text-xs text-blue-700 dark:text-blue-300">
+          GHS {Number(row.unverified_amount).toFixed(2)} not individually verified
+        </p>
+      )}
+
+      <a
+        href={`${payrollBase}/${row.payroll_run_id}`}
+        className="inline-block text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
+      >
+        Open payroll run
+      </a>
+    </div>
+  )
+}
+
 export default function StaffViewPage() {
   const router = useRouter()
   const payrollBase = usePayrollBasePath()
@@ -115,6 +314,12 @@ export default function StaffViewPage() {
   const [allowances, setAllowances] = useState<Allowance[]>([])
   const [deductions, setDeductions] = useState<Deduction[]>([])
   const [paymentMethods, setPaymentMethods] = useState<StaffPaymentMethod[]>([])
+  const [salaryHistory, setSalaryHistory] = useState<SalaryHistoryResponse | null>(null)
+  const [salaryLoading, setSalaryLoading] = useState(true)
+  const [salaryError, setSalaryError] = useState("")
+  const [salaryPermissionDenied, setSalaryPermissionDenied] = useState(false)
+  const [salaryYear, setSalaryYear] = useState("")
+  const [salaryLimit, setSalaryLimit] = useState(24)
   const [error, setError] = useState("")
   const [showAllowanceModal, setShowAllowanceModal] = useState(false)
   const [showDeductionModal, setShowDeductionModal] = useState(false)
@@ -143,6 +348,10 @@ export default function StaffViewPage() {
     loadStaff()
   }, [staffId])
 
+  useEffect(() => {
+    loadSalaryHistory()
+  }, [staffId, salaryYear, salaryLimit])
+
   const loadStaff = async () => {
     try {
       setLoading(true)
@@ -162,6 +371,38 @@ export default function StaffViewPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const loadSalaryHistory = async () => {
+    try {
+      setSalaryLoading(true)
+      setSalaryError("")
+      setSalaryPermissionDenied(false)
+      const params = new URLSearchParams()
+      params.set("limit", String(salaryLimit))
+      if (salaryYear) params.set("year", salaryYear)
+      const response = await fetch(`/api/staff/${staffId}/salary-history?${params.toString()}`)
+      const data = await response.json()
+      if (!response.ok) {
+        if (response.status === 403) {
+          setSalaryPermissionDenied(true)
+          setSalaryHistory(null)
+          return
+        }
+        setSalaryError(data.error || "Failed to load salary history")
+        return
+      }
+      setSalaryHistory(data)
+    } catch (err: any) {
+      setSalaryError(err.message || "Failed to load salary history")
+    } finally {
+      setSalaryLoading(false)
+    }
+  }
+
+  const handleSalaryYearChange = (year: string) => {
+    setSalaryYear(year)
+    setSalaryLimit(24)
   }
 
   const handleSaveAllowance = async () => {
@@ -460,6 +701,15 @@ export default function StaffViewPage() {
             </div>
           </div>
 
+          <div className="mb-4 flex flex-wrap gap-2">
+            <a
+              href="#salary-payslips"
+              className="inline-flex items-center rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700"
+            >
+              Salary &amp; Payslips
+            </a>
+          </div>
+
           {/* Staff Details */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
             <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
@@ -539,6 +789,274 @@ export default function StaffViewPage() {
                 </div>
               </div>
             </div>
+          </div>
+
+          {/* Salary & Payslips */}
+          <div
+            id="salary-payslips"
+            className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700 mb-6 scroll-mt-6"
+          >
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between mb-4">
+              <div>
+                <h2 className="text-xl font-bold text-gray-900 dark:text-white">Salary &amp; Payslips</h2>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mt-1 max-w-3xl">
+                  Historical approved payroll, confirmed employee payments and existing payslips. Current salary
+                  settings above remain separate from historical payroll figures.
+                </p>
+              </div>
+              {salaryHistory && (
+                <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                  <span>Year</span>
+                  <select
+                    value={salaryYear}
+                    onChange={(e) => handleSalaryYearChange(e.target.value)}
+                    className="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-gray-900 dark:text-white"
+                  >
+                    <option value="">All years</option>
+                    {salaryHistory.available_years.map((year) => (
+                      <option key={year} value={String(year)}>
+                        {year}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+            </div>
+
+            {salaryLoading ? (
+              <p className="text-sm text-gray-500 dark:text-gray-400">Loading salary history...</p>
+            ) : salaryPermissionDenied ? (
+              <p className="text-sm text-gray-600 dark:text-gray-300">
+                Payroll view or export permission is required to see salary history and payslips.
+              </p>
+            ) : salaryError ? (
+              <div className="space-y-2">
+                <p className="text-sm text-red-700 dark:text-red-300">{salaryError}</p>
+                <button
+                  type="button"
+                  onClick={loadSalaryHistory}
+                  className="text-sm font-medium text-blue-600 dark:text-blue-400 hover:underline"
+                >
+                  Retry
+                </button>
+              </div>
+            ) : salaryHistory ? (
+              <div className="space-y-5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+                  <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Current basic salary</p>
+                    <p className="mt-1 text-lg font-bold text-gray-900 dark:text-white">
+                      GHS {Number(salaryHistory.staff.basic_salary || 0).toFixed(2)}
+                    </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      {salaryHistory.staff.salary_basis || "monthly"} basis
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Historical approved net salary</p>
+                    <p className="mt-1 text-lg font-bold text-gray-900 dark:text-white">
+                      GHS {Number(salaryHistory.summary.total_net_salary || 0).toFixed(2)}
+                    </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      {salaryHistory.summary.period_count} payroll period
+                      {salaryHistory.summary.period_count === 1 ? "" : "s"}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Confirmed paid to employee</p>
+                    <p className="mt-1 text-lg font-bold text-emerald-700 dark:text-emerald-400">
+                      GHS {Number(salaryHistory.summary.total_confirmed_paid || 0).toFixed(2)}
+                    </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      Employee-level batch payments only
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Outstanding (individually established)</p>
+                    <p className="mt-1 text-lg font-bold text-amber-700 dark:text-amber-400">
+                      GHS {Number(salaryHistory.summary.total_outstanding || 0).toFixed(2)}
+                    </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      Excludes unallocated aggregate payments
+                    </p>
+                  </div>
+                </div>
+
+                {(salaryHistory.summary.total_unverified > 0 ||
+                  salaryHistory.summary.unallocated_aggregate_payment_total > 0) && (
+                  <div className="rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/30 px-3 py-2 text-xs text-blue-900 dark:text-blue-200">
+                    {salaryHistory.summary.total_unverified > 0 && (
+                      <p>
+                        GHS {Number(salaryHistory.summary.total_unverified).toFixed(2)} of salary has not been
+                        individually verified because it is covered only by run-level aggregate payments.
+                      </p>
+                    )}
+                    {salaryHistory.summary.unallocated_aggregate_payment_total > 0 && (
+                      <p>
+                        Run-level aggregate payments total GHS{" "}
+                        {Number(salaryHistory.summary.unallocated_aggregate_payment_total).toFixed(2)}. They are not
+                        attributed to this employee.
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {salaryHistory.summary.total_reversed_net_salary > 0 && (
+                  <p className="text-xs text-rose-700 dark:text-rose-300">
+                    Reversed payroll net salary excluded from totals: GHS{" "}
+                    {Number(salaryHistory.summary.total_reversed_net_salary).toFixed(2)}.
+                  </p>
+                )}
+
+                {salaryHistory.history.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-gray-300 dark:border-gray-600 p-6 text-center">
+                    <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                      No approved payroll history for this employee yet.
+                    </p>
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      Salary history appears after a payroll run is approved. Draft estimates are not historical
+                      salary.
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                  <div className="space-y-3 md:hidden">
+                    {salaryHistory.history.map((row) => (
+                      <SalaryHistoryMobileCard
+                        key={row.payroll_entry_id}
+                        row={row}
+                        payrollBase={payrollBase}
+                      />
+                    ))}
+                  </div>
+                  <div className="hidden md:block overflow-x-auto -mx-1">
+                    <table className="w-full min-w-[1080px] text-sm">
+                      <thead>
+                        <tr className="text-left text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                          <th className="px-2 py-2 min-w-[200px]">Period</th>
+                          <th className="px-2 py-2 text-right">Gross</th>
+                          <th className="px-2 py-2 text-right">PAYE</th>
+                          <th className="px-2 py-2 text-right">SSNIT</th>
+                          <th className="px-2 py-2 text-right">Net salary</th>
+                          <th className="px-2 py-2 text-right min-w-[120px]">Outstanding</th>
+                          <th className="px-2 py-2 min-w-[250px]">Payment status</th>
+                          <th className="px-2 py-2 min-w-[110px]">Payslip</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                        {salaryHistory.history.map((row) => {
+                          const aggregateTotal = row.aggregate_payments.reduce(
+                            (sum, payment) => sum + Number(payment.amount || 0),
+                            0
+                          )
+                          const payslipToken = row.payslip?.public_token || null
+                          return (
+                            <tr key={row.payroll_entry_id}>
+                              <td className="px-2 py-3 align-top text-gray-900 dark:text-white">
+                                <p className="font-medium">{salaryPeriodLabel(row)}</p>
+                                <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                                  Basic GHS {Number(row.basic_salary || 0).toFixed(2)} · Allowances GHS{" "}
+                                  {Number(row.allowances_total || 0).toFixed(2)} · Deductions GHS{" "}
+                                  {Number(row.deductions_total || 0).toFixed(2)}
+                                </p>
+                                {row.is_reversed_run && (
+                                  <span className="mt-1 inline-flex rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-medium text-rose-800 dark:bg-rose-900/40 dark:text-rose-300">
+                                    Reversed payroll
+                                  </span>
+                                )}
+                                <a
+                                  href={`${payrollBase}/${row.payroll_run_id}`}
+                                  className="mt-1 block text-[11px] font-medium text-blue-600 dark:text-blue-400 hover:underline"
+                                >
+                                  Open payroll run
+                                </a>
+                              </td>
+                              <td className="px-2 py-3 text-right tabular-nums text-gray-900 dark:text-white">
+                                GHS {Number(row.gross_salary || 0).toFixed(2)}
+                              </td>
+                              <td className="px-2 py-3 text-right tabular-nums text-gray-700 dark:text-gray-300">
+                                GHS {Number(row.paye || 0).toFixed(2)}
+                              </td>
+                              <td className="px-2 py-3 text-right tabular-nums text-gray-700 dark:text-gray-300">
+                                GHS {Number(row.ssnit_employee || 0).toFixed(2)}
+                              </td>
+                              <td className="px-2 py-3 text-right font-semibold tabular-nums text-gray-900 dark:text-white">
+                                GHS {Number(row.net_salary || 0).toFixed(2)}
+                              </td>
+                              <td className="px-2 py-3 text-right tabular-nums text-gray-700 dark:text-gray-300">
+                                {row.outstanding_amount == null ? (
+                                  <span className="text-xs text-blue-700 dark:text-blue-300">Not verified</span>
+                                ) : (
+                                  `GHS ${Number(row.outstanding_amount || 0).toFixed(2)}`
+                                )}
+                              </td>
+                              <td className="px-2 py-3 align-top">
+                                <span
+                                  className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${paymentStatusClasses(
+                                    row.payment_status
+                                  )}`}
+                                >
+                                  {row.payment_status_label}
+                                </span>
+                                {row.payments.length > 0 && (
+                                  <ul className="mt-1 space-y-0.5 text-[11px] text-gray-600 dark:text-gray-300">
+                                    {row.payments.map((payment) => (
+                                      <li key={payment.id}>
+                                        Paid GHS {Number(payment.amount || 0).toFixed(2)}
+                                        {payment.payment_date
+                                          ? ` on ${new Date(payment.payment_date).toLocaleDateString("en-GH")}`
+                                          : ""}
+                                        {payment.reference ? ` · ${payment.reference}` : ""}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                )}
+                                {aggregateTotal > 0 && (
+                                  <p className="mt-1 text-[11px] text-blue-700 dark:text-blue-300">
+                                    Unallocated aggregate: GHS {aggregateTotal.toFixed(2)} (
+                                    {row.aggregate_payments.length})
+                                  </p>
+                                )}
+                                {row.unverified_amount > 0 && (
+                                  <p className="mt-1 text-[11px] text-blue-700 dark:text-blue-300">
+                                    GHS {Number(row.unverified_amount).toFixed(2)} not individually verified
+                                  </p>
+                                )}
+                              </td>
+                              <td className="px-2 py-3 align-top">
+                                {payslipToken ? (
+                                  <a
+                                    href={`/payslips/${encodeURIComponent(payslipToken)}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
+                                  >
+                                    View / print
+                                  </a>
+                                ) : (
+                                  <span className="text-xs text-gray-500 dark:text-gray-400">Not generated</span>
+                                )}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  </>
+                )}
+
+                {salaryHistory.pagination.has_more && (
+                  <button
+                    type="button"
+                    onClick={() => setSalaryLimit((n) => n + 24)}
+                    className="text-sm font-medium text-blue-600 dark:text-blue-400 hover:underline"
+                  >
+                    Load more history
+                  </button>
+                )}
+              </div>
+            ) : null}
           </div>
 
           {/* Payment methods */}
