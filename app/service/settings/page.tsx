@@ -45,6 +45,18 @@ const SETTING_GROUPS: SettingsGroup[] = [
     ],
   },
   {
+    title: "Payroll payouts",
+    description:
+      "Connect the business's own Paystack account and control direct salary transfers. Business plan only.",
+    links: [
+      {
+        label: "Paystack payroll payouts",
+        path: "/service/settings/payroll-paystack",
+        minTier: "business",
+      },
+    ],
+  },
+  {
     title: "Documents",
     description:
       "Bring files into Finza by email (no upload). You get a short email when something new lands in Incoming documents.",

@@ -51,6 +51,8 @@ type SalaryHistoryPayment = {
   amount: number
   payment_date: string | null
   reference: string | null
+  payment_method?: string | null
+  payment_account_code?: string | null
 }
 
 type SalaryHistoryRow = {
@@ -128,6 +130,9 @@ type StaffPaymentMethod = {
   is_default: boolean
   is_verified: boolean
   verification_status: string
+  paystack_recipient_code?: string | null
+  paystack_recipient_environment?: string | null
+  paystack_recipient_fingerprint?: string | null
 }
 
 const PAYMENT_METHOD_LABELS: Record<string, string> = {
@@ -274,6 +279,7 @@ function SalaryHistoryMobileCard({
                 ? ` on ${new Date(payment.payment_date).toLocaleDateString("en-GH")}`
                 : ""}
               {payment.reference ? ` · ${payment.reference}` : ""}
+              {payment.payment_method ? ` · ${payment.payment_method}` : ""}
             </p>
           ))}
         </div>
@@ -343,10 +349,46 @@ export default function StaffViewPage() {
   })
 
   const [paymentMethodForm, setPaymentMethodForm] = useState(emptyPaymentMethodForm())
+  const [paystackDestinations, setPaystackDestinations] = useState<{
+    banks: Array<{ name: string; code: string }>
+    mobile_money: Array<{ name: string; code: string; label: string }>
+    environment: "test" | "live"
+  } | null>(null)
+  const [loadingPaystackDestinations, setLoadingPaystackDestinations] = useState(false)
 
   useEffect(() => {
     loadStaff()
   }, [staffId])
+
+  useEffect(() => {
+    if (!showPaymentMethodModal) return
+    if (paymentMethodForm.method_type !== "bank" && paymentMethodForm.method_type !== "momo") return
+    if (paystackDestinations || loadingPaystackDestinations) return
+    let cancelled = false
+    const loadDestinations = async () => {
+      setLoadingPaystackDestinations(true)
+      try {
+        const response = await fetch("/api/payroll/paystack/banks", { cache: "no-store" })
+        if (!response.ok) return
+        const data = await response.json()
+        if (!cancelled) {
+          setPaystackDestinations({
+            banks: data.banks || [],
+            mobile_money: data.mobile_money || [],
+            environment: data.environment === "live" ? "live" : "test",
+          })
+        }
+      } catch {
+        // Paystack not connected or not eligible: keep manual destination fields.
+      } finally {
+        if (!cancelled) setLoadingPaystackDestinations(false)
+      }
+    }
+    void loadDestinations()
+    return () => {
+      cancelled = true
+    }
+  }, [showPaymentMethodModal, paymentMethodForm.method_type, paystackDestinations, loadingPaystackDestinations])
 
   useEffect(() => {
     loadSalaryHistory()
@@ -1007,6 +1049,7 @@ export default function StaffViewPage() {
                                           ? ` on ${new Date(payment.payment_date).toLocaleDateString("en-GH")}`
                                           : ""}
                                         {payment.reference ? ` · ${payment.reference}` : ""}
+                                        {payment.payment_method ? ` · ${payment.payment_method}` : ""}
                                       </li>
                                     ))}
                                   </ul>
@@ -1065,8 +1108,8 @@ export default function StaffViewPage() {
               <div>
                 <h2 className="text-xl font-bold text-gray-900 dark:text-white">Payment methods</h2>
                 <p className="text-sm text-gray-600 dark:text-gray-400 mt-1 max-w-3xl">
-                  Payment methods are stored for payroll planning and future salary payment workflows. Finza does not
-                  send money from this screen.
+                  Payment methods are used for manual salary records and Business-tier Paystack payouts. A Paystack
+                  transfer only starts after an authorized user explicitly confirms it in the payroll batch.
                 </p>
               </div>
               <button
@@ -1110,9 +1153,14 @@ export default function StaffViewPage() {
                           {m.account_name ? <li>Registered name: {m.account_name}</li> : null}
                         </ul>
                       ) : null}
+                      {m.paystack_recipient_code ? (
+                        <p className="text-[11px] text-emerald-700 dark:text-emerald-400">
+                          Paystack recipient linked ({m.paystack_recipient_environment || "test"}).
+                        </p>
+                      ) : null}
                       {m.method_type === "cash" ? (
                         <p className="text-gray-600 dark:text-gray-300">
-                          Cash payment / manual handling — record payouts outside integrated transfers.
+                          Cash payment / manual handling - record payouts outside integrated transfers.
                         </p>
                       ) : null}
                       {m.provider_name ? (
@@ -1426,7 +1474,7 @@ export default function StaffViewPage() {
               {editingPaymentMethod ? "Edit payment method" : "Add payment method"}
             </h3>
             <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-              For planning only — no funds are transferred from Finza.
+              Used for manual salary records and confirmed Paystack payouts. No transfer starts from this dialog.
             </p>
             <div className="space-y-4">
               <div>
@@ -1471,13 +1519,49 @@ export default function StaffViewPage() {
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                       Bank name *
                     </label>
-                    <input
-                      value={paymentMethodForm.bank_name}
-                      onChange={(e) =>
-                        setPaymentMethodForm({ ...paymentMethodForm, bank_name: e.target.value })
-                      }
-                      className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                    />
+                    {paystackDestinations && paystackDestinations.banks.length > 0 ? (
+                      <select
+                        value={paymentMethodForm.bank_code}
+                        onChange={(e) => {
+                          const selected = paystackDestinations.banks.find(
+                            (bank) => bank.code === e.target.value
+                          )
+                          setPaymentMethodForm({
+                            ...paymentMethodForm,
+                            bank_code: e.target.value,
+                            bank_name: selected?.name || "",
+                          })
+                        }}
+                        className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      >
+                        <option value="">Select a supported Ghana bank</option>
+                        {paystackDestinations.banks.map((bank) => (
+                          <option key={bank.code} value={bank.code}>
+                            {bank.name}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        value={paymentMethodForm.bank_name}
+                        onChange={(e) =>
+                          setPaymentMethodForm({ ...paymentMethodForm, bank_name: e.target.value })
+                        }
+                        className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                        placeholder="Bank name"
+                      />
+                    )}
+                    {loadingPaystackDestinations ? (
+                      <p className="mt-1 text-[11px] text-gray-500">Loading Paystack banks…</p>
+                    ) : paystackDestinations ? (
+                      <p className="mt-1 text-[11px] text-gray-500">
+                        Paystack-supported bank list · {paystackDestinations.environment} mode
+                      </p>
+                    ) : (
+                      <p className="mt-1 text-[11px] text-gray-500">
+                        Connect Paystack in settings to select a supported bank code.
+                      </p>
+                    )}
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -1517,14 +1601,15 @@ export default function StaffViewPage() {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Bank code (optional)
+                      Bank code {paystackDestinations ? "" : "(optional)"}
                     </label>
                     <input
                       value={paymentMethodForm.bank_code}
+                      readOnly={Boolean(paystackDestinations && paystackDestinations.banks.length > 0)}
                       onChange={(e) =>
                         setPaymentMethodForm({ ...paymentMethodForm, bank_code: e.target.value })
                       }
-                      className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white read-only:bg-gray-100 dark:read-only:bg-gray-800"
                     />
                   </div>
                 </>
@@ -1535,14 +1620,36 @@ export default function StaffViewPage() {
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                       Provider *
                     </label>
-                    <input
-                      value={paymentMethodForm.momo_provider}
-                      onChange={(e) =>
-                        setPaymentMethodForm({ ...paymentMethodForm, momo_provider: e.target.value })
-                      }
-                      className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                      placeholder="e.g. MTN, Vodafone"
-                    />
+                    {paystackDestinations && paystackDestinations.mobile_money.length > 0 ? (
+                      <select
+                        value={paymentMethodForm.momo_provider}
+                        onChange={(e) =>
+                          setPaymentMethodForm({ ...paymentMethodForm, momo_provider: e.target.value })
+                        }
+                        className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      >
+                        <option value="">Select a Mobile Money network</option>
+                        {paystackDestinations.mobile_money.map((network) => (
+                          <option key={network.code} value={network.name}>
+                            {network.label || network.name}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        value={paymentMethodForm.momo_provider}
+                        onChange={(e) =>
+                          setPaymentMethodForm({ ...paymentMethodForm, momo_provider: e.target.value })
+                        }
+                        className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                        placeholder="e.g. MTN, Telecel, AirtelTigo"
+                      />
+                    )}
+                    <p className="mt-1 text-[11px] text-gray-500">
+                      {paystackDestinations
+                        ? "Paystack supports MTN, Telecel (Vodafone) and AirtelTigo in Ghana."
+                        : "Connect Paystack in settings to load supported networks."}
+                    </p>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">

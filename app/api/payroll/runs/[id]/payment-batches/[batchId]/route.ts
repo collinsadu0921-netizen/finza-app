@@ -74,7 +74,28 @@ export async function GET(
       return NextResponse.json({ error: iErr.message }, { status: 500 })
     }
 
-    return NextResponse.json({ batch, items: items || [] })
+    const itemIds = (items || []).map((item) => String(item.id))
+    let paystackTransfers: unknown[] = []
+    if (itemIds.length > 0) {
+      const { data: transfers, error: transferErr } = await supabase
+        .from("payroll_paystack_transfers")
+        .select(
+          "id, batch_item_id, status, provider_status, reference, amount, currency, environment, failure_reason, requires_attention_reason, initiated_at, confirmed_at, reversed_at, payment_id, provider_transfer_id"
+        )
+        .eq("business_id", business.id)
+        .eq("payroll_run_id", runId)
+        .in("batch_item_id", itemIds)
+        .order("created_at", { ascending: false })
+
+      if (transferErr) {
+        // A missing Phase 2 table must not break the existing batch screen.
+        console.error("[payment-batch GET paystack transfers]", transferErr.code)
+      } else {
+        paystackTransfers = transfers || []
+      }
+    }
+
+    return NextResponse.json({ batch, items: items || [], paystack_transfers: paystackTransfers })
   } catch (e: any) {
     console.error("[payment-batch GET]", e)
     return NextResponse.json({ error: e.message || "Internal server error" }, { status: 500 })

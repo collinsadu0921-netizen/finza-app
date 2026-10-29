@@ -35,6 +35,7 @@ import {
   shouldShowDraftBusinessTinWarning,
 } from "@/lib/payroll/payrollBusinessTinWarning"
 import { submitManualSalaryPaymentRequest } from "@/lib/payroll/manualPaymentModalLifecycle"
+import PaystackSalaryPaymentModal from "@/components/payroll/PaystackSalaryPaymentModal"
 
 type PayrollEntry = {
   id: string
@@ -152,6 +153,24 @@ type PayrollPaymentBatchItem = {
   payment_reference: string | null
   failure_reason: string | null
   paid_at: string | null
+}
+
+type PaystackPayrollTransfer = {
+  id: string
+  batch_item_id: string
+  status: string
+  provider_status: string | null
+  reference: string
+  amount: number
+  currency: string
+  environment: "test" | "live"
+  failure_reason: string | null
+  requires_attention_reason: string | null
+  initiated_at: string
+  confirmed_at: string | null
+  reversed_at: string | null
+  payment_id: string | null
+  provider_transfer_id: string | null
 }
 
 type PayrollPayment = {
@@ -308,6 +327,21 @@ export default function PayrollRunViewPage() {
   const [expandedBatchDetail, setExpandedBatchDetail] = useState<{
     batch: PayrollPaymentBatch
     items: PayrollPaymentBatchItem[]
+    paystackTransfers: PaystackPayrollTransfer[]
+  } | null>(null)
+  const [paystackStatus, setPaystackStatus] = useState<{
+    enabled: boolean
+    connected: boolean
+    environment: "test" | "live" | null
+    balance_ghs: number | null
+    mock_mode?: boolean
+    reason?: string
+  }>({ enabled: false, connected: false, environment: null, balance_ghs: null })
+  const [paystackTarget, setPaystackTarget] = useState<{
+    batchId: string
+    itemId: string
+    employeeName: string | null
+    amount: number
   } | null>(null)
   const [loadingBatchDetail, setLoadingBatchDetail] = useState(false)
   const [batchActionLoading, setBatchActionLoading] = useState<string | null>(null)
@@ -422,6 +456,27 @@ export default function PayrollRunViewPage() {
     }
   }, [runId])
 
+  const loadPaystackStatus = useCallback(async () => {
+    try {
+      const response = await fetch("/api/payroll/paystack/status", { cache: "no-store" })
+      if (!response.ok) {
+        setPaystackStatus({ enabled: false, connected: false, environment: null, balance_ghs: null })
+        return
+      }
+      const data = await response.json()
+      setPaystackStatus({
+        enabled: Boolean(data.enabled),
+        connected: Boolean(data.connected),
+        environment: data.environment === "live" ? "live" : data.environment === "test" ? "test" : null,
+        balance_ghs: data.balance_ghs != null ? Number(data.balance_ghs) : null,
+        mock_mode: Boolean(data.mock_mode),
+        reason: data.reason,
+      })
+    } catch {
+      setPaystackStatus({ enabled: false, connected: false, environment: null, balance_ghs: null })
+    }
+  }, [])
+
   const loadObligations = useCallback(async () => {
     setLoadingObligations(true)
     try {
@@ -441,7 +496,15 @@ export default function PayrollRunViewPage() {
     loadPayrollPayments()
     loadPaymentBatches()
     loadObligations()
-  }, [loadPayrollRun, loadPayslips, loadPayrollPayments, loadPaymentBatches, loadObligations])
+    loadPaystackStatus()
+  }, [
+    loadPayrollRun,
+    loadPayslips,
+    loadPayrollPayments,
+    loadPaymentBatches,
+    loadObligations,
+    loadPaystackStatus,
+  ])
 
   useEffect(() => {
     const drafts: Record<string, { adjustment_amount: string; adjustment_reason: string; exclusion_reason: string }> = {}
@@ -1100,6 +1163,7 @@ export default function PayrollRunViewPage() {
       setExpandedBatchDetail({
         batch: data.batch as PayrollPaymentBatch,
         items: (data.items || []) as PayrollPaymentBatchItem[],
+        paystackTransfers: (data.paystack_transfers || []) as PaystackPayrollTransfer[],
       })
     } finally {
       setLoadingBatchDetail(false)
@@ -1815,8 +1879,14 @@ export default function PayrollRunViewPage() {
                 )}
               </div>
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                Batches help you prepare and track salary payments. They do not send money or update your books.
+                Batches help you prepare and track salary payments. Manual recording does not send money. A Paystack
+                transfer starts only after explicit confirmation.
               </p>
+              {paystackStatus.mock_mode ? (
+                <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+                  Staging mock provider is active. Paystack transfers are simulated; no external money moves.
+                </p>
+              ) : null}
               {hasUnallocatedAggregatePayments && (
                 <p className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2">
                   This run has aggregate salary payments that are not allocated to employees. Reverse those aggregate
@@ -1981,6 +2051,9 @@ export default function PayrollRunViewPage() {
                                           ? `${item.destination_momo_provider || "—"} · ${item.destination_momo_number || "—"}`
                                           : `${item.destination_bank_name || "—"} · ${item.destination_account_number || "—"}`
                                       const busy = batchActionLoading === `${b.id}:${item.id}`
+                                      const paystackTransfer = expandedBatchDetail.paystackTransfers.find(
+                                        (transfer) => transfer.batch_item_id === item.id
+                                      )
                                       return (
                                         <tr key={item.id}>
                                           <td className="sticky left-0 z-10 bg-white dark:bg-gray-800 py-2 pr-2 text-gray-900 dark:text-white">
@@ -2002,10 +2075,76 @@ export default function PayrollRunViewPage() {
                                           </td>
                                           <td className="py-2 pr-2">
                                             <span className="text-xs font-medium capitalize">{item.status}</span>
+                                            {paystackTransfer ? (
+                                              <div className="mt-1 space-y-0.5 text-[10px] text-gray-500 dark:text-gray-400">
+                                                <p>
+                                                  Paystack:{" "}
+                                                  <span className="font-medium">
+                                                    {paystackTransfer.status.replace(/_/g, " ")}
+                                                  </span>
+                                                  {paystackTransfer.environment === "test" ? " (test)" : ""}
+                                                </p>
+                                                {paystackTransfer.confirmed_at ? (
+                                                  <p>
+                                                    {new Date(paystackTransfer.confirmed_at).toLocaleDateString("en-GH")}
+                                                  </p>
+                                                ) : null}
+                                                {paystackTransfer.failure_reason ? (
+                                                  <p className="text-red-600 dark:text-red-400">
+                                                    {paystackTransfer.failure_reason}
+                                                  </p>
+                                                ) : null}
+                                              </div>
+                                            ) : null}
                                           </td>
                                           {!readOnly && (
                                             <td className="sticky right-0 z-10 bg-white dark:bg-gray-800 py-2 text-right whitespace-nowrap">
                                               <div className="flex flex-wrap justify-end gap-1">
+                                                {paystackStatus.enabled &&
+                                                (item.status === "pending" || item.status === "failed") &&
+                                                (!paystackTransfer ||
+                                                  paystackTransfer.status === "failed" ||
+                                                  paystackTransfer.status === "reversed") ? (
+                                                  <button
+                                                    type="button"
+                                                    disabled={busy || b.status === "cancelled"}
+                                                    onClick={() =>
+                                                      guardWriteAction(() =>
+                                                        setPaystackTarget({
+                                                          batchId: b.id,
+                                                          itemId: item.id,
+                                                          employeeName: item.employee_name,
+                                                          amount: Number(item.amount || 0),
+                                                        })
+                                                      )
+                                                    }
+                                                    className="px-2 py-0.5 text-[11px] rounded bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+                                                  >
+                                                    Pay with Paystack
+                                                  </button>
+                                                ) : null}
+                                                {paystackTransfer &&
+                                                (paystackTransfer.status === "pending" ||
+                                                  paystackTransfer.status === "awaiting_authorization" ||
+                                                  paystackTransfer.status === "requires_attention") ? (
+                                                  <button
+                                                    type="button"
+                                                    disabled={busy}
+                                                    onClick={() =>
+                                                      guardWriteAction(() =>
+                                                        setPaystackTarget({
+                                                          batchId: b.id,
+                                                          itemId: item.id,
+                                                          employeeName: item.employee_name,
+                                                          amount: Number(item.amount || 0),
+                                                        })
+                                                      )
+                                                    }
+                                                    className="px-2 py-0.5 text-[11px] rounded border border-indigo-300 text-indigo-700 hover:bg-indigo-50 dark:border-indigo-800 dark:text-indigo-300 dark:hover:bg-indigo-900/20 disabled:opacity-50"
+                                                  >
+                                                    View transfer
+                                                  </button>
+                                                ) : null}
                                                 {item.status === "pending" || item.status === "failed" ? (
                                                   <button
                                                     type="button"
@@ -3145,6 +3284,23 @@ export default function PayrollRunViewPage() {
           </div>
         </div>
       )}
+
+      {paystackTarget ? (
+        <PaystackSalaryPaymentModal
+          runId={runId}
+          batchId={paystackTarget.batchId}
+          itemId={paystackTarget.itemId}
+          employeeName={paystackTarget.employeeName}
+          amount={paystackTarget.amount}
+          onClose={() => setPaystackTarget(null)}
+          onCompleted={() => {
+            void loadPaymentBatches()
+            void expandPaymentBatch(paystackTarget.batchId)
+            void loadPayrollPayments()
+            void loadPaystackStatus()
+          }}
+        />
+      ) : null}
     </>
   )
 }
