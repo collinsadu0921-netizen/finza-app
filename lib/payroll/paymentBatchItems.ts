@@ -57,6 +57,17 @@ export function roundMoney(n: number): number {
   return Math.round(n * 100) / 100
 }
 
+/**
+ * True only for finite amounts representable exactly in whole pesewas.
+ * Rejects 500.005, 500.001, NaN and Infinity rather than silently rounding.
+ */
+export function hasSupportedPesewaPrecision(value: number): boolean {
+  if (!Number.isFinite(value)) return false
+  // Use the canonical decimal representation rather than binary floating-point
+  // multiplication, which can misclassify large valid amounts.
+  return /^-?\d+(\.\d{1,2})?$/.test(String(value))
+}
+
 export function destinationSnapshotComplete(row: {
   destination_method_type: string | null
   destination_bank_name: string | null

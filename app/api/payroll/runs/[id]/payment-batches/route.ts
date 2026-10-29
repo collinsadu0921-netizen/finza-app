@@ -7,6 +7,7 @@ import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceSer
 import {
   buildPayrollPaymentBatchItemsFromEntries,
   countItemStatuses,
+  hasSupportedPesewaPrecision,
   type PayrollEntryForBatchItem,
   type StaffPaymentMethodRowForBatch,
 } from "@/lib/payroll/paymentBatchItems"
@@ -231,6 +232,20 @@ export async function POST(
 
     if (entries.length === 0) {
       return NextResponse.json({ error: "No payroll entries found for this run." }, { status: 400 })
+    }
+
+    const invalidAmountEntry = entries.find(
+      (entry) => !hasSupportedPesewaPrecision(Number(entry.net_salary))
+    )
+    if (invalidAmountEntry) {
+      return NextResponse.json(
+        {
+          error:
+            "A payroll entry net salary has unsupported fractional pesewas. Payroll amounts must be exact to two decimal places.",
+          code: "PAYROLL_BATCH_AMOUNT_PRECISION_INVALID",
+        },
+        { status: 400 }
+      )
     }
 
     const staffIds = Array.from(new Set(entries.map((e) => String(e.staff_id)).filter(Boolean)))

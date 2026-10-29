@@ -91,6 +91,7 @@ export function mapPayrollPaymentAtomicError(err: {
       break
     case "PAYROLL_PAYMENT_INVALID_ACCOUNT":
     case "PAYROLL_PAYMENT_INVALID_INPUT":
+    case "PAYROLL_BATCH_AMOUNT_PRECISION_INVALID":
       base.status = 400
       break
     default:

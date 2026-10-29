@@ -66,7 +66,15 @@ export function mapPayrollBatchWorkflowError(err: {
       base.status = 409
       break
     case "PAYROLL_PAYMENT_IDEMPOTENCY_KEY_REQUIRED":
+    case "PAYROLL_BATCH_AMOUNT_PRECISION_INVALID":
+    case "PAYROLL_BATCH_EXPORT_INVALID_INPUT":
       base.status = 400
+      break
+    case "PAYROLL_BATCH_EXPORT_PERMISSION_DENIED":
+      base.status = 403
+      break
+    case "PAYROLL_BATCH_EXPORT_NOT_FOUND":
+      base.status = 404
       break
     default:
       base.status = 400

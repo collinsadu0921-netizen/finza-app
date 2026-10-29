@@ -124,7 +124,19 @@ export async function GET(
     const res = csvResponse(filename, rows)
 
     if (!(batch as { export_filename?: string | null }).export_filename) {
-      await supabase.from("payroll_payment_batches").update({ export_filename: filename }).eq("id", batchId)
+      const { error: recordExportError } = await supabase.rpc(
+        "record_payroll_payment_batch_export",
+        {
+          p_business_id: business.id,
+          p_batch_id: batchId,
+          p_export_filename: filename,
+        }
+      )
+      if (recordExportError) {
+        // Do not fail the download if filename recording fails; the CSV has
+        // already been prepared and the RPC only records export metadata.
+        console.error("[batch export] filename recording", recordExportError)
+      }
     }
 
     return res
