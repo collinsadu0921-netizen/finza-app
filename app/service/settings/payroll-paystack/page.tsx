@@ -168,7 +168,14 @@ export default function PaystackPayrollSettingsPage() {
           <div className="space-y-5">
             {error ? (
               <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-                {error}
+                <p>{error}</p>
+                <button
+                  type="button"
+                  onClick={load}
+                  className="mt-2 text-xs font-semibold underline"
+                >
+                  Retry
+                </button>
               </div>
             ) : null}
             {notice ? (
@@ -267,7 +274,11 @@ export default function PaystackPayrollSettingsPage() {
                 storing it encrypted. Secret keys are never returned to the browser after submission.
               </p>
 
-              {!data?.can_edit ? (
+              {!data ? (
+                <p className="mt-4 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                  Settings could not be loaded. Retry once the backend configuration is available.
+                </p>
+              ) : !data.can_edit ? (
                 <p className="mt-4 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
                   You need the settings.edit permission to change the Paystack connection.
                 </p>
