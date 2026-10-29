@@ -1,5 +1,6 @@
 import {
   buildPayrollPaymentBatchItemsFromEntries,
+  hasSupportedPesewaPrecision,
   syncBatchStatusFromItems,
   deriveBatchStatusFromItemStatuses,
   assertManualBatchStatusTransition,
@@ -10,6 +11,20 @@ import { formatNumeric } from "@/lib/payroll/csvExport"
 import { PAYROLL_EXPORT_PERIOD_HEADERS, payrollExportPeriodValues } from "@/lib/payroll/payrollExportMetadata"
 
 describe("paymentBatchItems helpers", () => {
+  it("accepts exact two-decimal pesewa amounts", () => {
+    expect(hasSupportedPesewaPrecision(500)).toBe(true)
+    expect(hasSupportedPesewaPrecision(500.01)).toBe(true)
+    expect(hasSupportedPesewaPrecision(500.1)).toBe(true)
+    expect(hasSupportedPesewaPrecision(123456789.12)).toBe(true)
+  })
+
+  it("rejects fractional pesewas and non-finite amounts", () => {
+    expect(hasSupportedPesewaPrecision(500.005)).toBe(false)
+    expect(hasSupportedPesewaPrecision(500.001)).toBe(false)
+    expect(hasSupportedPesewaPrecision(Number.NaN)).toBe(false)
+    expect(hasSupportedPesewaPrecision(Number.POSITIVE_INFINITY)).toBe(false)
+  })
+
   it("snapshots net salary and destination from default staff_payment_method", () => {
     const entries = [
       {

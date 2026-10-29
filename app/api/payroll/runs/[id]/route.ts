@@ -110,7 +110,17 @@ export async function GET(
         reference,
         notes,
         journal_entry_id,
+        batch_item_id,
+        reversed_at,
+        reversal_reason,
+        reversal_journal_id,
         created_at,
+        batch_item:batch_item_id (
+          id,
+          employee_name,
+          staff_id,
+          status
+        ),
         payment_account:payment_account_id (
           id,
           name,
@@ -130,8 +140,11 @@ export async function GET(
       console.error("Error fetching payroll payments:", paymentsError)
     }
 
-    const paidAmount = (payrollPayments || []).reduce((sum, payment: any) => sum + Number(payment.amount || 0), 0)
-    const latestPaymentDate = (payrollPayments || [])[0]?.payment_date ?? null
+    const postedPayments = (payrollPayments || []).filter(
+      (payment: any) => payment.journal_entry_id != null && payment.reversed_at == null
+    )
+    const paidAmount = postedPayments.reduce((sum, payment: any) => sum + Number(payment.amount || 0), 0)
+    const latestPaymentDate = postedPayments[0]?.payment_date ?? null
     const paymentSummary = derivePayrollPaymentSummary(
       Number(payrollRun.total_net_salary || 0),
       paidAmount,

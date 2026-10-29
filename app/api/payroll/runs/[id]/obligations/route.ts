@@ -66,6 +66,8 @@ export async function GET(
       .eq("business_id", business.id)
       .eq("payroll_run_id", runId)
       .is("deleted_at", null)
+      .not("journal_entry_id", "is", null)
+      .is("reversed_at", null)
 
     const payrollPaymentsSum = (payrollPaymentRows || []).reduce(
       (sum, row: any) => sum + Number(row.amount || 0),

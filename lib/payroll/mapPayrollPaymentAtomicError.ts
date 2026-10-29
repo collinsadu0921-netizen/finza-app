@@ -55,11 +55,30 @@ export function mapPayrollPaymentAtomicError(err: {
     case "PAYROLL_PAYMENT_BATCH_LINK_CONFLICT":
     case "PAYROLL_PAYMENT_BATCH_AMOUNT_MISMATCH":
     case "PAYROLL_PAYMENT_BATCH_IDENTITY_MISMATCH":
+    case "PAYROLL_PAYMENT_BATCH_SETTLEMENT_ACTIVE":
+    case "PAYROLL_PAYMENT_AGGREGATE_RECONCILIATION_REQUIRED":
     case "PAYROLL_BATCH_PAYMENT_RECONCILIATION_FAILED":
+    case "PAYROLL_BATCH_INSTRUCTION_IMMUTABLE":
+    case "PAYROLL_BATCH_INVALID_INPUT":
     case "PAYROLL_RUN_IMMUTABLE":
     case "PAYROLL_RUN_INVALID_STATUS_TRANSITION":
     case "PAYROLL_BATCH_ITEM_PAYMENT_REQUIRED":
       base.status = 409
+      break
+    case "PAYROLL_PAYMENT_REVERSAL_PERMISSION_DENIED":
+      base.status = 403
+      break
+    case "PAYROLL_PAYMENT_REVERSAL_NOT_FOUND":
+      base.status = 404
+      break
+    case "PAYROLL_PAYMENT_REVERSAL_ALREADY_COMPLETED":
+    case "PAYROLL_PAYMENT_REVERSAL_CONFLICT":
+    case "PAYROLL_PAYMENT_REVERSAL_PERIOD_CLOSED":
+    case "PAYROLL_PAYMENT_REVERSAL_INCONSISTENT_STATE":
+      base.status = 409
+      break
+    case "PAYROLL_PAYMENT_REVERSAL_INVALID_INPUT":
+      base.status = 400
       break
     case "PAYROLL_PAYMENT_IDEMPOTENCY_KEY_REQUIRED":
       base.status = 400
@@ -72,6 +91,7 @@ export function mapPayrollPaymentAtomicError(err: {
       break
     case "PAYROLL_PAYMENT_INVALID_ACCOUNT":
     case "PAYROLL_PAYMENT_INVALID_INPUT":
+    case "PAYROLL_BATCH_AMOUNT_PRECISION_INVALID":
       base.status = 400
       break
     default:

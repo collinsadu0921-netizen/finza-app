@@ -14,6 +14,7 @@ DECLARE
   v_run UUID := gen_random_uuid();
   v_entry_a UUID := gen_random_uuid();
   v_entry_b UUID := gen_random_uuid();
+  v_entry_new UUID := gen_random_uuid();
   v_cash UUID := gen_random_uuid();
   v_batch UUID := gen_random_uuid();
   v_item_a UUID := gen_random_uuid();
@@ -186,6 +187,14 @@ BEGIN
     500, 500, 0, 55, 130, 50, 0, 500,
     'finza-ghana-v2', 'gh-paye-2024-01', 'gh-pension-2026-01', 'GH', v_month, '564-test-cancel'
   );
+  INSERT INTO public.payroll_entries (
+    id, payroll_run_id, staff_id, basic_salary, gross_salary, ssnit_employee, ssnit_employer,
+    paye, net_salary, is_included, payroll_tax_profile, filing_tin, filing_employee_name
+  ) VALUES (
+    v_entry_new, v_run, v_staff_a, 500, 500, 55, 130, 50, 500, true,
+    jsonb_build_object('staff_is_tax_resident', true), 'C0000000001', 'Employee A'
+  );
+
   INSERT INTO public.payroll_obligations (
     business_id, payroll_run_id, obligation_type, label, amount_due, amount_paid, status, liability_account_code
   ) VALUES (v_biz, v_run, 'salary_net', 'Net salaries payable', 500, 0, 'unpaid', '2240');
@@ -199,7 +208,7 @@ BEGIN
     id, business_id, batch_id, payroll_run_id, payroll_entry_id, staff_id, employee_name,
     amount, currency, status, destination_method_type, destination_bank_name, destination_account_number
   ) VALUES (
-    v_item_a, v_biz, v_batch, v_run, v_entry_a, v_staff_a, 'Employee A',
+    v_item_a, v_biz, v_batch, v_run, v_entry_new, v_staff_a, 'Employee A',
     500, 'GHS', 'pending', 'bank', 'GCB', '1111111111'
   );
   PERFORM public.transition_payroll_payment_batch_status_atomic(v_biz, v_run, v_batch, 'ready');

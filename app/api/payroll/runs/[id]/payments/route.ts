@@ -41,7 +41,17 @@ async function getRunPaymentData(
       notes,
       journal_entry_id,
       idempotency_key,
+      batch_item_id,
+      reversed_at,
+      reversal_reason,
+      reversal_journal_id,
       created_at,
+      batch_item:batch_item_id (
+        id,
+        employee_name,
+        staff_id,
+        status
+      ),
       payment_account:payment_account_id (
         id,
         name,
@@ -62,8 +72,11 @@ async function getRunPaymentData(
     return { error: paymentsError.message, status: 500 as const }
   }
 
-  const paidAmount = (payments || []).reduce((sum, p: any) => sum + Number(p.amount || 0), 0)
-  const latestPaymentDate = (payments || []).length > 0 ? (payments || [])[0].payment_date : null
+  const postedPayments = (payments || []).filter(
+    (p: any) => p.journal_entry_id != null && p.reversed_at == null
+  )
+  const paidAmount = postedPayments.reduce((sum, p: any) => sum + Number(p.amount || 0), 0)
+  const latestPaymentDate = postedPayments.length > 0 ? postedPayments[0].payment_date : null
   const summary = derivePayrollPaymentSummary(payrollRun.total_net_salary, paidAmount, latestPaymentDate)
 
   return { payrollRun, payments: payments || [], summary }
