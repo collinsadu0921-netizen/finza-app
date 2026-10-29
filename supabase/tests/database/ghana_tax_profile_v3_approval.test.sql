@@ -58,7 +58,11 @@ DECLARE
   v_has_pension_fn BOOLEAN :=
     to_regprocedure('public.payroll_ghana_expected_pension(numeric,text,boolean)') IS NOT NULL;
   v_has_paye_fn BOOLEAN :=
-    to_regprocedure('public.payroll_ghana_calculate_paye_from_bands(numeric)') IS NOT NULL;
+    to_regprocedure('public.payroll_ghana_calculate_paye_from_bands(numeric,text)') IS NOT NULL;
+  v_paye_version TEXT := CASE
+    WHEN p_period >= DATE '2026-09-01' THEN 'gh-paye-2026-09'
+    ELSE 'gh-paye-2024-01'
+  END;
 BEGIN
   IF p_profile IS NOT NULL
      AND jsonb_typeof(p_profile->'staff_is_pensionable') = 'boolean' THEN
@@ -117,7 +121,7 @@ BEGIN
     v_taxable := ROUND(GREATEST(0, v_gross - v_employee), 2);
     v_regular_base := v_taxable;
     IF v_has_paye_fn THEN
-      v_paye := public.payroll_ghana_calculate_paye_from_bands(v_taxable);
+      v_paye := public.payroll_ghana_calculate_paye_from_bands(v_taxable, v_paye_version);
     ELSE
       v_paye := 56.13;
     END IF;
@@ -128,7 +132,7 @@ BEGIN
     v_regular_base := v_taxable;
     v_paye := COALESCE(
       CASE WHEN v_has_paye_fn
-        THEN public.payroll_ghana_calculate_paye_from_bands(v_taxable)
+        THEN public.payroll_ghana_calculate_paye_from_bands(v_taxable, v_paye_version)
         ELSE 56.13 END,
       56.13
     );
@@ -184,7 +188,7 @@ BEGIN
     (date_trunc('month', p_period) + INTERVAL '1 month - 1 day')::DATE,
     'draft', 'monthly', v_basic, v_gross, v_allowances,
     v_employee, v_employer, v_paye, 0, v_net,
-    'finza-ghana-v3', 'gh-paye-2024-01', v_pension_version,
+    'finza-ghana-v3', v_paye_version, v_pension_version,
     'GH', p_period, 'migration-560-test', gen_random_uuid()::TEXT
   );
 
@@ -217,7 +221,7 @@ BEGIN
     v_bonus_graduated, (v_pension->>'pensionable_base')::NUMERIC,
     v_employee, v_employer, (v_pension->>'total_mandatory')::NUMERIC,
     (v_pension->>'tier1')::NUMERIC, (v_pension->>'tier2')::NUMERIC,
-    p_entry_engine, 'gh-paye-2024-01', v_pension_version, 'GH',
+    p_entry_engine, v_paye_version, v_pension_version, 'GH',
     p_period, v_profile, 'P0000000000', 'Migration 560 Test Employee',
     CASE WHEN p_entry_engine = 'finza-ghana-v2' THEN NULL ELSE p_method END,
     CASE WHEN p_entry_engine = 'finza-ghana-v2' THEN NULL ELSE p_version END,
@@ -419,7 +423,7 @@ BEGIN
     v_business, DATE '2027-01-01', v_profile, 'gh_resident_graduated'
   );
   PERFORM pg_temp.assert_approval_rejected(
-    v_business, v_run, 'profile_tax_version_does_not_cover_period'
+    v_business, v_run, 'does not have a configured annual SSNIT'
   );
 
   -- Component mismatch and mixed v2/v3 entry/run evidence.

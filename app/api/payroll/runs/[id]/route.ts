@@ -14,6 +14,7 @@ import {
   nonMonthlyApprovalBlockedMessage,
 } from "@/lib/payroll/salaryBasis"
 import { validateGhanaPayrollRunForApproval } from "@/lib/payroll/ghanaApprovalGuards"
+import { refreshGhanaDraftStatutoryRates } from "@/lib/payroll/refreshGhanaDraftStatutoryRates"
 import { mapApprovePayrollRunAtomicError } from "@/lib/payroll/mapApprovePayrollAtomicError"
 import { mapPayrollPaymentAtomicError } from "@/lib/payroll/mapPayrollPaymentAtomicError"
 import {
@@ -208,13 +209,13 @@ export async function PUT(
     if (tierDeniedPut) return tierDeniedPut
 
     const body = await request.json()
-    const { status, notes } = body
+    const { status, notes, provisional_ssnit_acknowledged } = body
 
     // Get existing payroll run
     const { data: existingRun } = await supabase
       .from("payroll_runs")
       .select(
-        "status, journal_entry_id, payroll_frequency, calculation_engine_version, paye_rate_version, pension_rate_version, calculation_jurisdiction, statutory_period_basis"
+        "status, journal_entry_id, payroll_frequency, calculation_engine_version, paye_rate_version, pension_rate_version, calculation_jurisdiction, statutory_period_basis, pension_limits_provisional, pension_minimum_insurable_earnings, pension_maximum_insurable_earnings, pension_limits_effective_from, provisional_ssnit_acknowledged_at"
       )
       .eq("id", runId)
       .eq("business_id", business.id)
@@ -319,6 +320,69 @@ export async function PUT(
 
       // Optional preflight (UI-friendly). Authoritative validation runs inside the RPC after lock.
       if (existingRun.status === "draft") {
+        // Move a draft onto newly configured official statutory versions before
+        // validating it. This recalculates entries and clears stale provisional
+        // acknowledgement. If no official SSNIT limits exist, the draft remains
+        // provisional and requires the employer acknowledgement below.
+        const refreshed = await refreshGhanaDraftStatutoryRates({
+          supabase,
+          businessId: business.id,
+          businessCountry,
+          runId,
+        })
+        if (!refreshed.ok) {
+          return NextResponse.json({ error: refreshed.error }, { status: refreshed.status })
+        }
+
+        const { data: approvalRun, error: approvalRunError } = await supabase
+          .from("payroll_runs")
+          .select(
+            "status, journal_entry_id, payroll_frequency, calculation_engine_version, paye_rate_version, pension_rate_version, calculation_jurisdiction, statutory_period_basis, pension_limits_provisional, pension_minimum_insurable_earnings, pension_maximum_insurable_earnings, pension_limits_effective_from, provisional_ssnit_acknowledged_at"
+          )
+          .eq("id", runId)
+          .eq("business_id", business.id)
+          .single()
+
+        if (approvalRunError || !approvalRun) {
+          return NextResponse.json(
+            { error: approvalRunError?.message || "Failed to reload payroll run before approval" },
+            { status: 500 }
+          )
+        }
+
+        if (approvalRun.pension_limits_provisional === true) {
+          const acknowledged =
+            provisional_ssnit_acknowledged === true ||
+            Boolean(approvalRun.provisional_ssnit_acknowledged_at)
+          if (!acknowledged) {
+            return NextResponse.json(
+              {
+                error:
+                  "This payroll uses provisional SSNIT limits because the annual notice is not yet published. Employer acknowledgement is required before approval.",
+                code: "PROVISIONAL_SSNIT_ACKNOWLEDGEMENT_REQUIRED",
+              },
+              { status: 400 }
+            )
+          }
+          if (!approvalRun.provisional_ssnit_acknowledged_at) {
+            const { error: ackError } = await supabase
+              .from("payroll_runs")
+              .update({
+                provisional_ssnit_acknowledged_at: new Date().toISOString(),
+                provisional_ssnit_acknowledged_by: user.id,
+              })
+              .eq("id", runId)
+              .eq("business_id", business.id)
+              .eq("status", "draft")
+            if (ackError) {
+              return NextResponse.json(
+                { error: `Failed to record provisional SSNIT acknowledgement: ${ackError.message}` },
+                { status: 500 }
+              )
+            }
+          }
+        }
+
         const { data: approvalEntries, error: approvalEntriesError } = await supabase
           .from("payroll_entries")
           .select(
@@ -352,7 +416,8 @@ export async function PUT(
 
         const ghanaGuard = validateGhanaPayrollRunForApproval({
           businessCountry,
-          run: existingRun,
+          run: approvalRun,
+          provisionalSsnitAcknowledged: provisional_ssnit_acknowledged === true,
           entries: (approvalEntries || []) as any,
         })
         if (!ghanaGuard.ok) {

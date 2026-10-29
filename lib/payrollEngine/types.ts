@@ -290,11 +290,20 @@ export interface PayrollCalculationResult {
     graduatedPayeBase: number
     graduatedPayeAmount: number
     totalIncomeTax: number
+    /** Ghana: what was deducted to reach PAYE chargeable income. */
+    payeChargeableIncomeBasis?: "gross_less_employee_ssnit_only"
+    /** Ghana: statutory reliefs not modeled by the engine. */
+    unsupportedPayeReliefs?: string[]
     calculationEngineVersion?: string
     payeRateVersion?: string
     pensionRateVersion?: string
     statutoryPeriodBasis?: string
     pensionableBase?: number
+    pensionLimitsProvisional?: boolean
+    pensionMinimumInsurableEarnings?: number
+    pensionMaximumInsurableEarnings?: number
+    pensionLimitsEffectiveFrom?: string
+    pensionLimitsProvisionalBaseVersion?: string | null
     tier1SsnitRemittance?: number
     tier2PensionRemittance?: number
   }

@@ -64,6 +64,9 @@ const PAYROLL_RUN_LIST_SELECT = `
   approved_by,
   approved_at,
   journal_entry_id,
+  pension_limits_provisional,
+  pension_rate_version,
+  provisional_ssnit_acknowledged_at,
   notes,
   created_at,
   updated_at
@@ -347,12 +350,16 @@ export async function POST(request: NextRequest) {
       pensionRateVersion: string
       periodBasis: string
     } | null = null
-    let runStatutoryFields: Record<string, string | null> = {
+    let runStatutoryFields: Record<string, string | number | boolean | null> = {
       calculation_engine_version: null,
       paye_rate_version: null,
       pension_rate_version: null,
       calculation_jurisdiction: null,
       statutory_period_basis: null,
+      pension_limits_provisional: false,
+      pension_minimum_insurable_earnings: null,
+      pension_maximum_insurable_earnings: null,
+      pension_limits_effective_from: null,
     }
 
     if (isGhanaMonthlyStatutoryEngine(businessCountry)) {
@@ -370,6 +377,11 @@ export async function POST(request: NextRequest) {
           pension_rate_version: resolved.pension.version,
           calculation_jurisdiction: "GH",
           statutory_period_basis: resolved.periodBasis,
+          pension_limits_provisional: resolved.pension.isProvisional === true,
+          pension_minimum_insurable_earnings: resolved.pension.minimumInsurableEarnings,
+          pension_maximum_insurable_earnings: resolved.pension.maximumInsurableEarnings,
+          pension_limits_effective_from:
+            resolved.pension.limitsEffectiveFrom ?? resolved.pension.effectiveFrom,
         }
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : "Unsupported Ghana statutory rate period"

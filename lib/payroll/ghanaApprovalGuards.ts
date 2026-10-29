@@ -23,6 +23,7 @@ import {
   clampGhanaPensionableBase,
   computeGhanaPensionAmounts,
   resolveGhanaStatutoryRatesByVersions,
+  resolveGhanaStatutoryRatesForPeriod,
 } from "@/lib/payrollEngine/jurisdictions/ghanaStatutoryRates"
 import { normalizeEmploymentTypeForSnapshot } from "@/lib/payroll/staffTaxProfile"
 import { isGhanaMonthlyStatutoryEngine } from "@/lib/payroll/salaryBasis"
@@ -185,11 +186,12 @@ function resolveExpectedPension(
     }
   | null {
   if (!isFiniteNumber(entry.basic_salary) || !entry.pension_rate_version) return null
+  if (!entry.paye_rate_version) return null
   if (typeof profile.staff_is_pensionable !== "boolean") return null
 
   try {
     const rates = resolveGhanaStatutoryRatesByVersions({
-      payeRateVersion: entry.paye_rate_version || "gh-paye-2024-01",
+      payeRateVersion: entry.paye_rate_version,
       pensionRateVersion: entry.pension_rate_version,
       periodBasis: periodDate,
     })
@@ -250,12 +252,13 @@ function validateResidentGraduatedTax(
   employeePension: number
 ): string | null {
   if (!hasEarningsSnapshot(entry) || !hasIncomeTaxBases(entry)) return null
+  if (!entry.paye_rate_version || !entry.pension_rate_version) return null
 
   let payeBands
   try {
     const rates = resolveGhanaStatutoryRatesByVersions({
-      payeRateVersion: entry.paye_rate_version || "gh-paye-2024-01",
-      pensionRateVersion: entry.pension_rate_version || "gh-pension-2026-01",
+      payeRateVersion: entry.paye_rate_version,
+      pensionRateVersion: entry.pension_rate_version,
       periodBasis: periodDate,
     })
     payeBands = rates.paye.bands
@@ -631,6 +634,9 @@ const V3_STATUTORY_FAILURE_CLASSIFICATIONS = new Set([
   "pension_snapshot_mismatch",
   "resident_tax_base_mismatch",
   "resident_tax_amount_mismatch",
+  "provisional_ssnit_snapshot_mismatch",
+  "provisional_ssnit_acknowledgement_required",
+  "official_ssnit_limits_require_recalculation",
 ])
 
 export function validateGhanaPayrollRunForApproval(opts: {
@@ -642,7 +648,14 @@ export function validateGhanaPayrollRunForApproval(opts: {
     calculation_jurisdiction?: string | null
     statutory_period_basis?: string | null
     payroll_frequency?: string | null
+    pension_limits_provisional?: boolean | null
+    pension_minimum_insurable_earnings?: number | null
+    pension_maximum_insurable_earnings?: number | null
+    pension_limits_effective_from?: string | null
+    provisional_ssnit_acknowledged_at?: string | null
   }
+  /** True when this approval request explicitly acknowledges provisional SSNIT limits. */
+  provisionalSsnitAcknowledged?: boolean
   entries: PayrollEntryForGhanaApproval[]
 }): GhanaApprovalBlockResult {
   if (!isGhanaMonthlyStatutoryEngine(opts.businessCountry)) {
@@ -699,8 +712,9 @@ export function validateGhanaPayrollRunForApproval(opts: {
     }
   }
 
+  let resolvedRates
   try {
-    resolveGhanaStatutoryRatesByVersions({
+    resolvedRates = resolveGhanaStatutoryRatesByVersions({
       payeRateVersion: runPaye,
       pensionRateVersion: runPension,
       periodBasis: runPeriod,
@@ -713,7 +727,7 @@ export function validateGhanaPayrollRunForApproval(opts: {
       return {
         ok: false,
         code: GHANA_PAYROLL_STATUTORY_VALIDATION_FAILED,
-        message: `Ghana statutory rate versions do not cover period ${runPeriod}. Approval is blocked.`,
+        message: `${message} Approval is blocked.`,
         affectedEmployees: [
           {
             staffId: "",
@@ -729,6 +743,80 @@ export function validateGhanaPayrollRunForApproval(opts: {
       message: `Unknown or unsupported Ghana statutory rate version (PAYE="${runPaye}", pension="${runPension}", period="${runPeriod}"). Approval is blocked.`,
       affectedEmployees: [],
     }
+  }
+
+  const pensionRates = resolvedRates.pension
+  if (pensionRates.isProvisional) {
+    const acknowledged =
+      opts.provisionalSsnitAcknowledged === true ||
+      Boolean(opts.run.provisional_ssnit_acknowledged_at)
+    const snapshotMatches =
+      opts.run.pension_limits_provisional === true &&
+      amountsMatch(
+        Number(opts.run.pension_minimum_insurable_earnings ?? NaN),
+        pensionRates.minimumInsurableEarnings
+      ) &&
+      amountsMatch(
+        Number(opts.run.pension_maximum_insurable_earnings ?? NaN),
+        pensionRates.maximumInsurableEarnings
+      ) &&
+      normalizePeriodBasis(opts.run.pension_limits_effective_from) ===
+        (pensionRates.limitsEffectiveFrom ?? pensionRates.effectiveFrom)
+
+    if (!snapshotMatches) {
+      return {
+        ok: false,
+        code: GHANA_PAYROLL_STATUTORY_VALIDATION_FAILED,
+        message:
+          "This payroll run is missing the provisional SSNIT limits snapshot. Recalculate the draft before approval.",
+        affectedEmployees: [
+          {
+            staffId: "",
+            employeeName: null,
+            unsupportedClassification: "provisional_ssnit_snapshot_mismatch",
+          },
+        ],
+      }
+    }
+
+    if (!acknowledged) {
+      return {
+        ok: false,
+        code: GHANA_PAYROLL_STATUTORY_VALIDATION_FAILED,
+        message:
+          "This payroll uses provisional SSNIT limits because the annual notice is not yet published. An employer acknowledgement is required before approval.",
+        affectedEmployees: [
+          {
+            staffId: "",
+            employeeName: null,
+            unsupportedClassification: "provisional_ssnit_acknowledgement_required",
+          },
+        ],
+      }
+    }
+  }
+
+  // If official limits are now configured for this period, a provisional draft
+  // must be recalculated rather than finalized under outdated limits.
+  try {
+    const current = resolveGhanaStatutoryRatesForPeriod(runPeriod)
+    if (current.pension.version !== runPension) {
+      return {
+        ok: false,
+        code: GHANA_PAYROLL_STATUTORY_VALIDATION_FAILED,
+        message:
+          "Official SSNIT limits are now configured for this payroll period. Recalculate this draft before approval.",
+        affectedEmployees: [
+          {
+            staffId: "",
+            employeeName: null,
+            unsupportedClassification: "official_ssnit_limits_require_recalculation",
+          },
+        ],
+      }
+    }
+  } catch {
+    // Period resolution errors are handled by the existing version checks.
   }
 
   const versionMismatches = collectEntryVersionMismatches(

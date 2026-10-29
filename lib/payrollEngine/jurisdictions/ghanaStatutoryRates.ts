@@ -4,13 +4,26 @@
  * Sources (authoritative):
  * - GRA PAYE monthly bands effective 1 Jan 2024 (Income Tax (Amendment) (No. 2) Act, 2023 / Act 1111;
  *   GRA PAYE page Year 2024 table).
+ * - Income Tax (Amendment) Act, 2026 (Act 1178) and GRA notice "Amendments – Income Tax Act, 2026":
+ *   new resident monthly/annual PAYE rates effective 1 September 2026. Monthly bands: first
+ *   GH¢588 at 0%; next GH¢80 at 5%; next GH¢100 at 10%; next GH¢2,900 at 17.5%; next GH¢16,000
+ *   at 25%; next GH¢30,332 at 30%; above GH¢50,000 at 35%. Annual bands are exactly 12× monthly.
+ *   Act 1178 also raises the Modified Taxation Scheme turnover threshold (not a payroll rule).
+ *   It does not change SSNIT, bonus, overtime, casual-worker, or non-resident rates.
  * - SSNIT Public Notice 13 Jan 2026: 2026 min/max insurable earnings GH¢587.80 / GH¢69,000;
  *   prior (2025) levels GH¢539.19 / GH¢61,000 cited in that notice.
  * - 2024 SSNIT ceilings: min GH¢490.05 / max GH¢52,000 (Tier 1 bounds GH¢66.16 / GH¢7,020).
  * - National Pensions Act, 2008 (Act 766): employee 5.5%, employer 13%; Tier 1 13.5%, Tier 2 5%.
  *
- * Selection uses the payroll period date, never "today". Fail closed when no version covers the period
- * or the period is outside the verified support horizon (2024-01-01 … 2026-12-31).
+ * Selection uses the payroll period date, never "today". Fail closed when no version covers the period.
+ *
+ * Legal horizon (do not conflate these):
+ * - PAYE: Act 1178 amended the First Schedule to Act 896. The schedule has a statutory
+ *   commencement (1 September 2026) but no statutory expiry; it continues until Parliament
+ *   amends it. Finza therefore treats `gh-paye-2026-09` as open-ended.
+ * - SSNIT/SSNIT-style pension: minimum and maximum insurable earnings are annual values.
+ *   The latest verified values are the 2026 SSNIT notice (1 January 2026). The 2027 values
+ *   are not published/verified, so pension resolution fails closed from 2027-01-01 onward.
  */
 
 import { extractDatePart, roundPayroll, validateEffectiveDate } from "../versioning"
@@ -26,9 +39,19 @@ export {
   isSupportedGhanaEngineVersion,
 } from "./ghanaProfileTax"
 
-/** Inclusive verified statutory configuration window for Finza Ghana payroll. */
-export const GHANA_STATUTORY_VERIFIED_FROM = "2024-01-01"
-export const GHANA_STATUTORY_VERIFIED_THROUGH = "2026-12-31"
+/** Inclusive verified PAYE support start. The Act 1178 schedule has no statutory expiry. */
+export const GHANA_PAYE_VERIFIED_FROM = "2024-01-01"
+/** Inclusive start for verified annual SSNIT/pension insurable-earnings limits. */
+export const GHANA_PENSION_VERIFIED_FROM = "2024-01-01"
+/** Latest annual SSNIT/pension insurable-earnings limits verified by an official notice. */
+export const GHANA_PENSION_VERIFIED_THROUGH = "2026-12-31"
+
+/**
+ * Legacy names kept for external callers. These describe the pension verification
+ * horizon, not a PAYE expiry.
+ */
+export const GHANA_STATUTORY_VERIFIED_FROM = GHANA_PAYE_VERIFIED_FROM
+export const GHANA_STATUTORY_VERIFIED_THROUGH = GHANA_PENSION_VERIFIED_THROUGH
 
 export const GHANA_STATUTORY_VERSION_ERROR_CODE = "GHANA_PAYROLL_UNKNOWN_RATE_VERSION"
 
@@ -57,6 +80,12 @@ export type GhanaPensionRates = {
   tier2Rate: number
   minimumInsurableEarnings: number
   maximumInsurableEarnings: number
+  /** Statutory effective date of the limits themselves (may predate a provisional period). */
+  limitsEffectiveFrom?: string
+  /** True when these are the latest published limits reused before the next annual notice. */
+  isProvisional?: boolean
+  /** Confirmed version whose limits are reused for a provisional period. */
+  provisionalBaseVersion?: string
 }
 
 export type GhanaPayeRates = {
@@ -73,7 +102,7 @@ export type GhanaStatutoryRateBundle = {
   periodBasis: string
 }
 
-/** Official GRA monthly resident PAYE "Next" bands from 1 Jan 2024. */
+/** Official GRA monthly resident PAYE "Next" bands from 1 Jan 2024 (superseded 1 Sep 2026). */
 export const GHANA_PAYE_2024_01_BANDS: readonly GhanaPayeBand[] = [
   { taxableAmount: 490, rate: 0 },
   { taxableAmount: 110, rate: 0.05 },
@@ -84,12 +113,34 @@ export const GHANA_PAYE_2024_01_BANDS: readonly GhanaPayeBand[] = [
   { taxableAmount: null, rate: 0.35 },
 ] as const
 
+/** Official GRA monthly resident PAYE "Next" bands from 1 Sep 2026 (Act 1178). */
+export const GHANA_PAYE_2026_09_BANDS: readonly GhanaPayeBand[] = [
+  { taxableAmount: 588, rate: 0 },
+  { taxableAmount: 80, rate: 0.05 },
+  { taxableAmount: 100, rate: 0.1 },
+  { taxableAmount: 2900, rate: 0.175 },
+  { taxableAmount: 16000, rate: 0.25 },
+  { taxableAmount: 30332, rate: 0.3 },
+  { taxableAmount: null, rate: 0.35 },
+] as const
+
+export const GHANA_PAYE_2024_01_VERSION = "gh-paye-2024-01"
+export const GHANA_PAYE_2026_09_VERSION = "gh-paye-2026-09"
+export const GHANA_PENSION_2026_01_VERSION = "gh-pension-2026-01"
+export const GHANA_PENSION_2027_PROVISIONAL_VERSION = "gh-pension-2027-provisional"
+
 const GHANA_PAYE_VERSIONS: GhanaPayeRates[] = [
   {
-    version: "gh-paye-2024-01",
+    version: GHANA_PAYE_2024_01_VERSION,
     effectiveFrom: "2024-01-01",
-    effectiveTo: GHANA_STATUTORY_VERIFIED_THROUGH,
+    effectiveTo: "2026-08-31",
     bands: [...GHANA_PAYE_2024_01_BANDS],
+  },
+  {
+    version: GHANA_PAYE_2026_09_VERSION,
+    effectiveFrom: "2026-09-01",
+    // No effectiveTo: Act 1178's First Schedule remains in force until amended.
+    bands: [...GHANA_PAYE_2026_09_BANDS],
   },
 ]
 
@@ -104,6 +155,7 @@ const GHANA_PENSION_VERSIONS: GhanaPensionRates[] = [
     tier2Rate: 0.05,
     minimumInsurableEarnings: 490.05,
     maximumInsurableEarnings: 52000,
+    limitsEffectiveFrom: "2024-01-01",
   },
   {
     version: "gh-pension-2025-01",
@@ -115,6 +167,7 @@ const GHANA_PENSION_VERSIONS: GhanaPensionRates[] = [
     tier2Rate: 0.05,
     minimumInsurableEarnings: 539.19,
     maximumInsurableEarnings: 61000,
+    limitsEffectiveFrom: "2025-01-01",
   },
   {
     version: "gh-pension-2026-01",
@@ -126,6 +179,25 @@ const GHANA_PENSION_VERSIONS: GhanaPensionRates[] = [
     tier2Rate: 0.05,
     minimumInsurableEarnings: 587.8,
     maximumInsurableEarnings: 69000,
+    limitsEffectiveFrom: "2026-01-01",
+  },
+  {
+    // Interim 2027 configuration: SSNIT has not yet published the 2027 annual
+    // minimum/maximum insurable earnings. Reuse the latest published 2026 limits
+    // provisionally. Approval requires explicit employer acknowledgement, and the
+    // run snapshot records the actual limits and provisional status.
+    version: GHANA_PENSION_2027_PROVISIONAL_VERSION,
+    effectiveFrom: "2027-01-01",
+    effectiveTo: "2027-12-31",
+    employeeRate: 0.055,
+    employerRate: 0.13,
+    tier1TotalRate: 0.135,
+    tier2Rate: 0.05,
+    minimumInsurableEarnings: 587.8,
+    maximumInsurableEarnings: 69000,
+    limitsEffectiveFrom: "2026-01-01",
+    isProvisional: true,
+    provisionalBaseVersion: GHANA_PENSION_2026_01_VERSION,
   },
 ]
 
@@ -138,37 +210,65 @@ function versionCoversDate(
   return true
 }
 
-export function assertGhanaPeriodWithinVerifiedHorizon(periodDate: string): string {
+export function assertGhanaPayePeriodSupported(periodDate: string): string {
   validateEffectiveDate(periodDate)
   const date = extractDatePart(periodDate)
-  if (date < GHANA_STATUTORY_VERIFIED_FROM || date > GHANA_STATUTORY_VERIFIED_THROUGH) {
+  if (date < GHANA_PAYE_VERIFIED_FROM) {
     throw new GhanaStatutoryVersionError(
-      `Ghana payroll period ${date} is outside the verified statutory support window (${GHANA_STATUTORY_VERIFIED_FROM} through ${GHANA_STATUTORY_VERIFIED_THROUGH}).`
+      `Ghana PAYE period ${date} is before the verified start ${GHANA_PAYE_VERIFIED_FROM}.`
     )
   }
   return date
 }
 
+export function assertGhanaPensionPeriodWithinVerifiedHorizon(periodDate: string): string {
+  validateEffectiveDate(periodDate)
+  const date = extractDatePart(periodDate)
+  if (date < GHANA_PENSION_VERIFIED_FROM) {
+    throw new GhanaStatutoryVersionError(
+      `Ghana pension/SSNIT period ${date} is before the verified start ${GHANA_PENSION_VERIFIED_FROM}.`
+    )
+  }
+  return date
+}
+
+/**
+ * Legacy alias for the annual pension/SSNIT verification horizon.
+ * Do not use this to decide PAYE schedule validity.
+ */
+export function assertGhanaPeriodWithinVerifiedHorizon(periodDate: string): string {
+  return assertGhanaPensionPeriodWithinVerifiedHorizon(periodDate)
+}
+
 export function getGhanaPayeRatesForPeriod(periodDate: string): GhanaPayeRates {
-  const date = assertGhanaPeriodWithinVerifiedHorizon(periodDate)
+  const date = assertGhanaPayePeriodSupported(periodDate)
   const match = GHANA_PAYE_VERSIONS.find((v) => versionCoversDate(v, date))
   if (!match) {
     throw new GhanaStatutoryVersionError(
-      `No Ghana PAYE rate version covers payroll period ${date}. Supported from ${GHANA_STATUTORY_VERIFIED_FROM} through ${GHANA_STATUTORY_VERIFIED_THROUGH}.`
+      `No Ghana PAYE rate version covers payroll period ${date}. Supported from ${GHANA_PAYE_VERIFIED_FROM} onward.`
     )
   }
   return match
 }
 
 export function getGhanaPensionRatesForPeriod(periodDate: string): GhanaPensionRates {
-  const date = assertGhanaPeriodWithinVerifiedHorizon(periodDate)
-  const match = GHANA_PENSION_VERSIONS.find((v) => versionCoversDate(v, date))
-  if (!match) {
-    throw new GhanaStatutoryVersionError(
-      `No Ghana pension/SSNIT rate version covers payroll period ${date}. Supported from ${GHANA_STATUTORY_VERIFIED_FROM} through ${GHANA_STATUTORY_VERIFIED_THROUGH}.`
-    )
-  }
-  return match
+  const date = assertGhanaPensionPeriodWithinVerifiedHorizon(periodDate)
+  const confirmed = GHANA_PENSION_VERSIONS.find(
+    (v) => !v.isProvisional && versionCoversDate(v, date)
+  )
+  if (confirmed) return confirmed
+  const provisional = GHANA_PENSION_VERSIONS.find(
+    (v) => v.isProvisional === true && versionCoversDate(v, date)
+  )
+  if (provisional) return provisional
+  throw new GhanaStatutoryVersionError(
+    `No verified annual SSNIT/pension limits cover payroll period ${date}; the latest confirmed limits are through ${GHANA_PENSION_VERIFIED_THROUGH}, and no provisional version is configured for this period.`
+  )
+}
+
+/** True when the period has no confirmed annual SSNIT notice and would use provisional limits. */
+export function isGhanaPensionPeriodProvisional(periodDate: string): boolean {
+  return getGhanaPensionRatesForPeriod(periodDate).isProvisional === true
 }
 
 export function getGhanaPayeRatesByVersion(versionId: string): GhanaPayeRates {
@@ -189,7 +289,7 @@ export function getGhanaPensionRatesByVersion(versionId: string): GhanaPensionRa
 
 /** Resolve PAYE + pension for a payroll period. Fail closed — no newest/oldest fallback. */
 export function resolveGhanaStatutoryRatesForPeriod(periodDate: string): GhanaStatutoryRateBundle {
-  const periodBasis = assertGhanaPeriodWithinVerifiedHorizon(periodDate)
+  const periodBasis = assertGhanaPayePeriodSupported(periodDate)
   return {
     paye: getGhanaPayeRatesForPeriod(periodBasis),
     pension: getGhanaPensionRatesForPeriod(periodBasis),
@@ -200,15 +300,17 @@ export function resolveGhanaStatutoryRatesForPeriod(periodDate: string): GhanaSt
 
 /**
  * Resolve by previously snapshotted version ids (draft recalc / historical stability).
- * Validates that both versions exist, are Ghana tables, and cover the stored period basis
- * within the verified support horizon. Does not fall back to any other version.
+ * Validates that both versions exist, are Ghana tables, and cover the stored period basis.
+ * PAYE coverage is open-ended from Act 1178; pension coverage remains limited to verified
+ * annual SSNIT insurable-earnings notices. Does not fall back to any other version.
  */
 export function resolveGhanaStatutoryRatesByVersions(opts: {
   payeRateVersion: string
   pensionRateVersion: string
   periodBasis: string
 }): GhanaStatutoryRateBundle {
-  const periodBasis = assertGhanaPeriodWithinVerifiedHorizon(opts.periodBasis)
+  validateEffectiveDate(opts.periodBasis)
+  const periodBasis = extractDatePart(opts.periodBasis)
   const paye = getGhanaPayeRatesByVersion(opts.payeRateVersion)
   const pension = getGhanaPensionRatesByVersion(opts.pensionRateVersion)
 
@@ -219,7 +321,7 @@ export function resolveGhanaStatutoryRatesByVersions(opts: {
   }
   if (!versionCoversDate(pension, periodBasis)) {
     throw new GhanaStatutoryVersionError(
-      `Ghana pension version "${pension.version}" does not cover stored period ${periodBasis}.`
+      `Ghana pension version "${pension.version}" does not cover stored period ${periodBasis}; annual SSNIT insurable-earnings limits are verified only through ${GHANA_PENSION_VERIFIED_THROUGH}. Ghana PAYE remains valid.`
     )
   }
 
@@ -233,22 +335,29 @@ export function resolveGhanaStatutoryRatesByVersions(opts: {
 
 /**
  * Progressive PAYE from official "Next" band widths.
- * Rounds once at the end via roundPayroll.
+ *
+ * Accumulates in integer cents × rate basis points so binary floating-point
+ * error cannot move a half-pesewa result to the wrong side of the statutory
+ * half-up boundary (e.g. GH¢44.975 must become GH¢44.98, never GH¢44.97).
+ * Rounds once at the end, half-up, to two decimals.
  */
 export function calculateGhanaPayeFromBands(taxableIncome: number, bands: readonly GhanaPayeBand[]): number {
   const income = Number(taxableIncome)
   if (!Number.isFinite(income) || income <= 0) return 0
 
-  let remaining = income
-  let tax = 0
+  let remainingCents = Math.round(income * 100)
+  let taxUnits = 0
   for (const band of bands) {
-    if (remaining <= 0) break
-    const width =
-      band.taxableAmount == null ? remaining : Math.min(remaining, Math.max(0, band.taxableAmount))
-    tax += width * band.rate
-    remaining -= width
+    if (remainingCents <= 0) break
+    const widthCents =
+      band.taxableAmount == null
+        ? remainingCents
+        : Math.min(remainingCents, Math.round(Math.max(0, band.taxableAmount) * 100))
+    const rateUnits = Math.round(band.rate * 10000)
+    taxUnits += widthCents * rateUnits
+    remainingCents -= widthCents
   }
-  return roundPayroll(tax)
+  return Math.round(taxUnits / 10000) / 100
 }
 
 export function clampGhanaPensionableBase(

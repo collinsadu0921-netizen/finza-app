@@ -59,6 +59,13 @@ export function formatPayrollMoney(amount: number, currencySymbol = "₵"): stri
   return `${currencySymbol}${Number(amount).toFixed(2)}`
 }
 
+/**
+ * Finza Ghana PAYE currently deducts only the employee SSNIT contribution before tax.
+ * Mortgage-interest, provident-fund and donation reliefs are not modeled.
+ */
+export const GHANA_PAYE_RELIEF_SCOPE_NOTICE =
+  "Ghana PAYE is calculated after employee SSNIT only. Mortgage-interest, provident-fund and donation reliefs are not applied; do not enter them as payroll deductions expecting a PAYE reduction."
+
 export type EmployeePayeSubBreakdownLine = {
   label: string
   detail: string

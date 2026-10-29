@@ -28,7 +28,18 @@ DECLARE
   v_pension_version TEXT := CASE EXTRACT(YEAR FROM p_period)::INT
     WHEN 2024 THEN 'gh-pension-2024-01'
     WHEN 2025 THEN 'gh-pension-2025-01'
+    WHEN 2027 THEN 'gh-pension-2027-provisional'
     ELSE 'gh-pension-2026-01'
+  END;
+  v_pension_provisional BOOLEAN := p_period >= DATE '2027-01-01';
+  v_pension_min NUMERIC := CASE WHEN p_period >= DATE '2027-01-01' THEN 587.8 END;
+  v_pension_max NUMERIC := CASE WHEN p_period >= DATE '2027-01-01' THEN 69000 END;
+  v_pension_effective_from DATE := CASE
+    WHEN p_period >= DATE '2027-01-01' THEN DATE '2026-01-01'
+  END;
+  v_paye_version TEXT := CASE
+    WHEN p_period >= DATE '2026-09-01' THEN 'gh-paye-2026-09'
+    ELSE 'gh-paye-2024-01'
   END;
   v_pension JSONB;
   v_employee NUMERIC;
@@ -91,13 +102,19 @@ BEGIN
     v_ot_tax_graduated := ROUND(
       GREATEST(
         0,
-        public.payroll_ghana_calculate_paye_from_bands(v_taxable - v_bonus_concessional)
-        - public.payroll_ghana_calculate_paye_from_bands(v_regular_base)
+        public.payroll_ghana_calculate_paye_from_bands(
+          v_taxable - v_bonus_concessional, v_paye_version
+        )
+        - public.payroll_ghana_calculate_paye_from_bands(
+          v_regular_base, v_paye_version
+        )
       ),
       2
     );
     v_paye := ROUND(
-      public.payroll_ghana_calculate_paye_from_bands(v_taxable - v_bonus_concessional)
+      public.payroll_ghana_calculate_paye_from_bands(
+        v_taxable - v_bonus_concessional, v_paye_version
+      )
       + v_bonus_tax_5,
       2
     );
@@ -140,15 +157,19 @@ BEGIN
     total_paye, total_deductions, total_net_salary,
     calculation_engine_version, paye_rate_version, pension_rate_version,
     calculation_jurisdiction, statutory_period_basis, notes,
-    staff_scope_fingerprint
+    staff_scope_fingerprint, pension_limits_provisional,
+    pension_minimum_insurable_earnings, pension_maximum_insurable_earnings,
+    pension_limits_effective_from
   ) VALUES (
     v_run, p_business_id, date_trunc('month', p_period)::DATE,
     date_trunc('month', p_period)::DATE,
     (date_trunc('month', p_period) + INTERVAL '1 month - 1 day')::DATE,
     'draft', 'monthly', v_basic, v_gross, v_allowances,
     v_employee, v_employer, v_paye, 0, v_net,
-    'finza-ghana-v3', 'gh-paye-2024-01', v_pension_version,
-    'GH', p_period, 'migration-561-test', gen_random_uuid()::TEXT
+    'finza-ghana-v3', v_paye_version, v_pension_version,
+    'GH', p_period, 'migration-561-test', gen_random_uuid()::TEXT,
+    v_pension_provisional, v_pension_min, v_pension_max,
+    v_pension_effective_from
   );
 
   INSERT INTO public.payroll_entries (
@@ -180,7 +201,7 @@ BEGIN
     v_bonus_graduated, (v_pension->>'pensionable_base')::NUMERIC,
     v_employee, v_employer, (v_pension->>'total_mandatory')::NUMERIC,
     (v_pension->>'tier1')::NUMERIC, (v_pension->>'tier2')::NUMERIC,
-    'finza-ghana-v3', 'gh-paye-2024-01', v_pension_version, 'GH',
+    'finza-ghana-v3', v_paye_version, v_pension_version, 'GH',
     p_period, v_profile, 'P5610000000', 'Migration 561 Test Employee',
     p_method, 'gh-profile-tax-2024-01',
     v_regular_base, v_regular_tax, v_bonus_base, v_bonus_component,
@@ -248,8 +269,14 @@ DECLARE
   v_business UUID := gen_random_uuid();
   v_run UUID;
   v_result JSONB;
+  v_entry_paye NUMERIC;
+  v_entry_paye_version TEXT;
 BEGIN
-  SELECT id INTO v_owner FROM auth.users LIMIT 1;
+  SELECT au.id INTO v_owner
+  FROM auth.users au
+  JOIN public.users pu ON pu.id = au.id
+  ORDER BY au.created_at NULLS LAST
+  LIMIT 1;
   IF v_owner IS NULL THEN
     RAISE EXCEPTION 'TEST_SETUP: need at least one auth.users row';
   END IF;
@@ -282,7 +309,7 @@ BEGIN
     v_business, month_start::DATE,
     (month_start + INTERVAL '1 month - 1 day')::DATE, 'open'
   FROM generate_series(
-    DATE '2025-01-01', DATE '2026-03-01', INTERVAL '1 month'
+    DATE '2025-01-01', DATE '2027-01-01', INTERVAL '1 month'
   ) month_start
   ON CONFLICT DO NOTHING;
 
@@ -495,6 +522,55 @@ BEGIN
   v_result := public.approve_payroll_run_atomic(v_business, v_run);
   IF COALESCE((v_result->>'ok')::BOOLEAN, FALSE) IS NOT TRUE THEN
     RAISE EXCEPTION 'Valid non-resident approval failed: %', v_result;
+  END IF;
+
+  -- Act 1178: September 2026 uses the new schedule and must approve.
+  v_run := pg_temp.make_ghana_v3_valid_run(
+    v_business, DATE '2026-09-01', 'gh_resident_graduated'
+  );
+  SELECT paye, paye_rate_version
+  INTO v_entry_paye, v_entry_paye_version
+  FROM public.payroll_entries
+  WHERE payroll_run_id = v_run;
+  IF v_entry_paye_version IS DISTINCT FROM 'gh-paye-2026-09'
+     OR v_entry_paye IS DISTINCT FROM 93.73 THEN
+    RAISE EXCEPTION
+      'September 2026 run expected gh-paye-2026-09 PAYE 93.73, got % PAYE %',
+      v_entry_paye_version, v_entry_paye;
+  END IF;
+  v_result := public.approve_payroll_run_atomic(v_business, v_run);
+  IF COALESCE((v_result->>'ok')::BOOLEAN, FALSE) IS NOT TRUE THEN
+    RAISE EXCEPTION 'Valid September 2026 Act 1178 approval failed: %', v_result;
+  END IF;
+
+  -- January 2027 has no official SSNIT notice yet. The latest 2026 limits are
+  -- reused provisionally, and approval requires explicit employer acknowledgement.
+  v_run := pg_temp.make_ghana_v3_valid_run(
+    v_business, DATE '2027-01-01', 'gh_resident_graduated'
+  );
+  UPDATE public.payroll_runs
+  SET pension_maximum_insurable_earnings = 70000,
+      provisional_ssnit_acknowledged_at = NOW(),
+      provisional_ssnit_acknowledged_by = v_owner
+  WHERE id = v_run;
+  PERFORM pg_temp.assert_approval_rejected_without_mutations(
+    v_business, v_run, 'provisional_ssnit_snapshot_mismatch'
+  );
+  UPDATE public.payroll_runs
+  SET pension_maximum_insurable_earnings = 69000,
+      provisional_ssnit_acknowledged_at = NULL,
+      provisional_ssnit_acknowledged_by = NULL
+  WHERE id = v_run;
+  PERFORM pg_temp.assert_approval_rejected_without_mutations(
+    v_business, v_run, 'provisional_ssnit_acknowledgement_required'
+  );
+  UPDATE public.payroll_runs
+  SET provisional_ssnit_acknowledged_at = NOW(),
+      provisional_ssnit_acknowledged_by = v_owner
+  WHERE id = v_run;
+  v_result := public.approve_payroll_run_atomic(v_business, v_run);
+  IF COALESCE((v_result->>'ok')::BOOLEAN, FALSE) IS NOT TRUE THEN
+    RAISE EXCEPTION 'Valid provisional January 2027 approval failed: %', v_result;
   END IF;
 
   RAISE NOTICE 'PASS migration 561 Ghana v3 independent tax-base validation';
