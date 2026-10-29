@@ -163,8 +163,18 @@ type PayrollPayment = {
   reference: string | null
   notes: string | null
   journal_entry_id: string | null
+  batch_item_id?: string | null
+  reversed_at?: string | null
+  reversal_reason?: string | null
+  reversal_journal_id?: string | null
   created_at: string
   batch_id?: string | null
+  batch_item?: {
+    id: string
+    employee_name: string | null
+    staff_id: string | null
+    status: string
+  } | null
   payment_account?: {
     id: string
     name: string
@@ -345,6 +355,13 @@ export default function PayrollRunViewPage() {
     reference: "",
     notes: "",
   })
+  const [reversalTarget, setReversalTarget] = useState<PayrollPayment | null>(null)
+  const [reversalForm, setReversalForm] = useState({
+    reversal_date: new Date().toISOString().split("T")[0],
+    reason: "",
+  })
+  const [reversingPayment, setReversingPayment] = useState(false)
+  const [reversalError, setReversalError] = useState("")
   const [filingContext, setFilingContext] = useState<{
     currentBusinessTin: string | null
     approvedSnapshotBusinessTin: string | null
@@ -465,6 +482,9 @@ export default function PayrollRunViewPage() {
       } else {
         await loadPayrollRun()
       }
+      // Draft line changes update payroll_runs.total_net_salary. Refresh the
+      // payment summary so the outstanding balance uses the new net total.
+      await loadPayrollPayments()
       toast.showToast("Payroll line updated", "success")
     } catch {
       toast.showToast("Failed to update payroll line", "error")
@@ -551,6 +571,7 @@ export default function PayrollRunViewPage() {
         description: "",
       })
       await loadPayrollRun()
+      await loadPayrollPayments()
     } catch {
       toast.showToast("Failed to assign one-off item", "error")
     } finally {
@@ -1003,6 +1024,67 @@ export default function PayrollRunViewPage() {
     }
   }
 
+  const openPaymentReversalModal = (payment: PayrollPayment) => {
+    setReversalTarget(payment)
+    setReversalError("")
+    setReversalForm({
+      reversal_date: new Date().toISOString().split("T")[0],
+      reason: "",
+    })
+  }
+
+  const closePaymentReversalModal = () => {
+    if (reversingPayment) return
+    setReversalTarget(null)
+    setReversalError("")
+  }
+
+  const handleReversePayment = async () => {
+    if (!reversalTarget || reversingPayment) return
+    const reason = reversalForm.reason.trim()
+    if (reason.length < 3) {
+      setReversalError("Enter a reversal reason of at least 3 characters.")
+      return
+    }
+
+    setReversingPayment(true)
+    setReversalError("")
+    try {
+      const response = await fetch(
+        `/api/payroll/runs/${runId}/payments/${reversalTarget.id}/reverse`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            reversal_date: reversalForm.reversal_date,
+            reason,
+          }),
+        }
+      )
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        setReversalError(data.error || "Could not reverse this salary payment.")
+        return
+      }
+
+      toast.showToast(
+        data.reused ? "Payment was already reversed" : "Salary payment reversed",
+        "success"
+      )
+      setReversalTarget(null)
+      await Promise.all([
+        loadPayrollPayments(),
+        loadObligations(),
+        loadPaymentBatches(),
+        loadPayrollRun(),
+      ])
+    } catch {
+      setReversalError("Could not reverse this salary payment.")
+    } finally {
+      setReversingPayment(false)
+    }
+  }
+
   const expandPaymentBatch = async (batchId: string) => {
     setExpandedPaymentBatchId(batchId)
     setLoadingBatchDetail(true)
@@ -1125,13 +1207,16 @@ export default function PayrollRunViewPage() {
   const paymentStatus = paymentSummary?.payment_status || "unpaid"
   const isRunPayable = payrollRun?.status === "approved" || payrollRun?.status === "locked"
   const outstandingAmount = Number(paymentSummary?.outstanding_amount || 0)
-  const canRecordPayment = isRunPayable && outstandingAmount > 0.01
   const hasActivePaymentBatch = paymentBatches.some((b) => b.status !== "cancelled")
-  const canCreatePaymentBatch = isRunPayable && !hasActivePaymentBatch && !readOnly
-  const expandedBatchAllPaid =
-    expandedBatchDetail &&
-    expandedBatchDetail.items.length > 0 &&
-    expandedBatchDetail.items.every((i) => i.status === "paid")
+  const hasUnallocatedAggregatePayments = salaryPayments.some(
+    (payment) =>
+      payment.journal_entry_id != null &&
+      !payment.reversed_at &&
+      !payment.batch_item_id
+  )
+  const canRecordPayment = isRunPayable && outstandingAmount > 0.01 && !hasActivePaymentBatch
+  const canCreatePaymentBatch =
+    isRunPayable && !hasActivePaymentBatch && !readOnly && !hasUnallocatedAggregatePayments
   const salaryPaymentEnteredAmount = Number(paymentForm.amount)
   const salaryPaymentAmountExceedsOutstanding =
     paymentForm.amount.trim() !== "" &&
@@ -1313,7 +1398,13 @@ export default function PayrollRunViewPage() {
                 <button
                   onClick={() => guardWriteAction(openPaymentModal)}
                   disabled={!canRecordPayment}
-                  title={!canRecordPayment ? "Payroll net salary is fully paid." : undefined}
+                  title={
+                    hasActivePaymentBatch
+                      ? "An employee payment batch is active. Record payments per employee instead of using an aggregate payment."
+                      : !canRecordPayment
+                      ? "Payroll net salary is fully paid."
+                      : undefined
+                  }
                   className="inline-flex items-center gap-2 px-4 py-2 bg-slate-700 text-white text-sm font-medium rounded-lg hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1641,16 +1732,22 @@ export default function PayrollRunViewPage() {
                     <thead>
                       <tr className="text-left text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">
                         <th className="py-2">Date</th>
+                        <th className="py-2">Employee</th>
                         <th className="py-2">Account</th>
                         <th className="py-2">Reference</th>
                         <th className="py-2 text-right">Amount</th>
+                        <th className="py-2">Status</th>
+                        <th className="py-2 text-right">Action</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
                       {salaryPayments.map((payment) => (
-                        <tr key={payment.id}>
+                        <tr key={payment.id} className={payment.reversed_at ? "opacity-60" : undefined}>
                           <td className="py-2 text-gray-700 dark:text-gray-300">
                             {new Date(payment.payment_date).toLocaleDateString("en-GH")}
+                          </td>
+                          <td className="py-2 text-gray-700 dark:text-gray-300">
+                            {payment.batch_item?.employee_name || "Run-level aggregate"}
                           </td>
                           <td className="py-2 text-gray-700 dark:text-gray-300">
                             {payment.payment_account?.code} - {payment.payment_account?.name}
@@ -1658,6 +1755,31 @@ export default function PayrollRunViewPage() {
                           <td className="py-2 text-gray-500 dark:text-gray-400">{payment.reference || "—"}</td>
                           <td className="py-2 text-right font-medium text-gray-900 dark:text-white">
                             ₵{Number(payment.amount || 0).toFixed(2)}
+                          </td>
+                          <td className="py-2 text-gray-600 dark:text-gray-300">
+                            {payment.reversed_at ? (
+                              <span
+                                className="inline-flex items-center rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-medium text-rose-800 dark:bg-rose-900/40 dark:text-rose-300"
+                                title={payment.reversal_reason || "Reversed"}
+                              >
+                                Reversed
+                              </span>
+                            ) : (
+                              <span className="text-[11px] text-emerald-700 dark:text-emerald-400">Posted</span>
+                            )}
+                          </td>
+                          <td className="py-2 text-right">
+                            {!payment.reversed_at && !readOnly ? (
+                              <button
+                                type="button"
+                                onClick={() => guardWriteAction(() => openPaymentReversalModal(payment))}
+                                className="text-xs font-medium text-rose-700 hover:text-rose-900 dark:text-rose-300 dark:hover:text-rose-200"
+                              >
+                                Reverse
+                              </button>
+                            ) : (
+                              <span className="text-xs text-gray-400">-</span>
+                            )}
                           </td>
                         </tr>
                       ))}
@@ -1695,10 +1817,16 @@ export default function PayrollRunViewPage() {
               <p className="text-xs text-gray-500 dark:text-gray-400">
                 Batches help you prepare and track salary payments. They do not send money or update your books.
               </p>
-              {expandedBatchAllPaid && canRecordPayment && (
+              {hasUnallocatedAggregatePayments && (
                 <p className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2">
-                  All lines in the open batch are marked paid externally. When funds have left your bank account, record
-                  the salary payment to clear net salaries payable against your bank account.
+                  This run has aggregate salary payments that are not allocated to employees. Reverse those aggregate
+                  payments in Salary Payment Summary before creating an employee payment batch.
+                </p>
+              )}
+              {hasActivePaymentBatch && outstandingAmount > 0.01 && (
+                <p className="text-xs text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg px-3 py-2">
+                  This run is being settled through an employee payment batch. Use each employee&apos;s Record payment
+                  action. Aggregate manual salary payments are blocked to prevent double settlement.
                 </p>
               )}
               {loadingPaymentBatches ? (
@@ -2727,6 +2855,85 @@ export default function PayrollRunViewPage() {
         </div>
       )}
 
+      {reversalTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden">
+            <div className="shrink-0 px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+              <h2 className="text-base font-bold text-gray-900 dark:text-white">Reverse salary payment</h2>
+              <p className="text-xs text-gray-500 mt-1">
+                This reverses Finza&apos;s accounting record of the payment. It does not refund a bank or Mobile Money
+                transfer, and it does not reverse salary expense.
+              </p>
+            </div>
+            <div className="px-6 py-5 space-y-4 overflow-y-auto flex-1 min-h-0">
+              {reversalError && (
+                <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                  {reversalError}
+                </div>
+              )}
+              <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-slate-50 dark:bg-gray-900/50 px-3 py-2 space-y-1">
+                <p className="text-sm font-medium text-gray-900 dark:text-white">
+                  {reversalTarget.batch_item?.employee_name || "Run-level aggregate payment"}
+                </p>
+                <p className="text-xs text-gray-600 dark:text-gray-400">
+                  Amount: GHS {Number(reversalTarget.amount || 0).toFixed(2)} · Paid{" "}
+                  {new Date(reversalTarget.payment_date).toLocaleDateString("en-GH")}
+                </p>
+                <p className="text-xs text-gray-600 dark:text-gray-400">
+                  Account: {reversalTarget.payment_account?.code} - {reversalTarget.payment_account?.name}
+                </p>
+              </div>
+              <label className="space-y-1 block">
+                <span className="text-sm text-gray-700 dark:text-gray-300">Reversal Date</span>
+                <input
+                  type="date"
+                  value={reversalForm.reversal_date}
+                  onChange={(e) => setReversalForm((f) => ({ ...f, reversal_date: e.target.value }))}
+                  className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 dark:bg-gray-700 dark:text-white"
+                />
+                <span className="block text-[11px] text-gray-500 dark:text-gray-400">
+                  If the original period is closed, use a current open-period date. The reversal posts to the selected
+                  date.
+                </span>
+              </label>
+              <label className="space-y-1 block">
+                <span className="text-sm text-gray-700 dark:text-gray-300">Reason</span>
+                <textarea
+                  value={reversalForm.reason}
+                  onChange={(e) => setReversalForm((f) => ({ ...f, reason: e.target.value }))}
+                  rows={3}
+                  maxLength={500}
+                  placeholder="Explain why this salary payment is being reversed"
+                  className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 dark:bg-gray-700 dark:text-white"
+                />
+              </label>
+              <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-xs text-amber-900 dark:text-amber-200">
+                The original payment and journal remain in history. A balanced reversal journal will debit the original
+                payment account and credit Net Salaries Payable (2240). Any linked batch item returns to pending so a
+                replacement payment can be recorded.
+              </div>
+            </div>
+            <div className="shrink-0 flex justify-end gap-2 px-6 py-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
+              <button
+                type="button"
+                onClick={closePaymentReversalModal}
+                disabled={reversingPayment}
+                className="px-4 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => guardWriteAction(handleReversePayment)}
+                disabled={reversingPayment || reversalForm.reason.trim().length < 3}
+                className="px-4 py-2 text-sm rounded-lg bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50"
+              >
+                {reversingPayment ? "Reversing..." : "Reverse payment"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {showObligationPaymentModal && selectedObligation && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
           <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden">

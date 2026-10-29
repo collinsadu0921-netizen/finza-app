@@ -143,6 +143,32 @@ export async function POST(
       )
     }
 
+    const { count: unallocatedAggregateCount, error: aggregateCheckError } = await supabase
+      .from("payroll_payments")
+      .select("id", { count: "exact", head: true })
+      .eq("business_id", business.id)
+      .eq("payroll_run_id", runId)
+      .is("deleted_at", null)
+      .not("journal_entry_id", "is", null)
+      .is("reversed_at", null)
+      .is("batch_item_id", null)
+
+    if (aggregateCheckError) {
+      console.error("[payment-batches POST aggregate check]", aggregateCheckError)
+      return NextResponse.json({ error: aggregateCheckError.message }, { status: 500 })
+    }
+
+    if ((unallocatedAggregateCount ?? 0) > 0) {
+      return NextResponse.json(
+        {
+          error:
+            "This payroll run has aggregate salary payments that are not allocated to employees. Reverse those aggregate payments before creating an employee payment batch.",
+          code: "PAYROLL_PAYMENT_AGGREGATE_RECONCILIATION_REQUIRED",
+        },
+        { status: 409 }
+      )
+    }
+
     const { data: existingBatch } = await supabase
       .from("payroll_payment_batches")
       .select("id")

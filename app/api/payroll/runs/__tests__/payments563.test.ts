@@ -165,6 +165,55 @@ describe("POST /api/payroll/runs/[id]/payments", () => {
     expect(body.reused).toBe(true)
   })
 
+  it("maps aggregate/batch settlement overlap to 409", async () => {
+    const client = buildPaymentClient({
+      data: null,
+      error: { message: "PAYROLL_PAYMENT_BATCH_SETTLEMENT_ACTIVE: use batch items" },
+    })
+    mockCreateSupabase.mockResolvedValue(client as any)
+    const req = new NextRequest("http://localhost/api/payroll/runs/run-1/payments", {
+      method: "POST",
+      headers: { "Idempotency-Key": STABLE_KEY },
+      body: JSON.stringify({
+        payment_date: "2026-06-15",
+        amount: 500,
+        payment_account_id: "acc-1",
+      }),
+    })
+    const res = await postRunPayment(req, { params: { id: "run-1" } })
+    expect(res.status).toBe(409)
+    const body = await res.json()
+    expect(body.code).toBe("PAYROLL_PAYMENT_BATCH_SETTLEMENT_ACTIVE")
+  })
+
+  it("maps aggregate reconciliation requirement to 409", async () => {
+    const client = buildPaymentClient({
+      data: null,
+      error: {
+        message:
+          "PAYROLL_PAYMENT_AGGREGATE_RECONCILIATION_REQUIRED: reverse aggregate payments first",
+      },
+    })
+    mockCreateSupabase.mockResolvedValue(client as any)
+    const req = new NextRequest(
+      "http://localhost/api/payroll/runs/run-1/payment-batches/b1/items/i1/record-payment",
+      {
+        method: "POST",
+        headers: { "Idempotency-Key": STABLE_KEY },
+        body: JSON.stringify({
+          payment_date: "2026-06-15",
+          payment_account_id: "acc-1",
+        }),
+      }
+    )
+    const res = await postBatchItemPayment(req, {
+      params: { id: "run-1", batchId: "b1", itemId: "i1" },
+    })
+    expect(res.status).toBe(409)
+    const body = await res.json()
+    expect(body.code).toBe("PAYROLL_PAYMENT_AGGREGATE_RECONCILIATION_REQUIRED")
+  })
+
   it("maps idempotency conflict to 409", async () => {
     const client = buildPaymentClient({
       data: null,
