@@ -36,6 +36,11 @@ import {
 } from "@/lib/payroll/payrollBusinessTinWarning"
 import { submitManualSalaryPaymentRequest } from "@/lib/payroll/manualPaymentModalLifecycle"
 import PaystackSalaryPaymentModal from "@/components/payroll/PaystackSalaryPaymentModal"
+import {
+  PAYSTACK_REVERSAL_DISCLAIMER,
+  PAYSTACK_REVERSAL_REFUND_NOTICE,
+  isPaystackSettledPayment,
+} from "@/lib/payroll/paystack/reversalDisclaimer"
 
 type PayrollEntry = {
   id: string
@@ -200,6 +205,12 @@ type PayrollPayment = {
     code: string
     sub_type: string | null
     type: string
+  } | null
+  paystack_transfer?: {
+    id: string
+    reference: string
+    status: string
+    environment: string | null
   } | null
 }
 
@@ -3022,6 +3033,22 @@ export default function PayrollRunViewPage() {
                   Account: {reversalTarget.payment_account?.code} - {reversalTarget.payment_account?.name}
                 </p>
               </div>
+              {isPaystackSettledPayment(reversalTarget) && (
+                <div
+                  role="note"
+                  className="rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 px-3 py-3 space-y-1.5"
+                >
+                  <p className="text-xs font-semibold uppercase tracking-wide text-amber-900 dark:text-amber-200">
+                    Paystack payment
+                  </p>
+                  <p className="text-sm font-medium text-amber-950 dark:text-amber-100">
+                    {PAYSTACK_REVERSAL_DISCLAIMER}
+                  </p>
+                  <p className="text-xs text-amber-900 dark:text-amber-200">
+                    {PAYSTACK_REVERSAL_REFUND_NOTICE}
+                  </p>
+                </div>
+              )}
               <label className="space-y-1 block">
                 <span className="text-sm text-gray-700 dark:text-gray-300">Reversal Date</span>
                 <input
