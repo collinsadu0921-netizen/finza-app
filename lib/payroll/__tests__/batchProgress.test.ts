@@ -1,6 +1,7 @@
 import {
   batchStatusLabel,
   computeBatchProgress,
+  employeeCountLabel,
   getBatchItemDisplayStatus,
 } from "@/lib/payroll/batchProgress"
 
@@ -64,5 +65,7 @@ describe("payroll payment batch progress", () => {
     expect(progress.outstandingAmount).toBe(0)
     expect(batchStatusLabel("partially_paid")).toBe("Part paid")
     expect(batchStatusLabel("processing")).toBe("Paying")
+    expect(employeeCountLabel(1)).toBe("1 employee")
+    expect(employeeCountLabel(4)).toBe("4 employees")
   })
 })

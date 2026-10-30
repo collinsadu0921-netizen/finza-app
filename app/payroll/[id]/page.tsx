@@ -45,6 +45,7 @@ import {
   BATCH_ITEM_STATUS_LABELS,
   batchStatusLabel,
   computeBatchProgress,
+  employeeCountLabel,
   getBatchItemDisplayStatus,
   type BatchProgress,
 } from "@/lib/payroll/batchProgress"
@@ -2155,7 +2156,7 @@ export default function PayrollRunViewPage() {
                               </span>
                             </div>
                             <p className="text-xs text-gray-600 dark:text-gray-400">
-                              {progress?.applicableCount ?? b.item_count} employees · ₵
+                              {employeeCountLabel(progress?.applicableCount ?? b.item_count)} · ₵
                               {Number(progress?.totalAmount ?? b.total_amount_snapshot ?? 0).toFixed(2)} ·{" "}
                               {b.currency || "GHS"}
                             </p>
@@ -2327,7 +2328,7 @@ export default function PayrollRunViewPage() {
                                     <>
                                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
                                         <span className="text-gray-700 dark:text-gray-300">
-                                          {expandedBatchProgress.applicableCount} employees
+                                          {employeeCountLabel(expandedBatchProgress.applicableCount)}
                                         </span>
                                         <span className="text-emerald-700 dark:text-emerald-400">
                                           {expandedBatchProgress.paidCount} paid

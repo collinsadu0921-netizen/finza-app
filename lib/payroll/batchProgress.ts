@@ -149,3 +149,7 @@ export const BATCH_ITEM_STATUS_LABELS: Record<BatchItemDisplayStatus, string> = 
   skipped: "Skipped",
   cancelled: "Cancelled",
 }
+
+export function employeeCountLabel(count: number): string {
+  return `${count} ${count === 1 ? "employee" : "employees"}`
+}
