@@ -60,6 +60,7 @@ export default function PaystackSalaryPaymentModal({
   amount,
   onClose,
   onCompleted,
+  onStatusChange,
 }: {
   runId: string
   batchId: string
@@ -68,6 +69,7 @@ export default function PaystackSalaryPaymentModal({
   amount: number
   onClose: () => void
   onCompleted: () => void
+  onStatusChange?: (status: string) => void
 }) {
   const base = `/api/payroll/runs/${runId}/payment-batches/${batchId}/items/${itemId}`
   const [preview, setPreview] = useState<Preview | null>(null)
@@ -79,6 +81,21 @@ export default function PaystackSalaryPaymentModal({
   const [otp, setOtp] = useState("")
   const [verifying, setVerifying] = useState(false)
   const idempotencyKeyRef = useRef<string | null>(null)
+  const transferRef = useRef<TransferState | null>(null)
+  const completedRef = useRef(false)
+  const pollAttemptsRef = useRef(0)
+
+  transferRef.current = transfer
+
+  const notifyCompleted = () => {
+    if (completedRef.current) return
+    completedRef.current = true
+    onCompleted()
+  }
+
+  const notifyStatusChange = (nextStatus: string) => {
+    onStatusChange?.(nextStatus)
+  }
 
   const loadPreview = async () => {
     setLoading(true)
@@ -103,6 +120,54 @@ export default function PaystackSalaryPaymentModal({
     loadPreview()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runId, batchId, itemId])
+
+  // Poll the provider through the existing verify endpoint while the transfer
+  // is still settling. This updates the modal and parent automatically and
+  // never initiates another transfer.
+  useEffect(() => {
+    const transferId = transfer?.transfer_id
+    if (!transferId) return
+    const activeStatuses = new Set(["initiating", "pending", "awaiting_authorization", "requires_attention"])
+    if (!activeStatuses.has(String(transfer?.status || ""))) return
+
+    let cancelled = false
+    pollAttemptsRef.current = 0
+
+    const poll = async () => {
+      if (cancelled) return
+      const current = transferRef.current
+      if (!current || !activeStatuses.has(String(current.status))) return
+      if (pollAttemptsRef.current >= 12) return
+      pollAttemptsRef.current += 1
+      try {
+        const response = await fetch(`/api/payroll/paystack/transfers/${transferId}/verify`, {
+          method: "POST",
+        })
+        const body = await response.json().catch(() => ({}))
+        if (cancelled || !response.ok) return
+        const nextStatus = String(body.status || "")
+        if (!nextStatus) return
+        setTransfer((value) =>
+          value
+            ? { ...value, status: nextStatus, message: String(body.message || value.message) }
+            : value
+        )
+        notifyStatusChange(nextStatus)
+        if (nextStatus === "successful" || nextStatus === "reversed") notifyCompleted()
+      } catch {
+        // Transient failures are retried by the next poll.
+      }
+    }
+
+    const timer = window.setInterval(poll, 5000)
+    const first = window.setTimeout(poll, 1500)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+      window.clearTimeout(first)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transfer?.transfer_id])
 
   const pay = async () => {
     if (!confirmed || submitting) return
@@ -134,6 +199,7 @@ export default function PaystackSalaryPaymentModal({
             message: String(body.error || body.message || ""),
             otp_required: Boolean(body.otp_required),
           })
+          notifyStatusChange(String(body.status || "requires_attention"))
         }
         return
       }
@@ -144,11 +210,12 @@ export default function PaystackSalaryPaymentModal({
         message: String(body.message || ""),
         otp_required: Boolean(body.otp_required),
       })
+      notifyStatusChange(String(body.status || "pending"))
       if (body.status === "failed") {
         idempotencyKeyRef.current = null
       }
       if (body.status === "successful") {
-        onCompleted()
+        notifyCompleted()
       }
     } catch {
       setError("The transfer outcome is uncertain. Verify the transfer status before retrying.")
@@ -177,8 +244,9 @@ export default function PaystackSalaryPaymentModal({
           ? { ...current, status: String(body.status), message: String(body.message || "") }
           : current
       )
+      notifyStatusChange(String(body.status))
       setOtp("")
-      if (body.status === "successful") onCompleted()
+      if (body.status === "successful") notifyCompleted()
     } catch {
       setError("Could not submit the Paystack OTP. Verify the transfer before retrying.")
     } finally {
@@ -204,7 +272,8 @@ export default function PaystackSalaryPaymentModal({
           ? { ...current, status: String(body.status), message: String(body.message || "") }
           : current
       )
-      if (body.status === "successful" || body.status === "reversed") onCompleted()
+      notifyStatusChange(String(body.status))
+      if (body.status === "successful" || body.status === "reversed") notifyCompleted()
     } catch {
       setError("Could not verify this Paystack transfer.")
     } finally {
