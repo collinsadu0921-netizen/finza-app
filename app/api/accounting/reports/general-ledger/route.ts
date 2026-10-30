@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server"
+﻿import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { checkAccountingAuthority } from "@/lib/accounting/auth"
 import { resolveAccountingPeriodForReport } from "@/lib/accounting/resolveAccountingPeriodForReport"
@@ -208,6 +208,7 @@ export async function GET(request: NextRequest) {
             journal_entry_description: line.journal_entry_description,
             reference_type: line.reference_type,
             reference_id: line.reference_id,
+            payment_reference: line.payment_reference ?? null,
             line_id: line.line_id,
             line_description: line.line_description,
             debit: line.debit,
@@ -258,6 +259,7 @@ export async function GET(request: NextRequest) {
             journal_entry_description: line.journal_entry_description,
             reference_type: line.reference_type,
             reference_id: line.reference_id,
+            payment_reference: line.payment_reference ?? null,
             line_id: line.line_id,
             line_description: line.line_description,
             debit: line.debit,
@@ -332,6 +334,7 @@ export async function GET(request: NextRequest) {
         journal_entry_description: line.journal_entry_description,
         reference_type: line.reference_type,
         reference_id: line.reference_id,
+        payment_reference: null,
         line_id: line.line_id,
         line_description: line.line_description,
         debit: Number(line.debit || 0),
@@ -354,3 +357,4 @@ export async function GET(request: NextRequest) {
     )
   }
 }
+

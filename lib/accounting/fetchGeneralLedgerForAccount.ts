@@ -10,6 +10,8 @@ export type GeneralLedgerApiLine = {
   journal_entry_description: string
   reference_type: string | null
   reference_id: string | null
+  /** Provider/payment reference for payroll_payment lines (e.g. Paystack transfer reference). */
+  payment_reference: string | null
   line_id: string
   line_description: string | null
   debit: number
@@ -72,6 +74,35 @@ export async function fetchGeneralLedgerForAccount(
 
   const rows = (ledgerLines || []) as RpcLine[]
 
+  // Payroll payment journals store the internal payroll_payment id as reference_id.
+  // Enrich the report with the provider/payment reference (e.g. Paystack transfer
+  // reference) so ledger lines are discoverable without changing posted records.
+  const payrollPaymentIds = Array.from(
+    new Set(
+      rows
+        .filter((line) => line.reference_type === "payroll_payment" && line.reference_id)
+        .map((line) => String(line.reference_id))
+    )
+  )
+  const paymentReferenceById = new Map<string, string>()
+  if (payrollPaymentIds.length > 0) {
+    const { data: paymentRows, error: paymentError } = await supabase
+      .from("payroll_payments")
+      .select("id, reference")
+      .eq("business_id", businessId)
+      .in("id", payrollPaymentIds)
+      .is("deleted_at", null)
+
+    if (paymentError) {
+      throw new Error(paymentError.message || "Failed to resolve payroll payment references")
+    }
+
+    for (const payment of paymentRows || []) {
+      const reference = payment.reference != null ? String(payment.reference).trim() : ""
+      if (reference) paymentReferenceById.set(String(payment.id), reference)
+    }
+  }
+
   const totalDebit = rows.reduce((sum, line) => sum + Number(line.debit || 0), 0)
   const totalCredit = rows.reduce((sum, line) => sum + Number(line.credit || 0), 0)
   const finalBalance =
@@ -121,6 +152,10 @@ export async function fetchGeneralLedgerForAccount(
     journal_entry_description: line.journal_entry_description,
     reference_type: line.reference_type,
     reference_id: line.reference_id,
+    payment_reference:
+      line.reference_type === "payroll_payment" && line.reference_id
+        ? paymentReferenceById.get(String(line.reference_id)) ?? null
+        : null,
     line_id: line.line_id,
     line_description: line.line_description,
     debit: Number(line.debit || 0),

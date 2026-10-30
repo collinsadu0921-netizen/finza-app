@@ -183,7 +183,7 @@ export async function GET(request: NextRequest) {
     }
 
     csvRows.push(
-      "Entry Date,Account Code,Account Name,Journal Entry ID,Description,Reference Type,Reference ID,Line ID,Line Description,Debit,Credit,Running Balance"
+      "Entry Date,Account Code,Account Name,Journal Entry ID,Description,Reference Type,Reference ID,Line ID,Line Description,Debit,Credit,Running Balance,Payment Reference"
     )
 
     for (const line of ledgerLines) {
@@ -201,6 +201,7 @@ export async function GET(request: NextRequest) {
           formatNumeric(line.debit || 0),
           formatNumeric(line.credit || 0),
           formatNumeric(line.running_balance || 0),
+          escapeCsvValue(line.payment_reference || ""),
         ].join(",")
       )
     }
@@ -339,7 +340,7 @@ async function buildMultiAccountCsvResponse(params: {
   }
 
   const header =
-    "Entry Date,Account Code,Account Name,Journal Entry ID,Description,Reference Type,Reference ID,Line ID,Line Description,Debit,Credit,Running Balance"
+    "Entry Date,Account Code,Account Name,Journal Entry ID,Description,Reference Type,Reference ID,Line ID,Line Description,Debit,Credit,Running Balance,Payment Reference"
 
   if (accountList.length === 0) {
     csvRows.push(header)
@@ -409,6 +410,7 @@ async function buildMultiAccountCsvResponse(params: {
           formatNumeric(line.debit || 0),
           formatNumeric(line.credit || 0),
           formatNumeric(line.running_balance || 0),
+          escapeCsvValue(line.payment_reference || ""),
         ].join(",")
       )
     }
