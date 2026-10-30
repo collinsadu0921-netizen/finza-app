@@ -28,6 +28,7 @@ describe("payroll payment batch progress", () => {
       failedCount: 0,
       totalAmount: 2500,
       paidAmount: 1000,
+      processingAmount: 750,
       outstandingAmount: 1500,
     })
   })

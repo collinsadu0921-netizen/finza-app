@@ -49,6 +49,11 @@ import {
   getBatchItemDisplayStatus,
   type BatchProgress,
 } from "@/lib/payroll/batchProgress"
+import {
+  isBatchItemPaystackEligible,
+  sumBatchItemAmounts,
+} from "@/lib/payroll/paystack/batchSelection"
+import { runBatchPaystackPayments as executeBatchPaystackPayments } from "@/lib/payroll/paystack/batchPaymentRunner"
 
 type PayrollEntry = {
   id: string
@@ -378,6 +383,9 @@ export default function PayrollRunViewPage() {
     reference: "",
     notes: "",
   })
+  const [selectedBatchItemIds, setSelectedBatchItemIds] = useState<Record<string, boolean>>({})
+  const [batchPayProgress, setBatchPayProgress] = useState<{ done: number; total: number } | null>(null)
+  const batchPayInFlightRef = useRef(false)
 
   // Send modal state
   const [sendModal, setSendModal] = useState<SendModalState>(null)
@@ -1176,6 +1184,7 @@ export default function PayrollRunViewPage() {
       setExpandedPaymentBatchId(batchId)
       setLoadingBatchDetail(true)
       setExpandedBatchDetail(null)
+      setSelectedBatchItemIds({})
     }
     try {
       const res = await fetch(`/api/payroll/runs/${runId}/payment-batches/${batchId}`, {
@@ -1486,6 +1495,140 @@ export default function PayrollRunViewPage() {
   const expandedBatchProgress = expandedBatchDetail
     ? computeBatchProgress(expandedBatchDetail.items, expandedBatchDetail.paystackTransfers)
     : null
+
+  const batchTransferByItemId = new Map(
+    (expandedBatchDetail?.paystackTransfers || []).map((transfer) => [transfer.batch_item_id, transfer])
+  )
+  const eligibleBatchItems = expandedBatchDetail
+    ? expandedBatchDetail.items.filter((item) =>
+        isBatchItemPaystackEligible({
+          item,
+          transfer: batchTransferByItemId.get(item.id),
+          paystackEnabled: Boolean(paystackStatus.enabled),
+          batchStatus: expandedBatchDetail.batch.status,
+        })
+      )
+    : []
+  const selectedBatchItems = eligibleBatchItems.filter((item) => selectedBatchItemIds[item.id])
+  const selectedBatchTotal = sumBatchItemAmounts(selectedBatchItems)
+  const allEligibleSelected =
+    eligibleBatchItems.length > 0 && selectedBatchItems.length === eligibleBatchItems.length
+
+  const toggleBatchItemSelection = (itemId: string) => {
+    setSelectedBatchItemIds((current) => {
+      if (current[itemId]) {
+        const next = { ...current }
+        delete next[itemId]
+        return next
+      }
+      return { ...current, [itemId]: true }
+    })
+  }
+
+  const toggleSelectAllEligible = () => {
+    if (allEligibleSelected) {
+      setSelectedBatchItemIds({})
+      return
+    }
+    const next: Record<string, boolean> = {}
+    for (const item of eligibleBatchItems) next[item.id] = true
+    setSelectedBatchItemIds(next)
+  }
+
+  const runBatchPaystackPayments = async (
+    batchId: string,
+    items: PayrollPaymentBatchItem[],
+    total: number
+  ) => {
+    if (batchPayInFlightRef.current || items.length === 0) return
+    batchPayInFlightRef.current = true
+    setBatchPayProgress({ done: 0, total: items.length })
+
+    setBatchPayProgress({ done: 0, total: items.length })
+
+    try {
+      const statusResponse = await fetch("/api/payroll/paystack/status", { cache: "no-store" })
+      const freshStatus = await statusResponse.json().catch(() => ({}))
+      if (!statusResponse.ok || !freshStatus.enabled || !freshStatus.connected) {
+        toast.showToast("Connect Paystack before paying employees.", "error")
+        return
+      }
+      const available =
+        freshStatus.balance_ghs != null ? Number(freshStatus.balance_ghs) : null
+      if (available != null && Number.isFinite(available) && available + 0.005 < total) {
+        toast.showToast(
+          `Paystack balance is GH₵${available.toFixed(2)} but the selected salaries total GH₵${total.toFixed(
+            2
+          )}. Fund the Paystack balance and try again.`,
+          "error"
+        )
+        return
+      }
+
+      const outcome = await executeBatchPaystackPayments({
+        runId,
+        batchId,
+        items,
+        onAuthorizationRequired: (item) => {
+          setPaystackTarget({
+            batchId,
+            itemId: item.id,
+            employeeName: item.employee_name,
+            amount: Number(item.amount || 0),
+          })
+        },
+        onItemComplete: async (_item, _result, index, total) => {
+          setBatchPayProgress({ done: index + 1, total })
+          await loadPaymentBatches()
+          await expandPaymentBatch(batchId, { silent: true })
+        },
+      })
+
+      await Promise.all([
+        loadPaymentBatches(),
+        loadPayrollPayments(),
+        loadObligations(),
+        loadPayrollRun(),
+        expandPaymentBatch(batchId, { silent: true }),
+        loadPaystackStatus(),
+      ])
+
+      if (outcome.networkUncertain) {
+        toast.showToast(
+          "The last transfer outcome is uncertain. Verify that employee's transfer before retrying.",
+          "error"
+        )
+      } else if (outcome.stoppedForAuthorization) {
+        toast.showToast(
+          `Paid ${outcome.paid}, processing ${outcome.processing}, failed ${outcome.failed}. Authorize the pending transfer to continue.`,
+          "info"
+        )
+      } else {
+        toast.showToast(
+          `Paystack batch finished: ${outcome.paid} paid, ${outcome.processing} processing, ${outcome.failed} failed.`,
+          outcome.failed > 0 ? "error" : "success"
+        )
+      }
+    } finally {
+      batchPayInFlightRef.current = false
+      setBatchPayProgress(null)
+    }
+  }
+
+  const confirmBatchPaystackPayments = () => {
+    if (!expandedBatchDetail || selectedBatchItems.length === 0) return
+    const count = selectedBatchItems.length
+    const total = selectedBatchTotal
+    openConfirm({
+      title: `Pay ${count} ${count === 1 ? "employee" : "employees"} with Paystack?`,
+      description: `GH₵${total.toFixed(
+        2
+      )} will be sent from your Paystack balance. Each salary is confirmed separately; employees are marked Paid only after Paystack confirms their transfer.`,
+      confirmLabel: "Pay with Paystack",
+      onConfirm: () =>
+        runBatchPaystackPayments(expandedBatchDetail.batch.id, selectedBatchItems, total),
+    })
+  }
   const hasActivePaymentBatch = paymentBatches.some((b) => b.status !== "cancelled")
   const hasUnallocatedAggregatePayments = salaryPayments.some(
     (payment) =>
@@ -2192,6 +2335,14 @@ export default function PayrollRunViewPage() {
                                 <span className="font-medium text-emerald-700 dark:text-emerald-400">
                                   ₵{Number(progress.paidAmount || 0).toFixed(2)} paid
                                 </span>
+                                {progress.processingAmount > 0 && (
+                                  <>
+                                    <span className="mx-1">·</span>
+                                    <span className="font-medium text-blue-700 dark:text-blue-300">
+                                      ₵{Number(progress.processingAmount).toFixed(2)} processing
+                                    </span>
+                                  </>
+                                )}
                                 <span className="mx-1">·</span>
                                 <span className="font-medium text-amber-700 dark:text-amber-400">
                                   ₵{Number(progress.outstandingAmount || 0).toFixed(2)} remaining
@@ -2358,6 +2509,14 @@ export default function PayrollRunViewPage() {
                                         <span className="font-medium text-emerald-700 dark:text-emerald-400">
                                           ₵{Number(expandedBatchProgress.paidAmount || 0).toFixed(2)} paid
                                         </span>
+                                        {expandedBatchProgress.processingAmount > 0 && (
+                                          <>
+                                            <span className="mx-1">·</span>
+                                            <span className="font-medium text-blue-700 dark:text-blue-300">
+                                              ₵{Number(expandedBatchProgress.processingAmount).toFixed(2)} processing
+                                            </span>
+                                          </>
+                                        )}
                                         <span className="mx-1">·</span>
                                         <span className="font-medium text-amber-700 dark:text-amber-400">
                                           ₵{Number(expandedBatchProgress.outstandingAmount || 0).toFixed(2)} remaining
@@ -2374,11 +2533,70 @@ export default function PayrollRunViewPage() {
                                         <span className="font-semibold">Record payment</span> for each employee.
                                       </p>
                                     )}
+                                  {!readOnly && paystackStatus.enabled && (
+                                    <div className="mt-1 flex flex-col gap-2 border-t border-gray-200 pt-3 dark:border-gray-700 sm:flex-row sm:items-center sm:justify-between">
+                                      <div className="text-xs text-gray-600 dark:text-gray-300">
+                                        <span className="font-medium">
+                                          {selectedBatchItems.length} selected
+                                        </span>
+                                        <span className="mx-1">·</span>
+                                        <span className="font-medium text-emerald-700 dark:text-emerald-400">
+                                          ₵{selectedBatchTotal.toFixed(2)}
+                                        </span>
+                                        <span className="ml-2 text-gray-500 dark:text-gray-400">
+                                          {eligibleBatchItems.length} eligible
+                                        </span>
+                                      </div>
+                                      <div className="flex flex-wrap gap-2">
+                                        <button
+                                          type="button"
+                                          onClick={toggleSelectAllEligible}
+                                          disabled={
+                                            eligibleBatchItems.length === 0 || batchPayProgress !== null
+                                          }
+                                          className="px-2.5 py-1.5 text-xs rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
+                                        >
+                                          {allEligibleSelected ? "Clear selection" : "Select all eligible"}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={confirmBatchPaystackPayments}
+                                          disabled={
+                                            selectedBatchItems.length === 0 || batchPayProgress !== null
+                                          }
+                                          className="px-2.5 py-1.5 text-xs rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+                                        >
+                                          {batchPayProgress
+                                            ? `Paying ${batchPayProgress.done} of ${batchPayProgress.total}…`
+                                            : "Pay selected with Paystack"}
+                                        </button>
+                                      </div>
+                                    </div>
+                                  )}
+                                  {!readOnly &&
+                                    paystackStatus.enabled &&
+                                    eligibleBatchItems.length === 0 && (
+                                      <p className="text-xs text-amber-700 dark:text-amber-300">
+                                        No employees are currently eligible for Paystack. Check payment details or
+                                        wait for pending transfers to finish.
+                                      </p>
+                                    )}
                                 </div>
                                 <div className="hidden md:block overflow-x-auto">
                                 <table className="w-full min-w-[980px] text-sm">
                                   <thead>
                                     <tr className="text-left text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                                      {!readOnly && paystackStatus.enabled && (
+                                        <th className="py-2 pr-2 w-8">
+                                          <input
+                                            type="checkbox"
+                                            checked={allEligibleSelected}
+                                            onChange={toggleSelectAllEligible}
+                                            disabled={eligibleBatchItems.length === 0 || batchPayProgress !== null}
+                                            aria-label="Select all eligible employees"
+                                          />
+                                        </th>
+                                      )}
                                       <th className="sticky left-0 z-20 bg-white dark:bg-gray-800 py-2 pr-2 min-w-[220px]">
                                         Employee
                                       </th>
@@ -2407,8 +2625,25 @@ export default function PayrollRunViewPage() {
                                         item.status,
                                         paystackTransfer?.status
                                       )
+                                      const selectable = isBatchItemPaystackEligible({
+                                        item,
+                                        transfer: paystackTransfer,
+                                        paystackEnabled: Boolean(paystackStatus.enabled),
+                                        batchStatus: b.status,
+                                      })
                                       return (
                                         <tr key={item.id}>
+                                          {!readOnly && paystackStatus.enabled && (
+                                            <td className="py-2 pr-2">
+                                              <input
+                                                type="checkbox"
+                                                checked={Boolean(selectedBatchItemIds[item.id])}
+                                                onChange={() => toggleBatchItemSelection(item.id)}
+                                                disabled={!selectable || batchPayProgress !== null}
+                                                aria-label={`Select ${item.employee_name || "employee"} for Paystack`}
+                                              />
+                                            </td>
+                                          )}
                                           <td className="sticky left-0 z-10 bg-white dark:bg-gray-800 py-2 pr-2 text-gray-900 dark:text-white">
                                             {item.employee_name || "—"}
                                           </td>
@@ -2489,19 +2724,37 @@ export default function PayrollRunViewPage() {
                                       item.status,
                                       transfer?.status
                                     )
+                                    const selectable = isBatchItemPaystackEligible({
+                                      item,
+                                      transfer,
+                                      paystackEnabled: Boolean(paystackStatus.enabled),
+                                      batchStatus: b.status,
+                                    })
                                     return (
                                       <div
                                         key={item.id}
                                         className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 space-y-2"
                                       >
                                         <div className="flex items-start justify-between gap-3">
-                                          <div className="min-w-0">
-                                            <p className="text-sm font-semibold text-gray-900 dark:text-white">
-                                              {item.employee_name || "—"}
-                                            </p>
-                                            <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                                              {item.destination_method_type || "—"} · {dest}
-                                            </p>
+                                          <div className="min-w-0 flex items-start gap-2">
+                                            {!readOnly && paystackStatus.enabled && (
+                                              <input
+                                                type="checkbox"
+                                                checked={Boolean(selectedBatchItemIds[item.id])}
+                                                onChange={() => toggleBatchItemSelection(item.id)}
+                                                disabled={!selectable || batchPayProgress !== null}
+                                                className="mt-1"
+                                                aria-label={`Select ${item.employee_name || "employee"} for Paystack`}
+                                              />
+                                            )}
+                                            <div className="min-w-0">
+                                              <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                                                {item.employee_name || "—"}
+                                              </p>
+                                              <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                                                {item.destination_method_type || "—"} · {dest}
+                                              </p>
+                                            </div>
                                           </div>
                                           <p className="text-sm font-semibold tabular-nums text-gray-900 dark:text-white">
                                             ₵{Number(item.amount || 0).toFixed(2)}

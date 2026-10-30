@@ -34,6 +34,7 @@ export type BatchProgress = {
   skippedCount: number
   totalAmount: number
   paidAmount: number
+  processingAmount: number
   outstandingAmount: number
 }
 
@@ -82,6 +83,7 @@ export function computeBatchProgress(
   let skippedCount = 0
   let totalAmount = 0
   let paidAmount = 0
+  let processingAmount = 0
 
   for (const item of items) {
     const amount = Number(item.amount || 0)
@@ -103,6 +105,7 @@ export function computeBatchProgress(
       paidAmount += amount
     } else if (display === "processing") {
       processingCount += 1
+      processingAmount += amount
     } else if (display === "failed") {
       failedCount += 1
     } else {
@@ -119,6 +122,7 @@ export function computeBatchProgress(
     skippedCount,
     totalAmount: roundMoney(totalAmount),
     paidAmount: roundMoney(paidAmount),
+    processingAmount: roundMoney(processingAmount),
     outstandingAmount: roundMoney(Math.max(0, totalAmount - paidAmount)),
   }
 }
