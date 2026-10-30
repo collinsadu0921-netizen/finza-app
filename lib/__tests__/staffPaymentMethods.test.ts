@@ -1,6 +1,7 @@
 import {
   normalizeMethodType,
   validateStaffPaymentMethodCreate,
+  validateStaffPaymentMethodFields,
   resolveNetSalaryExportPayoutFields,
 } from "@/lib/staffPaymentMethods"
 
@@ -16,12 +17,13 @@ describe("normalizeMethodType", () => {
 })
 
 describe("validateStaffPaymentMethodCreate", () => {
-  it("requires bank name and account number for bank", () => {
+  it("requires bank name, valid account number and account holder name for bank", () => {
     expect(
       validateStaffPaymentMethodCreate({
         method_type: "bank",
         bank_name: "",
-        account_number: "123",
+        account_number: "1234567890",
+        account_name: "Jane Doe",
       }).ok
     ).toBe(false)
     expect(
@@ -29,6 +31,7 @@ describe("validateStaffPaymentMethodCreate", () => {
         method_type: "bank",
         bank_name: "GCB",
         account_number: "",
+        account_name: "Jane Doe",
       }).ok
     ).toBe(false)
     expect(
@@ -36,16 +39,34 @@ describe("validateStaffPaymentMethodCreate", () => {
         method_type: "bank",
         bank_name: "GCB",
         account_number: "999",
+        account_name: "Jane Doe",
+      }).ok
+    ).toBe(false)
+    expect(
+      validateStaffPaymentMethodCreate({
+        method_type: "bank",
+        bank_name: "GCB",
+        account_number: "1234567890",
+        account_name: "",
+      }).ok
+    ).toBe(false)
+    expect(
+      validateStaffPaymentMethodCreate({
+        method_type: "bank",
+        bank_name: "GCB",
+        account_number: "1234567890",
+        account_name: "Jane Doe",
       }).ok
     ).toBe(true)
   })
 
-  it("requires MoMo provider and number for momo", () => {
+  it("requires MoMo provider, valid number and account holder name for momo", () => {
     expect(
       validateStaffPaymentMethodCreate({
         method_type: "momo",
         momo_provider: "",
-        momo_number: "02",
+        momo_number: "0241234567",
+        account_name: "Kwame Mensah",
       }).ok
     ).toBe(false)
     expect(
@@ -53,6 +74,7 @@ describe("validateStaffPaymentMethodCreate", () => {
         method_type: "momo",
         momo_provider: "MTN",
         momo_number: "",
+        account_name: "Kwame Mensah",
       }).ok
     ).toBe(false)
     expect(
@@ -60,13 +82,88 @@ describe("validateStaffPaymentMethodCreate", () => {
         method_type: "momo",
         momo_provider: "MTN",
         momo_number: "024xxx",
+        account_name: "Kwame Mensah",
+      }).ok
+    ).toBe(false)
+    expect(
+      validateStaffPaymentMethodCreate({
+        method_type: "momo",
+        momo_provider: "MTN",
+        momo_number: "0241234567",
+        account_name: "",
+      }).ok
+    ).toBe(false)
+    expect(
+      validateStaffPaymentMethodCreate({
+        method_type: "momo",
+        momo_provider: "MTN",
+        momo_number: "0241234567",
+        account_name: "Kwame Mensah",
       }).ok
     ).toBe(true)
+  })
+
+  it("accepts +233 and Telecel provider formats", () => {
+    const r = validateStaffPaymentMethodCreate({
+      method_type: "momo",
+      momo_provider: "Telecel",
+      momo_number: "+233241234567",
+      account_name: "Ama Serwaa",
+    })
+    expect(r.ok).toBe(true)
+  })
+
+  it("can skip destination checks when only updating non-destination fields", () => {
+    const r = validateStaffPaymentMethodCreate(
+      {
+        method_type: "bank",
+        bank_name: "Legacy Bank",
+        account_number: "BATCH001",
+        account_name: null,
+      },
+      { validateDestination: false, requireAccountName: false }
+    )
+    expect(r.ok).toBe(true)
   })
 
   it("allows cash without payout details", () => {
     const r = validateStaffPaymentMethodCreate({ method_type: "cash" })
     expect(r.ok).toBe(true)
+  })
+})
+
+describe("validateStaffPaymentMethodFields", () => {
+  it("returns field-level messages for a missing bank account holder name", () => {
+    const result = validateStaffPaymentMethodFields({
+      method_type: "bank",
+      bank_name: "GCB",
+      account_number: "1234567890",
+      account_name: "",
+    })
+    expect(result.ok).toBe(false)
+    expect(result.errors.account_name).toContain("account holder")
+  })
+
+  it("returns field-level messages for an invalid MoMo number", () => {
+    const result = validateStaffPaymentMethodFields({
+      method_type: "momo",
+      momo_provider: "MTN",
+      momo_number: "12345",
+      account_name: "Kwame Mensah",
+    })
+    expect(result.ok).toBe(false)
+    expect(result.errors.momo_number).toContain("valid Ghana")
+  })
+
+  it("accepts a complete Mobile Money destination", () => {
+    const result = validateStaffPaymentMethodFields({
+      method_type: "momo",
+      momo_provider: "VOD",
+      momo_number: "0201234567",
+      account_name: "Ama Serwaa",
+    })
+    expect(result.ok).toBe(true)
+    expect(result.errors).toEqual({})
   })
 })
 
