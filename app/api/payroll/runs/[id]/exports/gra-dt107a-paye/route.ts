@@ -19,6 +19,7 @@ import {
   resolveExportMode,
   serveImmutablePayrollExport,
 } from "../_shared"
+import { findMissingGraFilingDetails } from "@/lib/payroll/graFilingRequirements"
 
 const SNAPSHOT_ONLY_FILING = { allowLiveStaffFallback: false } as const
 
@@ -163,6 +164,36 @@ export async function GET(
         { error: GRA_DT107A_REQUIRES_APPROVAL_MESSAGE, code: "GRA_EXPORT_REQUIRES_APPROVAL" },
         { status: 400 }
       )
+    }
+
+    // Filing identity is required when preparing a GRA return, not when
+    // approving or paying payroll. Give a clear message instead of relying on
+    // a missing immutable snapshot.
+    if (mode === "preparation") {
+      const { data: filingRows, error: filingError } = await supabase
+        .from("payroll_entries")
+        .select("staff_id, filing_employee_name, filing_tin, payroll_tax_profile, is_included, staff:staff_id(name)")
+        .eq("payroll_run_id", runId)
+
+      if (filingError) {
+        return NextResponse.json({ error: filingError.message }, { status: 500 })
+      }
+
+      const missingFiling = findMissingGraFilingDetails(
+        (filingRows || []) as Parameters<typeof findMissingGraFilingDetails>[0]
+      )
+
+      if (missingFiling.length > 0) {
+        return NextResponse.json(
+          {
+            error:
+              "Complete the employee filing TIN and GRA position code for all included employees before preparing the GRA DT 107A return.",
+            code: "GRA_FILING_DETAILS_REQUIRED",
+            affectedEmployees: missingFiling,
+          },
+          { status: 400 }
+        )
+      }
     }
 
     return serveImmutablePayrollExport({
