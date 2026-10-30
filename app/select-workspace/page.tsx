@@ -3,7 +3,12 @@
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
-import { getAllUserBusinesses, setSelectedBusinessId, clearSelectedBusinessId } from "@/lib/business"
+import {
+  getAllUserBusinesses,
+  setSelectedBusinessId,
+  clearSelectedBusinessId,
+  ensureSelectedBusinessIdSynced,
+} from "@/lib/business"
 import { setTabIndustryMode, clearTabIndustryMode } from "@/lib/industryMode"
 import BusinessLogoDisplay from "@/components/BusinessLogoDisplay"
 import { beginSharedJsonGetAuthLogout } from "@/lib/client/sharedJsonGetAuthBoundary"
@@ -104,6 +109,7 @@ export default function SelectWorkspacePage() {
     setSelecting(biz.id)
     setSelectedBusinessId(biz.id)
     setTabIndustryMode(biz.industry ?? "service")
+    await ensureSelectedBusinessIdSynced(biz.id)
 
     const dashboard = biz.industry === "retail" ? "/retail/dashboard" : "/service/dashboard"
     router.replace(dashboard)
