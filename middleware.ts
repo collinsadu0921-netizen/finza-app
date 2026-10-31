@@ -4,6 +4,63 @@ import { createServerClient } from "@supabase/ssr"
 import {
   resolveAuthenticatedApiUser,
 } from "@/lib/server/resolveAuthenticatedApiUser"
+import {
+  ACTIVE_BUSINESS_COOKIE,
+  WORKSPACE_CONTEXT_MISMATCH_CODE,
+  WORKSPACE_CONTEXT_MISMATCH_MESSAGE,
+  WORKSPACE_CONTEXT_REQUIRED_CODE,
+  WORKSPACE_CONTEXT_REQUIRED_MESSAGE,
+} from "@/lib/business/activeBusiness"
+
+const FINANCIAL_MUTATION_PREFIXES = [
+  "/api/business",
+  "/api/payroll",
+  "/api/staff",
+  "/api/accounting",
+  "/api/accounts",
+  "/api/invoices",
+  "/api/bills",
+  "/api/expenses",
+  "/api/assets",
+  "/api/sales",
+  "/api/payments",
+  "/api/suppliers",
+  "/api/purchase-orders",
+  "/api/credit-notes",
+  "/api/proforma",
+  "/api/reconciliation",
+  "/api/register",
+  "/api/layaway",
+  "/api/wht",
+  "/api/cit",
+  "/api/vat-returns",
+  "/api/retail",
+  "/api/service/jobs",
+  "/api/service/materials",
+  "/api/service/expenses",
+  "/api/settings/payroll-paystack",
+]
+
+const WORKSPACE_CONTEXT_EXEMPT_PREFIXES = [
+  "/api/business/select",
+  "/api/webhooks",
+  "/api/payments/webhooks",
+  "/api/auth",
+  "/api/public",
+  "/api/health",
+  "/api/internal",
+  "/api/cron",
+]
+
+function requiresWorkspaceContext(pathname: string): boolean {
+  if (!pathname.startsWith("/api/")) return false
+  if (WORKSPACE_CONTEXT_EXEMPT_PREFIXES.some((prefix) => pathname.startsWith(prefix))) return false
+  return FINANCIAL_MUTATION_PREFIXES.some((prefix) => pathname.startsWith(prefix))
+}
+
+function isMutationMethod(method: string): boolean {
+  return method !== "GET" && method !== "HEAD" && method !== "OPTIONS"
+}
 
 /**
  * Accounting workspace middleware.
@@ -90,6 +147,29 @@ function isServiceOrRetailPath(pathname: string): boolean {
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
+
+  // Workspace context consistency for tenant-scoped financial APIs.
+  if (requiresWorkspaceContext(pathname)) {
+    const headerBusinessId = request.headers.get("x-finza-business-id")?.trim() || null
+    const cookieBusinessId = request.cookies.get(ACTIVE_BUSINESS_COOKIE)?.value?.trim() || null
+
+    // A stale tab must not read or write another workspace's data.
+    if (headerBusinessId && cookieBusinessId && headerBusinessId !== cookieBusinessId) {
+      return NextResponse.json(
+        { error: WORKSPACE_CONTEXT_MISMATCH_MESSAGE, code: WORKSPACE_CONTEXT_MISMATCH_CODE },
+        { status: 409 }
+      )
+    }
+
+    // Mutations require the server-validated cookie. GETs may proceed only when
+    // the server resolver can still determine a safe single-business context.
+    if (headerBusinessId && !cookieBusinessId && isMutationMethod(request.method)) {
+      return NextResponse.json(
+        { error: WORKSPACE_CONTEXT_REQUIRED_MESSAGE, code: WORKSPACE_CONTEXT_REQUIRED_CODE },
+        { status: 409 }
+      )
+    }
+  }
 
   // ── Accounting path handling ────────────────────────────────────────────────
   if (isAccountingPath(pathname)) {
@@ -189,6 +269,7 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
+    "/api/:path*",
     "/accounting/:path*",
     "/api/accounting/:path*",
     "/service",

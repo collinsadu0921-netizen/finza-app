@@ -5,6 +5,7 @@ import { ToastProvider } from '@/components/ui/ToastProvider'
 import { ConfirmProvider } from '@/components/ui/ConfirmProvider'
 import { ThemeProvider } from '@/components/ThemeProvider'
 import NumberInputGuard from '@/components/NumberInputGuard'
+import WorkspaceContextSync from '@/components/WorkspaceContextSync'
 import { SpeedInsights } from '@vercel/speed-insights/next'
 
 export const metadata: Metadata = {
@@ -35,6 +36,7 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <body className={`${inter.variable} ${jetbrainsMono.variable} font-sans antialiased`}>
         <Suspense fallback={null}>
+          <WorkspaceContextSync />
           <ThemeProvider>
             <NumberInputGuard />
             <ToastProvider>

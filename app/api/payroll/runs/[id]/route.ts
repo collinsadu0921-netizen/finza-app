@@ -87,7 +87,9 @@ export async function GET(
           position,
           email,
           phone,
-          whatsapp_phone
+          whatsapp_phone,
+          tin_number,
+          gra_position_code
         )
       `
       )

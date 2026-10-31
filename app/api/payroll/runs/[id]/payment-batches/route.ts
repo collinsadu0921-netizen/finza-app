@@ -11,6 +11,7 @@ import {
   type PayrollEntryForBatchItem,
   type StaffPaymentMethodRowForBatch,
 } from "@/lib/payroll/paymentBatchItems"
+import { computeBatchProgress } from "@/lib/payroll/batchProgress"
 
 async function getAuthorizedRun(
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
@@ -72,11 +73,14 @@ export async function GET(
     const list = batches || []
     const batchIds = list.map((b) => b.id)
     const statusCountsByBatch = new Map<string, Record<string, number>>()
+    const itemsByBatch = new Map<string, Array<{ id: string; status: string; amount: number | string | null }>>()
+    const batchByItemId = new Map<string, string>()
+    let transfers: Array<{ batch_item_id: string | null; status: string }> = []
 
     if (batchIds.length > 0) {
       const { data: itemRows, error: iErr } = await supabase
         .from("payroll_payment_batch_items")
-        .select("batch_id, status")
+        .select("id, batch_id, status, amount")
         .in("batch_id", batchIds)
         .is("deleted_at", null)
 
@@ -86,17 +90,59 @@ export async function GET(
       }
 
       for (const row of itemRows || []) {
-        const bid = String((row as { batch_id: string }).batch_id)
-        const st = String((row as { status: string }).status)
+        const item = row as {
+          id: string
+          batch_id: string
+          status: string
+          amount: number | string | null
+        }
+        const bid = String(item.batch_id)
+        const st = String(item.status)
         const cur = statusCountsByBatch.get(bid) || {}
         cur[st] = (cur[st] ?? 0) + 1
         statusCountsByBatch.set(bid, cur)
+
+        const batchItems = itemsByBatch.get(bid) || []
+        batchItems.push({ id: String(item.id), status: st, amount: item.amount })
+        itemsByBatch.set(bid, batchItems)
+        batchByItemId.set(String(item.id), bid)
       }
+
+      const itemIds = Array.from(batchByItemId.keys())
+      if (itemIds.length > 0) {
+        const { data: transferRows, error: transferErr } = await supabase
+          .from("payroll_paystack_transfers")
+          .select("batch_item_id, status, created_at")
+          .eq("business_id", business.id)
+          .eq("payroll_run_id", runId)
+          .in("batch_item_id", itemIds)
+          .order("created_at", { ascending: false })
+
+        if (transferErr) {
+          // A missing Phase 2 table must not break the existing batch screen.
+          console.error("[payment-batches GET paystack transfers]", transferErr.code)
+        } else {
+          transfers = (transferRows || []) as Array<{ batch_item_id: string | null; status: string }>
+        }
+      }
+    }
+
+    const transfersByBatch = new Map<string, Array<{ batch_item_id: string | null; status: string }>>()
+    for (const transfer of transfers) {
+      const batchId = transfer.batch_item_id ? batchByItemId.get(String(transfer.batch_item_id)) : null
+      if (!batchId) continue
+      const rows = transfersByBatch.get(batchId) || []
+      rows.push(transfer)
+      transfersByBatch.set(batchId, rows)
     }
 
     const enriched = list.map((b) => ({
       ...b,
       status_counts: statusCountsByBatch.get(String(b.id)) || {},
+      progress: computeBatchProgress(
+        itemsByBatch.get(String(b.id)) || [],
+        transfersByBatch.get(String(b.id)) || []
+      ),
     }))
 
     return NextResponse.json({ batches: enriched })

@@ -19,6 +19,7 @@ import {
   resolveExportMode,
   serveImmutablePayrollExport,
 } from "../_shared"
+import { buildLateGraFilingPreparation } from "@/lib/payroll/graFilingPreparation.server"
 
 const SNAPSHOT_ONLY_FILING = { allowLiveStaffFallback: false } as const
 
@@ -148,6 +149,9 @@ export async function GET(
     const auth = await getAuthorizedPayrollRunForExport(request, runId)
     if ("error" in auth) return auth.error
     const { supabase, payrollRun } = auth
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
 
     const mode = resolveExportMode(request)
 
@@ -165,6 +169,9 @@ export async function GET(
       )
     }
 
+    // Filing identity is validated when preparing a GRA return, not when
+    // approving or paying payroll. If no approval-time snapshot exists, build
+    // an audited preparation from approved amounts + current filing identity.
     return serveImmutablePayrollExport({
       supabase,
       business: { id: payrollRun.business_id },
@@ -175,6 +182,14 @@ export async function GET(
       legacyAuditContent: async () => {
         if (mode !== "audit") return null
         return buildLegacyDt107aAuditExport(supabase, runId, payrollRun)
+      },
+      legacyPreparationContent: async () => {
+        if (mode !== "preparation") return null
+        return buildLateGraFilingPreparation({
+          supabase,
+          payrollRun,
+          actorId: user?.id ?? null,
+        })
       },
     })
   } catch (error: unknown) {

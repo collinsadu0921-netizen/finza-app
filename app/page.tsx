@@ -3,7 +3,12 @@
 import { useRouter } from "next/navigation"
 import { useEffect } from "react"
 import { supabase } from "@/lib/supabaseClient"
-import { getAllUserBusinesses, setSelectedBusinessId, getSelectedBusinessId } from "@/lib/business"
+import {
+  getAllUserBusinesses,
+  setSelectedBusinessId,
+  getSelectedBusinessId,
+  ensureSelectedBusinessIdSynced,
+} from "@/lib/business"
 import { setTabIndustryMode } from "@/lib/industryMode"
 
 export default function HomePage() {
@@ -52,6 +57,7 @@ export default function HomePage() {
         // Single workspace — select it and go straight to dashboard
         const biz = all[0]
         setSelectedBusinessId(biz.id)
+        await ensureSelectedBusinessIdSynced(biz.id)
         setTabIndustryMode(biz.industry ?? "service")
         router.replace(biz.industry === "retail" ? "/retail/dashboard" : "/service/dashboard")
         return
@@ -62,6 +68,8 @@ export default function HomePage() {
       if (preferredId) {
         const preferred = all.find(b => b.id === preferredId)
         if (preferred) {
+          setSelectedBusinessId(preferred.id)
+          await ensureSelectedBusinessIdSynced(preferred.id)
           setTabIndustryMode(preferred.industry ?? "service")
           router.replace(preferred.industry === "retail" ? "/retail/dashboard" : "/service/dashboard")
           return
