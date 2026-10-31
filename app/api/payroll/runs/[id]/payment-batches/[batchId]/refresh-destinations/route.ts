@@ -4,7 +4,6 @@ import { getCurrentBusiness } from "@/lib/business"
 import { requirePermission } from "@/lib/userPermissions"
 import { PERMISSIONS } from "@/lib/permissions"
 import { enforceServiceIndustryMinTierWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
-import { refreshBatchItemDestinations } from "@/lib/payroll/batchDestinationRefresh"
 
 /**
  * Refresh unpaid batch instructions from current employee default payment
@@ -58,14 +57,21 @@ export async function POST(
       return NextResponse.json({ updated: 0 })
     }
 
-    const result = await refreshBatchItemDestinations({
-      supabase,
-      businessId: business.id,
-      payrollRunId: runId,
-      batchId,
-    })
+    const { data, error } = await supabase.rpc(
+      "refresh_payroll_batch_item_destinations_atomic",
+      {
+        p_business_id: business.id,
+        p_payroll_run_id: runId,
+        p_batch_id: batchId,
+      }
+    )
 
-    return NextResponse.json(result)
+    if (error) {
+      console.error("[payment-batch refresh destinations]", error)
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
+
+    return NextResponse.json(data ?? { updated: 0 })
   } catch (e: unknown) {
     console.error("[payment-batch refresh destinations]", e)
     return NextResponse.json(
