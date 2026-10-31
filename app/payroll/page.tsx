@@ -116,7 +116,7 @@ export default function PayrollPage() {
   )
 
   const renderRunActions = (run: PayrollRun) => (
-    <div className="flex flex-wrap items-center justify-end gap-x-2 gap-y-1">
+    <div className="flex flex-wrap items-center justify-end gap-x-2 gap-y-1 pr-12">
       <button
         type="button"
         onClick={() => router.push(`${payrollBase}/${run.id}`)}
@@ -164,13 +164,13 @@ export default function PayrollPage() {
             <div className="hidden md:block">
               <table className="w-full table-fixed">
                 <colgroup>
-                  <col className="w-[20%]" />
+                  <col className="w-[18%]" />
                   <col className="w-[11%]" />
                   <col className="w-[12%]" />
                   <col className="w-[10%]" />
                   <col className="w-[12%]" />
-                  <col className="w-[17%]" />
-                  <col className="w-[18%]" />
+                  <col className="w-[16%]" />
+                  <col className="w-[21%]" />
                 </colgroup>
                 <thead className="bg-gray-50 dark:bg-gray-700">
                   <tr>
