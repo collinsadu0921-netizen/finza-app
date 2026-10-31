@@ -116,7 +116,7 @@ export default function PayrollPage() {
   )
 
   const renderRunActions = (run: PayrollRun) => (
-    <div className="flex flex-wrap items-center justify-end gap-x-2 gap-y-1 pr-12">
+    <div className="flex flex-wrap items-center justify-end gap-x-2 gap-y-1 pr-14">
       <button
         type="button"
         onClick={() => router.push(`${payrollBase}/${run.id}`)}
@@ -254,7 +254,7 @@ export default function PayrollPage() {
                       </p>
                       {renderStatusBadges(run)}
                     </div>
-                    <div className="grid grid-cols-3 gap-2 text-xs">
+                    <div className="grid grid-cols-3 gap-2 pr-14 text-xs">
                       <div>
                         <p className="text-gray-500 dark:text-gray-400">Gross</p>
                         <p className="font-medium tabular-nums text-gray-900 dark:text-white">
