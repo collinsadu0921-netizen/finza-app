@@ -150,13 +150,6 @@ const PAYMENT_METHOD_LABELS: Record<string, string> = {
   cash: "Cash",
 }
 
-function verificationLabel(status: string): string {
-  const value = String(status || "").toLowerCase()
-  if (value === "verified") return "Verified"
-  if (value === "unverified") return "Not verified yet"
-  return value.replace(/_/g, " ")
-}
-
 function emptyPaymentMethodForm() {
   return {
     method_type: "bank" as "bank" | "momo" | "cash",
@@ -366,6 +359,7 @@ export default function StaffViewPage() {
 
   const [paymentMethodForm, setPaymentMethodForm] = useState(emptyPaymentMethodForm())
   const [paymentMethodErrors, setPaymentMethodErrors] = useState<StaffPaymentMethodFieldErrors>({})
+  const [savingPaymentMethod, setSavingPaymentMethod] = useState(false)
   const [paystackDestinations, setPaystackDestinations] = useState<{
     banks: Array<{ name: string; code: string }>
     mobile_money: Array<{ name: string; code: string; label: string }>
@@ -658,6 +652,8 @@ export default function StaffViewPage() {
   }
 
   const handleSavePaymentMethod = async () => {
+    if (savingPaymentMethod) return
+    setSavingPaymentMethod(true)
     try {
       const url = editingPaymentMethod
         ? `/api/staff/${staffId}/payment-methods/${editingPaymentMethod.id}`
@@ -708,6 +704,8 @@ export default function StaffViewPage() {
       }
     } catch (err: any) {
       toast.showToast(err.message || "Failed to save payment method", "error")
+    } finally {
+      setSavingPaymentMethod(false)
     }
   }
 
@@ -1151,7 +1149,10 @@ export default function StaffViewPage() {
           </div>
 
           {/* Payment methods */}
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700 mb-6">
+          <div
+            id="payment-methods"
+            className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700 mb-6"
+          >
             <div className="flex justify-between items-start mb-4 gap-4">
               <div>
                 <h2 className="text-xl font-bold text-gray-900 dark:text-white">Payment methods</h2>
@@ -1182,8 +1183,11 @@ export default function StaffViewPage() {
                         <span className="font-semibold">
                           {PAYMENT_METHOD_LABELS[m.method_type] || m.method_type}
                         </span>
+                        <MiniBadge label="Saved" />
                         {m.is_default ? <MiniBadge tone="blue" label="Default" /> : null}
-                        <MiniBadge label={verificationLabel(m.verification_status)} />
+                        {m.is_verified || m.verification_status === "verified" ? (
+                          <MiniBadge tone="blue" label="Verified" />
+                        ) : null}
                       </div>
                       {m.method_type === "bank" ? (
                         <ul className="text-gray-600 dark:text-gray-300 list-disc list-inside">
@@ -1822,9 +1826,10 @@ export default function StaffViewPage() {
               <button
                 type="button"
                 onClick={handleSavePaymentMethod}
-                className="flex-1 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700"
+                disabled={savingPaymentMethod}
+                className="flex-1 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
               >
-                Save
+                {savingPaymentMethod ? "Saving..." : "Save"}
               </button>
               <button
                 type="button"

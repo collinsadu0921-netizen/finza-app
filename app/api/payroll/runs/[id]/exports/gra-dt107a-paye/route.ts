@@ -19,7 +19,7 @@ import {
   resolveExportMode,
   serveImmutablePayrollExport,
 } from "../_shared"
-import { findMissingGraFilingDetails } from "@/lib/payroll/graFilingRequirements"
+import { buildLateGraFilingPreparation } from "@/lib/payroll/graFilingPreparation.server"
 
 const SNAPSHOT_ONLY_FILING = { allowLiveStaffFallback: false } as const
 
@@ -149,6 +149,9 @@ export async function GET(
     const auth = await getAuthorizedPayrollRunForExport(request, runId)
     if ("error" in auth) return auth.error
     const { supabase, payrollRun } = auth
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
 
     const mode = resolveExportMode(request)
 
@@ -166,36 +169,9 @@ export async function GET(
       )
     }
 
-    // Filing identity is required when preparing a GRA return, not when
-    // approving or paying payroll. Give a clear message instead of relying on
-    // a missing immutable snapshot.
-    if (mode === "preparation") {
-      const { data: filingRows, error: filingError } = await supabase
-        .from("payroll_entries")
-        .select("staff_id, filing_employee_name, filing_tin, payroll_tax_profile, is_included, staff:staff_id(name)")
-        .eq("payroll_run_id", runId)
-
-      if (filingError) {
-        return NextResponse.json({ error: filingError.message }, { status: 500 })
-      }
-
-      const missingFiling = findMissingGraFilingDetails(
-        (filingRows || []) as Parameters<typeof findMissingGraFilingDetails>[0]
-      )
-
-      if (missingFiling.length > 0) {
-        return NextResponse.json(
-          {
-            error:
-              "Complete the employee filing TIN and GRA position code for all included employees before preparing the GRA DT 107A return.",
-            code: "GRA_FILING_DETAILS_REQUIRED",
-            affectedEmployees: missingFiling,
-          },
-          { status: 400 }
-        )
-      }
-    }
-
+    // Filing identity is validated when preparing a GRA return, not when
+    // approving or paying payroll. If no approval-time snapshot exists, build
+    // an audited preparation from approved amounts + current filing identity.
     return serveImmutablePayrollExport({
       supabase,
       business: { id: payrollRun.business_id },
@@ -206,6 +182,14 @@ export async function GET(
       legacyAuditContent: async () => {
         if (mode !== "audit") return null
         return buildLegacyDt107aAuditExport(supabase, runId, payrollRun)
+      },
+      legacyPreparationContent: async () => {
+        if (mode !== "preparation") return null
+        return buildLateGraFilingPreparation({
+          supabase,
+          payrollRun,
+          actorId: user?.id ?? null,
+        })
       },
     })
   } catch (error: unknown) {

@@ -86,6 +86,8 @@ export type GraDt107aStaffRow = {
   id: string
   name: string | null
   tin_number: string | null
+  /** Current employee GRA position; used when the approved entry has no frozen position. */
+  gra_position_code?: string | null
 }
 
 export type GraDt107aPayrollEntryRow = {
@@ -161,15 +163,16 @@ export function sumGraDt107aPaye(rows: GraDt107aJoinedRow[]): number {
  * Filing readiness for included employees only (draft or approved).
  * Used by UI before export; export still re-validates server-side.
  */
-export function assessGraFilingReadiness(rows: GraDt107aJoinedRow[]): GraFilingReadinessResult {
+export function assessGraFilingReadiness(
+  rows: GraDt107aJoinedRow[],
+  filingOptions: FilingIdentityOptions = {}
+): GraFilingReadinessResult {
   const included = filterIncludedGraDt107aRows(rows)
   const issues: GraFilingReadinessIssue[] = []
 
   for (const { staff, entry } of included) {
-    const tin = effectiveFilingTin(staff, entry)
-    const profile = parsePayrollTaxProfile(entry.payroll_tax_profile)
-    const rawPos = profile?.gra_position_code
-    const pos = typeof rawPos === "string" ? rawPos.trim().toUpperCase() : ""
+    const tin = effectiveFilingTin(staff, entry, filingOptions)
+    const pos = effectiveGraPositionCode(staff, entry, filingOptions)
     const problems: string[] = []
     if (!tin) problems.push("missing TIN")
     if (!pos) problems.push("missing GRA position")
@@ -177,7 +180,7 @@ export function assessGraFilingReadiness(rows: GraDt107aJoinedRow[]): GraFilingR
     if (problems.length) {
       issues.push({
         staff_id: String(staff.id),
-        staff_name: effectiveFilingEmployeeName(staff, entry) || "Unknown",
+        staff_name: effectiveFilingEmployeeName(staff, entry, filingOptions) || "Unknown",
         problems,
       })
     }
@@ -235,6 +238,20 @@ export function effectiveFilingTin(
   if (entry.filing_tin != null) return String(entry.filing_tin).trim()
   if (!allowLive) return ""
   return String(staff.tin_number ?? "").trim()
+}
+
+/** Effective GRA position for validation and column (4). */
+export function effectiveGraPositionCode(
+  staff: GraDt107aStaffRow,
+  entry: GraDt107aPayrollEntryRow,
+  options: FilingIdentityOptions = {}
+): string {
+  const profile = parsePayrollTaxProfile(entry.payroll_tax_profile)
+  const raw = profile?.gra_position_code
+  const frozen = typeof raw === "string" ? raw.trim().toUpperCase() : ""
+  if (frozen) return frozen
+  if (options.allowLiveStaffFallback === false) return ""
+  return String(staff.gra_position_code ?? "").trim().toUpperCase()
 }
 
 /** Effective employee name for column (2). */
@@ -330,9 +347,7 @@ export function validateGraDt107aPayeExport(
 
   for (const { staff, entry } of included) {
     const tin = effectiveFilingTin(staff, entry, filingOptions)
-    const profile = parsePayrollTaxProfile(entry.payroll_tax_profile)
-    const rawPos = profile?.gra_position_code
-    const pos = typeof rawPos === "string" ? rawPos.trim().toUpperCase() : ""
+    const pos = effectiveGraPositionCode(staff, entry, filingOptions)
     const missing: GraDt107aValidationIssue["missing_fields"] = []
     if (!tin) missing.push("tin")
     if (!pos || !GRA_DT107A_ALLOWED_POSITIONS.has(pos)) missing.push("gra_position_code")
@@ -369,7 +384,7 @@ export function buildGraDt107aPayeDataRows(
   let serial = 1
   for (const { staff, entry } of included) {
     const profile = parsePayrollTaxProfile(entry.payroll_tax_profile) || {}
-    const pos = String(profile.gra_position_code ?? "").trim().toUpperCase()
+    const pos = effectiveGraPositionCode(staff, entry, filingOptions)
     const ssf = employeeSocialSecurityFundAmount(entry)
     const otTax = overtimeTaxTotal(entry)
     const cashEmolument = totalCashEmolument(entry)

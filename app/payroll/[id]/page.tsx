@@ -50,6 +50,7 @@ import {
   type BatchProgress,
 } from "@/lib/payroll/batchProgress"
 import {
+  getBatchItemPaystackEligibility,
   isBatchItemPaystackEligible,
   sumBatchItemAmounts,
 } from "@/lib/payroll/paystack/batchSelection"
@@ -100,6 +101,7 @@ type PayrollEntry = {
     whatsapp_phone: string | null
     email: string | null
     tin_number?: string | null
+    gra_position_code?: string | null
   }
 }
 
@@ -1185,6 +1187,12 @@ export default function PayrollRunViewPage() {
       setLoadingBatchDetail(true)
       setExpandedBatchDetail(null)
       setSelectedBatchItemIds({})
+      // Pick up payment details corrected after batch creation without touching
+      // paid or in-progress transfers.
+      await fetch(
+        `/api/payroll/runs/${runId}/payment-batches/${batchId}/refresh-destinations`,
+        { method: "POST" }
+      ).catch(() => undefined)
     }
     try {
       const res = await fetch(`/api/payroll/runs/${runId}/payment-batches/${batchId}`, {
@@ -1955,6 +1963,7 @@ export default function PayrollRunViewPage() {
                   id: e.staff.id,
                   name: e.staff.name,
                   tin_number: e.staff.tin_number ?? null,
+                  gra_position_code: e.staff.gra_position_code ?? null,
                 },
                 entry: {
                   basic_salary: e.basic_salary,
@@ -2631,6 +2640,12 @@ export default function PayrollRunViewPage() {
                                         paystackEnabled: Boolean(paystackStatus.enabled),
                                         batchStatus: b.status,
                                       })
+                                      const eligibility = getBatchItemPaystackEligibility({
+                                        item,
+                                        transfer: paystackTransfer,
+                                        paystackEnabled: Boolean(paystackStatus.enabled),
+                                        batchStatus: b.status,
+                                      })
                                       return (
                                         <tr key={item.id}>
                                           {!readOnly && paystackStatus.enabled && (
@@ -2698,6 +2713,24 @@ export default function PayrollRunViewPage() {
                                                 ) : null}
                                               </div>
                                             ) : null}
+                                            {!eligibility.eligible && eligibility.reason ? (
+                                              <div className="mt-1 text-[10px] text-amber-700 dark:text-amber-300">
+                                                {eligibility.reason}
+                                                {eligibility.requiresUpdate && item.staff_id ? (
+                                                  <button
+                                                    type="button"
+                                                    onClick={() =>
+                                                      router.push(
+                                                        `${payrollBase}/staff/${item.staff_id}#payment-methods`
+                                                      )
+                                                    }
+                                                    className="ml-1 font-medium underline hover:text-amber-900 dark:hover:text-amber-100"
+                                                  >
+                                                    Update details
+                                                  </button>
+                                                ) : null}
+                                              </div>
+                                            ) : null}
                                           </td>
                                           {!readOnly && (
                                             <td className="sticky right-0 z-10 bg-white dark:bg-gray-800 py-2 text-right whitespace-nowrap">
@@ -2724,12 +2757,13 @@ export default function PayrollRunViewPage() {
                                       item.status,
                                       transfer?.status
                                     )
-                                    const selectable = isBatchItemPaystackEligible({
+                                    const eligibility = getBatchItemPaystackEligibility({
                                       item,
                                       transfer,
                                       paystackEnabled: Boolean(paystackStatus.enabled),
                                       batchStatus: b.status,
                                     })
+                                    const selectable = eligibility.eligible
                                     return (
                                       <div
                                         key={item.id}
@@ -2787,6 +2821,24 @@ export default function PayrollRunViewPage() {
                                           <p className="text-[11px] text-red-600 dark:text-red-400">
                                             {transfer.failure_reason}
                                           </p>
+                                        ) : null}
+                                        {!eligibility.eligible && eligibility.reason ? (
+                                          <div className="text-[11px] text-amber-700 dark:text-amber-300">
+                                            {eligibility.reason}
+                                            {eligibility.requiresUpdate && item.staff_id ? (
+                                              <button
+                                                type="button"
+                                                onClick={() =>
+                                                  router.push(
+                                                    `${payrollBase}/staff/${item.staff_id}#payment-methods`
+                                                  )
+                                                }
+                                                className="ml-1 font-medium underline hover:text-amber-900 dark:hover:text-amber-100"
+                                              >
+                                                Update details
+                                              </button>
+                                            ) : null}
+                                          </div>
                                         ) : null}
                                         {!readOnly && renderBatchItemActions(b, item, busy, transfer)}
                                       </div>

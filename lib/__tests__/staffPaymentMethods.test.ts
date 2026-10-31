@@ -1,5 +1,6 @@
 import {
   normalizeMethodType,
+  paymentDestinationKey,
   validateStaffPaymentMethodCreate,
   validateStaffPaymentMethodFields,
   resolveNetSalaryExportPayoutFields,
@@ -129,6 +130,42 @@ describe("validateStaffPaymentMethodCreate", () => {
   it("allows cash without payout details", () => {
     const r = validateStaffPaymentMethodCreate({ method_type: "cash" })
     expect(r.ok).toBe(true)
+  })
+})
+
+describe("paymentDestinationKey", () => {
+  it("matches identical destinations despite spacing and case", () => {
+    const a = paymentDestinationKey({
+      method_type: "momo",
+      momo_provider: "MTN",
+      momo_number: "024 123 4567",
+      account_name: "Ama  Serwaa",
+    })
+    const b = paymentDestinationKey({
+      method_type: "MOMO",
+      momo_provider: "mtn",
+      momo_number: "0241234567",
+      account_name: "ama serwaa",
+    })
+    expect(a).toBe(b)
+  })
+
+  it("distinguishes different destinations", () => {
+    expect(
+      paymentDestinationKey({
+        method_type: "bank",
+        bank_code: "GH050100",
+        account_number: "1234567890",
+        account_name: "Ama",
+      })
+    ).not.toBe(
+      paymentDestinationKey({
+        method_type: "bank",
+        bank_code: "GH050100",
+        account_number: "1234567891",
+        account_name: "Ama",
+      })
+    )
   })
 })
 

@@ -134,6 +134,30 @@ export function validateStaffPaymentMethodCreate(
   return { ok: true, method_type: result.method_type }
 }
 
+/** Canonical key for spotting an identical saved destination. */
+export function paymentDestinationKey(input: {
+  method_type: unknown
+  bank_code?: unknown
+  bank_name?: unknown
+  account_number?: unknown
+  account_name?: unknown
+  momo_provider?: unknown
+  momo_number?: unknown
+}): string {
+  const method = normalizeMethodType(input.method_type) ?? ""
+  const clean = (v: unknown) => String(v ?? "").trim().replace(/\s+/g, " ").toLowerCase()
+  const digits = (v: unknown) => String(v ?? "").replace(/\s+/g, "").trim()
+  return [
+    method,
+    clean(input.bank_code),
+    clean(input.bank_name),
+    digits(input.account_number),
+    clean(input.account_name),
+    clean(input.momo_provider),
+    digits(input.momo_number),
+  ].join("|")
+}
+
 export function validateStaffPaymentMethodPatch(
   existingType: StaffPaymentMethodType,
   patch: Partial<StaffPaymentMethodWriteBody>

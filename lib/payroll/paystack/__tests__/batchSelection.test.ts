@@ -1,4 +1,5 @@
 import {
+  getBatchItemPaystackEligibility,
   isBatchItemPaystackEligible,
   sumBatchItemAmounts,
 } from "@/lib/payroll/paystack/batchSelection"
@@ -128,5 +129,58 @@ describe("batch Paystack selection", () => {
 
   it("sums selected amounts to two decimals", () => {
     expect(sumBatchItemAmounts([momoItem, { ...momoItem, amount: 2000.005 }])).toBe(3500.01)
+  })
+
+  it("returns the exact missing requirement and whether details can be updated", () => {
+    expect(
+      getBatchItemPaystackEligibility({
+        item: { ...momoItem, destination_account_name: "" },
+        paystackEnabled: true,
+        batchStatus: "processing",
+      })
+    ).toEqual({
+      eligible: false,
+      reason: "Missing account holder name.",
+      requiresUpdate: true,
+    })
+
+    expect(
+      getBatchItemPaystackEligibility({
+        item: {
+          status: "pending",
+          amount: 100,
+          destination_method_type: "bank",
+          destination_bank_name: "GCB Bank",
+          destination_bank_code: "GH050100",
+          destination_account_number: "",
+          destination_account_name: "Ama",
+        },
+        paystackEnabled: true,
+        batchStatus: "processing",
+      })
+    ).toMatchObject({ reason: "Missing bank account number.", requiresUpdate: true })
+
+    expect(
+      getBatchItemPaystackEligibility({
+        item: { ...momoItem, destination_method_type: null, legacy_destination_source: "missing" },
+        paystackEnabled: true,
+        batchStatus: "processing",
+      })
+    ).toMatchObject({ reason: "Missing default payment method.", requiresUpdate: true })
+  })
+
+  it("explains completed or processing payments without an update link", () => {
+    expect(
+      getBatchItemPaystackEligibility({
+        item: momoItem,
+        transfer: { status: "pending" },
+        paystackEnabled: true,
+        batchStatus: "processing",
+      })
+    ).toEqual({
+      eligible: false,
+      reason: "Payment already completed or processing.",
+      requiresUpdate: false,
+    })
   })
 })
