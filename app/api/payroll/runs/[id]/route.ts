@@ -441,6 +441,7 @@ export async function PUT(
               error: ghanaGuard.message,
               code: ghanaGuard.code,
               affectedEmployees: ghanaGuard.affectedEmployees,
+              ...(ghanaGuard.details ? { details: ghanaGuard.details } : {}),
             },
             { status: 400 }
           )

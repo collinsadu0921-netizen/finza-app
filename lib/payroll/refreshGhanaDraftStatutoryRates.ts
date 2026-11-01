@@ -49,6 +49,26 @@ export async function refreshGhanaDraftStatutoryRates(params: {
     }
   }
 
+  // Repair missing legacy calculation metadata from consistent employee
+  // snapshots before deciding whether statutory rates changed. This is why the
+  // function must not return early just because PAYE/pension versions match.
+  const { data: repair, error: repairError } = await supabase.rpc(
+    "repair_payroll_draft_calculation_metadata_atomic",
+    {
+      p_business_id: businessId,
+      p_payroll_run_id: runId,
+    }
+  )
+
+  if (repairError) {
+    return {
+      ok: false,
+      error: repairError.message,
+      status: 400,
+    }
+  }
+  const repaired = Boolean((repair as { repaired?: boolean } | null)?.repaired)
+
   let resolved
   try {
     resolved = resolveGhanaStatutoryRatesForPeriod(run.payroll_month)
@@ -70,9 +90,13 @@ export async function refreshGhanaDraftStatutoryRates(params: {
       resolved.pension.limitsEffectiveFrom ?? resolved.pension.effectiveFrom,
   }
 
-  const changed =
-    String(run.paye_rate_version || "") !== next.paye_rate_version ||
-    String(run.pension_rate_version || "") !== next.pension_rate_version ||
+  const effectivePaye = run.paye_rate_version ?? (repair as { paye_rate_version?: string } | null)?.paye_rate_version
+  const effectivePension =
+    run.pension_rate_version ?? (repair as { pension_rate_version?: string } | null)?.pension_rate_version
+
+  const ratesChanged =
+    String(effectivePaye || "") !== next.paye_rate_version ||
+    String(effectivePension || "") !== next.pension_rate_version ||
     Boolean(run.pension_limits_provisional) !== next.pension_limits_provisional ||
     Number(run.pension_minimum_insurable_earnings ?? NaN) !==
       next.pension_minimum_insurable_earnings ||
@@ -80,7 +104,10 @@ export async function refreshGhanaDraftStatutoryRates(params: {
       next.pension_maximum_insurable_earnings ||
     String(run.pension_limits_effective_from || "") !== next.pension_limits_effective_from
 
-  if (!changed) return { ok: true, changed: false }
+  if (!ratesChanged) {
+    // Metadata repair alone does not require recalculating verified amounts.
+    return { ok: true, changed: repaired }
+  }
 
   const { error: updateError } = await supabase
     .from("payroll_runs")

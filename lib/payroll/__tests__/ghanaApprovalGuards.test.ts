@@ -3,6 +3,7 @@ import {
   classifyUnsupportedV3Entry,
   GHANA_PAYROLL_UNSUPPORTED_TAX_PROFILE,
   GHANA_PAYROLL_UNKNOWN_RATE_VERSION,
+  GHANA_PAYROLL_LEGACY_METADATA_INCONSISTENT,
   GHANA_PAYROLL_STATUTORY_VALIDATION_FAILED,
 } from "@/lib/payroll/ghanaApprovalGuards"
 import {
@@ -64,14 +65,14 @@ describe("Ghana payroll approval guards (API-facing)", () => {
     }
   })
 
-  it("returns unknown rate version when run versions missing", () => {
+  it("returns an actionable legacy metadata error when run versions are missing and entries are unavailable", () => {
     const result = validateGhanaPayrollRunForApproval({
       businessCountry: "GH",
       run: { ...run, calculation_engine_version: null },
       entries: [],
     })
     expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.code).toBe(GHANA_PAYROLL_UNKNOWN_RATE_VERSION)
+    if (!result.ok) expect(result.code).toBe(GHANA_PAYROLL_LEGACY_METADATA_INCONSISTENT)
   })
 
   it("blocks casual snapshot even when live staff is full_time", () => {

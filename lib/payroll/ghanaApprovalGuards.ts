@@ -28,9 +28,12 @@ import {
 import { normalizeEmploymentTypeForSnapshot } from "@/lib/payroll/staffTaxProfile"
 import { isGhanaMonthlyStatutoryEngine } from "@/lib/payroll/salaryBasis"
 import { roundPayroll, extractDatePart } from "@/lib/payrollEngine/versioning"
+import { evaluateLegacyDraftMetadata } from "@/lib/payroll/legacyDraftMetadata"
 
 export const GHANA_PAYROLL_UNSUPPORTED_TAX_PROFILE = "GHANA_PAYROLL_UNSUPPORTED_TAX_PROFILE"
 export const GHANA_PAYROLL_UNKNOWN_RATE_VERSION = "GHANA_PAYROLL_UNKNOWN_RATE_VERSION"
+export const GHANA_PAYROLL_LEGACY_METADATA_RECOVERABLE = "GHANA_PAYROLL_LEGACY_METADATA_RECOVERABLE"
+export const GHANA_PAYROLL_LEGACY_METADATA_INCONSISTENT = "GHANA_PAYROLL_LEGACY_METADATA_INCONSISTENT"
 export const GHANA_PAYROLL_STATUTORY_VALIDATION_FAILED = "GHANA_PAYROLL_STATUTORY_VALIDATION_FAILED"
 
 const AMOUNT_TOLERANCE = 0.01
@@ -48,6 +51,7 @@ export type GhanaApprovalBlockResult =
       code: string
       message: string
       affectedEmployees: UnsupportedTaxProfileEmployee[]
+      details?: Record<string, unknown>
     }
 
 export type PayrollEntryForGhanaApproval = {
@@ -648,6 +652,8 @@ export function validateGhanaPayrollRunForApproval(opts: {
     calculation_jurisdiction?: string | null
     statutory_period_basis?: string | null
     payroll_frequency?: string | null
+    pay_period_start?: string | null
+    pay_period_end?: string | null
     pension_limits_provisional?: boolean | null
     pension_minimum_insurable_earnings?: number | null
     pension_maximum_insurable_earnings?: number | null
@@ -676,12 +682,47 @@ export function validateGhanaPayrollRunForApproval(opts: {
     : null
 
   if (!runEngine || !runPaye || !runPension || !runJurisdiction || !runPeriod || !runFrequency) {
+    if (!runFrequency) {
+      return {
+        ok: false,
+        code: GHANA_PAYROLL_LEGACY_METADATA_INCONSISTENT,
+        message:
+          "This draft payroll is missing its payroll frequency, which cannot be recovered from employee entries. Set the payroll frequency or contact support.",
+        affectedEmployees: [],
+        details: { missing_fields: ["payroll_frequency"] },
+      }
+    }
+
+    const evaluation = evaluateLegacyDraftMetadata({
+      run: {
+        calculation_engine_version: opts.run.calculation_engine_version,
+        calculation_jurisdiction: opts.run.calculation_jurisdiction,
+        statutory_period_basis: opts.run.statutory_period_basis,
+        paye_rate_version: opts.run.paye_rate_version,
+        pension_rate_version: opts.run.pension_rate_version,
+        pay_period_start: opts.run.pay_period_start,
+        pay_period_end: opts.run.pay_period_end,
+      },
+      entries: opts.entries,
+    })
+
+    if (evaluation.recoverable) {
+      return {
+        ok: false,
+        code: GHANA_PAYROLL_LEGACY_METADATA_RECOVERABLE,
+        message:
+          "This draft payroll was created before calculation metadata was stored. It can be repaired from its employee entries when you retry approval.",
+        affectedEmployees: [],
+        details: { fields_to_repair: evaluation.fieldsToRepair },
+      }
+    }
+
     return {
       ok: false,
-      code: GHANA_PAYROLL_UNKNOWN_RATE_VERSION,
-      message:
-        "This payroll run is missing a recognized Ghana calculation-engine, jurisdiction, period basis, frequency, or statutory-rate version and cannot be approved. Recreate the run after upgrading, or contact support for legacy runs.",
+      code: GHANA_PAYROLL_LEGACY_METADATA_INCONSISTENT,
+      message: `This draft payroll's calculation metadata cannot be repaired automatically. ${evaluation.reason} Contact support if this persists.`,
       affectedEmployees: [],
+      details: evaluation.details,
     }
   }
 
