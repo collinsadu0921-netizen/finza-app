@@ -27,8 +27,9 @@ import {
 } from "@/lib/payrollEngine/jurisdictions/ghanaStatutoryRates"
 import { normalizeEmploymentTypeForSnapshot } from "@/lib/payroll/staffTaxProfile"
 import { isGhanaMonthlyStatutoryEngine } from "@/lib/payroll/salaryBasis"
-import { roundPayroll, extractDatePart } from "@/lib/payrollEngine/versioning"
+import { roundPayroll, toCalendarDate } from "@/lib/payrollEngine/versioning"
 import { evaluateLegacyDraftMetadata } from "@/lib/payroll/legacyDraftMetadata"
+import { resolveRunStatutoryPeriodDate } from "@/lib/payroll/payrollStatutoryPeriod"
 
 export const GHANA_PAYROLL_UNSUPPORTED_TAX_PROFILE = "GHANA_PAYROLL_UNSUPPORTED_TAX_PROFILE"
 export const GHANA_PAYROLL_UNKNOWN_RATE_VERSION = "GHANA_PAYROLL_UNKNOWN_RATE_VERSION"
@@ -562,7 +563,7 @@ function normalizePeriodBasis(value: unknown): string | null {
   const s = String(value).trim()
   if (!s) return null
   try {
-    return extractDatePart(s)
+    return toCalendarDate(s)
   } catch {
     return null
   }
@@ -654,6 +655,7 @@ export function validateGhanaPayrollRunForApproval(opts: {
     payroll_frequency?: string | null
     pay_period_start?: string | null
     pay_period_end?: string | null
+    payroll_month?: string | null
     pension_limits_provisional?: boolean | null
     pension_minimum_insurable_earnings?: number | null
     pension_maximum_insurable_earnings?: number | null
@@ -676,7 +678,13 @@ export function validateGhanaPayrollRunForApproval(opts: {
   const runJurisdiction = opts.run.calculation_jurisdiction
     ? String(opts.run.calculation_jurisdiction).trim().toUpperCase()
     : null
-  const runPeriod = normalizePeriodBasis(opts.run.statutory_period_basis)
+  const runPeriod = resolveRunStatutoryPeriodDate({
+    statutory_period_basis: opts.run.statutory_period_basis,
+    pay_period_start: opts.run.pay_period_start,
+    pay_period_end: opts.run.pay_period_end,
+    payroll_month: opts.run.payroll_month,
+    payroll_frequency: opts.run.payroll_frequency,
+  })
   const runFrequency = opts.run.payroll_frequency
     ? String(opts.run.payroll_frequency).trim().toLowerCase()
     : null

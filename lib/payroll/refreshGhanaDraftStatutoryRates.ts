@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { recalcPayrollEntryForStaffOnDraftRun } from "@/lib/payroll/recalcPayrollEntryForStaff"
 import { isGhanaMonthlyStatutoryEngine } from "@/lib/payroll/salaryBasis"
+import { resolveRunStatutoryPeriodDate } from "@/lib/payroll/payrollStatutoryPeriod"
 import { resolveGhanaStatutoryRatesForPeriod } from "@/lib/payrollEngine/jurisdictions/ghanaStatutoryRates"
 
 /**
@@ -31,7 +32,7 @@ export async function refreshGhanaDraftStatutoryRates(params: {
   const { data: run, error: runError } = await supabase
     .from("payroll_runs")
     .select(
-      "id, status, payroll_month, paye_rate_version, pension_rate_version, pension_limits_provisional, pension_minimum_insurable_earnings, pension_maximum_insurable_earnings, pension_limits_effective_from"
+      "id, status, payroll_month, pay_period_start, pay_period_end, payroll_frequency, statutory_period_basis, paye_rate_version, pension_rate_version, pension_limits_provisional, pension_minimum_insurable_earnings, pension_maximum_insurable_earnings, pension_limits_effective_from"
     )
     .eq("id", runId)
     .eq("business_id", businessId)
@@ -67,11 +68,35 @@ export async function refreshGhanaDraftStatutoryRates(params: {
       status: 400,
     }
   }
-  const repaired = Boolean((repair as { repaired?: boolean } | null)?.repaired)
+  const repairResult = repair as
+    | { repaired?: boolean; statutory_period_basis?: string | null }
+    | null
+  const repaired = Boolean(repairResult?.repaired)
+
+  // Rate selection must use the payroll's authoritative calendar period, never
+  // a timezone-shifted timestamp. Prefer the stored statutory basis (including
+  // one just restored from employee snapshots), then the pay-period start.
+  const statutoryPeriod = resolveRunStatutoryPeriodDate({
+    statutory_period_basis:
+      run.statutory_period_basis ?? repairResult?.statutory_period_basis ?? null,
+    pay_period_start: run.pay_period_start,
+    pay_period_end: run.pay_period_end,
+    payroll_month: run.payroll_month,
+    payroll_frequency: run.payroll_frequency,
+  })
+
+  if (!statutoryPeriod) {
+    return {
+      ok: false,
+      error:
+        "This payroll run has no usable statutory period. Set the pay period or repair its calculation metadata before approval.",
+      status: 400,
+    }
+  }
 
   let resolved
   try {
-    resolved = resolveGhanaStatutoryRatesForPeriod(run.payroll_month)
+    resolved = resolveGhanaStatutoryRatesForPeriod(statutoryPeriod)
   } catch (err) {
     return {
       ok: false,

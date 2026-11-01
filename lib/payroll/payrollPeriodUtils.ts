@@ -1,3 +1,5 @@
+import { toCalendarDate } from "@/lib/payrollEngine/versioning"
+
 export const PAYROLL_FREQUENCIES = [
   "monthly",
   "weekly",
@@ -50,6 +52,21 @@ function parseIsoDate(value: string, field: string): Date {
   return d
 }
 
+/**
+ * Normalize an API period input to a calendar date.
+ *
+ * Date-only inputs are preserved. Timestamps are reduced to the calendar date
+ * written in the value (its own offset), never to the server timezone, so a
+ * timezone-shifted instant cannot silently select the previous month.
+ */
+function parsePeriodDateInput(value: string, field: string): string {
+  try {
+    return toCalendarDate(value)
+  } catch {
+    throw new Error(`${field} must be YYYY-MM-DD`)
+  }
+}
+
 function formatIsoDateUtc(d: Date): string {
   return d.toISOString().slice(0, 10)
 }
@@ -98,9 +115,15 @@ export function resolveCreatePayrollRunPeriod(
   const payroll_frequency = assertFrequency(input.payroll_frequency)
   const run_type = assertRunType(input.run_type)
 
-  let pay_period_start = input.pay_period_start?.slice(0, 10) || null
-  let pay_period_end = input.pay_period_end?.slice(0, 10) || null
-  const payroll_month = input.payroll_month?.slice(0, 10) || null
+  let pay_period_start = input.pay_period_start
+    ? parsePeriodDateInput(input.pay_period_start, "pay_period_start")
+    : null
+  let pay_period_end = input.pay_period_end
+    ? parsePeriodDateInput(input.pay_period_end, "pay_period_end")
+    : null
+  const payroll_month = input.payroll_month
+    ? parsePeriodDateInput(input.payroll_month, "payroll_month")
+    : null
 
   if (!pay_period_start && payroll_month) {
     if (payroll_frequency === "monthly") {

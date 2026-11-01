@@ -12,6 +12,7 @@ import {
   salaryBasisMatchesFrequency,
 } from "@/lib/payroll/salaryBasis"
 import { syncPayrollRunStaffScopeFingerprint } from "@/lib/payroll/syncPayrollRunStaffScope"
+import { resolveRunStatutoryPeriodDate } from "@/lib/payroll/payrollStatutoryPeriod"
 
 /** Recalculate one draft payroll entry after one-off item assignment changes. */
 export async function recalcPayrollEntryForStaffOnDraftRun(params: {
@@ -26,7 +27,7 @@ export async function recalcPayrollEntryForStaffOnDraftRun(params: {
   const { data: payrollRun } = await supabase
     .from("payroll_runs")
     .select(
-      "id, status, payroll_month, payroll_frequency, business_id, paye_rate_version, pension_rate_version, statutory_period_basis, calculation_engine_version"
+      "id, status, payroll_month, pay_period_start, pay_period_end, payroll_frequency, business_id, paye_rate_version, pension_rate_version, statutory_period_basis, calculation_engine_version"
     )
     .eq("id", runId)
     .eq("business_id", businessId)
@@ -66,6 +67,8 @@ export async function recalcPayrollEntryForStaffOnDraftRun(params: {
   const salaryBasis = parseSalaryBasis(existingEntry.salary_basis ?? staff.salary_basis ?? "monthly")
   const frequency = String(payrollRun.payroll_frequency || "monthly")
   const eligible = salaryBasisMatchesFrequency(salaryBasis, frequency)
+  const statutoryPeriod =
+    resolveRunStatutoryPeriodDate(payrollRun) ?? String(payrollRun.payroll_month)
 
   const [{ data: allowances }, { data: deductions }, { data: salaryAdvances }] = await Promise.all([
     supabase
@@ -92,7 +95,7 @@ export async function recalcPayrollEntryForStaffOnDraftRun(params: {
     deductions: deductions || [],
     payrollRunId: runId,
     payrollFrequency: frequency,
-    payrollMonth: payrollRun.payroll_month,
+    payrollMonth: statutoryPeriod,
   })
 
   try {
@@ -101,14 +104,14 @@ export async function recalcPayrollEntryForStaffOnDraftRun(params: {
         ? {
             payeRateVersion: String(payrollRun.paye_rate_version),
             pensionRateVersion: String(payrollRun.pension_rate_version),
-            periodBasis: String(payrollRun.statutory_period_basis || payrollRun.payroll_month),
+            periodBasis: statutoryPeriod,
           }
         : null
 
     const computed = computeStaffPayrollEntry({
       staff,
       businessCountry,
-      effectiveDate: payrollRun.payroll_month,
+      effectiveDate: statutoryPeriod,
       allowances: eligible ? filtered.includedAllowances : [],
       deductions: eligible ? filtered.includedDeductions : [],
       isIncluded: eligible,
