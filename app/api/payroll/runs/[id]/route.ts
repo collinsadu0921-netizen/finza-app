@@ -14,7 +14,7 @@ import {
   nonMonthlyApprovalBlockedMessage,
 } from "@/lib/payroll/salaryBasis"
 import { validateGhanaPayrollRunForApproval } from "@/lib/payroll/ghanaApprovalGuards"
-import { refreshGhanaDraftStatutoryRates } from "@/lib/payroll/refreshGhanaDraftStatutoryRates"
+import { refreshDraftStatutoryRatesForApproval } from "@/lib/payroll/approvalRecalculationSafeguard"
 import { mapApprovePayrollRunAtomicError } from "@/lib/payroll/mapApprovePayrollAtomicError"
 import { mapPayrollPaymentAtomicError } from "@/lib/payroll/mapPayrollPaymentAtomicError"
 import {
@@ -339,14 +339,21 @@ export async function PUT(
         // validating it. This recalculates entries and clears stale provisional
         // acknowledgement. If no official SSNIT limits exist, the draft remains
         // provisional and requires the employer acknowledgement below.
-        const refreshed = await refreshGhanaDraftStatutoryRates({
+        const refreshed = await refreshDraftStatutoryRatesForApproval({
           supabase,
           businessId: business.id,
           businessCountry,
           runId,
         })
         if (!refreshed.ok) {
-          return NextResponse.json({ error: refreshed.error }, { status: refreshed.status })
+          return NextResponse.json(
+            {
+              error: refreshed.error,
+              ...(refreshed.code ? { code: refreshed.code } : {}),
+              ...(refreshed.details ? { details: refreshed.details } : {}),
+            },
+            { status: refreshed.status }
+          )
         }
 
         const { data: approvalRun, error: approvalRunError } = await supabase

@@ -281,6 +281,26 @@ type SendModalState = {
   staffPhone: string | null
 } | null
 
+type RecalculationFieldChange = {
+  field: string
+  label: string
+  before: number
+  after: number
+  delta: number
+}
+
+type RecalculationEmployeeChange = {
+  staff_id: string
+  staff_name: string | null
+  changes: RecalculationFieldChange[]
+}
+
+type RecalculationReview = {
+  message?: string
+  totals: RecalculationFieldChange[]
+  employees: RecalculationEmployeeChange[]
+}
+
 type BatchItemPaymentTarget = {
   batchId: string
   itemId: string
@@ -335,6 +355,7 @@ export default function PayrollRunViewPage() {
   const salaryPaymentSubmittingRef = useRef(false)
   const salaryPaymentIdempotencyKeyRef = useRef<string | null>(null)
   const [showPaymentModal, setShowPaymentModal] = useState(false)
+  const [recalculationReview, setRecalculationReview] = useState<RecalculationReview | null>(null)
   const [salaryPayments, setSalaryPayments] = useState<PayrollPayment[]>([])
   const [paymentSummary, setPaymentSummary] = useState<PayrollPaymentSummary | null>(null)
   const [paymentAccounts, setPaymentAccounts] = useState<PaymentAccount[]>([])
@@ -601,9 +622,27 @@ export default function PayrollRunViewPage() {
       })
       const data = await response.json()
       if (response.ok) {
+        setRecalculationReview(null)
         loadPayrollRun()
         loadObligations()
         toast.showToast(data.reused ? "Payroll already approved" : "Payroll approved", "success")
+      } else if (
+        data.code === "PAYROLL_RECALCULATION_REVIEW_REQUIRED" &&
+        data.details &&
+        Array.isArray(data.details.totals)
+      ) {
+        setRecalculationReview({
+          message: typeof data.details.message === "string" ? data.details.message : undefined,
+          totals: data.details.totals as RecalculationFieldChange[],
+          employees: Array.isArray(data.details.employees)
+            ? (data.details.employees as RecalculationEmployeeChange[])
+            : [],
+        })
+        await loadPayrollRun()
+        toast.showToast(
+          "Payroll calculations updated. Review the revised amounts before approving.",
+          "warning"
+        )
       } else {
         const affected = Array.isArray(data.affectedEmployees) ? data.affectedEmployees : []
         const detail =
@@ -3930,6 +3969,136 @@ export default function PayrollRunViewPage() {
                 </button>
               </div>
 
+            </div>
+          </div>
+        </div>
+      )}
+
+      {recalculationReview && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="recalculation-review-title"
+        >
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
+            <div className="shrink-0 flex items-start justify-between gap-3 px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+              <div className="min-w-0">
+                <h2
+                  id="recalculation-review-title"
+                  className="text-base font-bold text-gray-900 dark:text-white"
+                >
+                  Payroll calculations updated
+                </h2>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Review the revised payroll before approving.
+                </p>
+              </div>
+              <button
+                onClick={() => setRecalculationReview(null)}
+                aria-label="Close recalculation review"
+                className="shrink-0 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="px-6 py-5 space-y-5 overflow-y-auto flex-1 min-h-0">
+              <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 px-4 py-3">
+                <p className="text-sm font-semibold text-amber-950 dark:text-amber-100">
+                  Payroll calculations updated
+                </p>
+                <p className="mt-1 text-sm text-amber-900/90 dark:text-amber-200/90">
+                  {recalculationReview.message ||
+                    "Some payroll amounts have changed because the applicable statutory rates were updated. Review the revised payroll before approving."}
+                </p>
+                <p className="mt-2 text-xs text-amber-900/80 dark:text-amber-200/80">
+                  This draft has not been approved. The amounts below are already saved to the draft; approve
+                  again only after reviewing them.
+                </p>
+              </div>
+
+              {recalculationReview.totals.length > 0 && (
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-2">
+                    Payroll totals
+                  </h3>
+                  <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
+                    <table className="min-w-full text-sm">
+                      <thead className="bg-gray-50 dark:bg-gray-900/50 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                        <tr>
+                          <th className="px-3 py-2 text-left font-medium">Item</th>
+                          <th className="px-3 py-2 text-right font-medium">Before</th>
+                          <th className="px-3 py-2 text-right font-medium">After</th>
+                          <th className="px-3 py-2 text-right font-medium">Change</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                        {recalculationReview.totals.map((change) => (
+                          <tr key={change.field}>
+                            <td className="px-3 py-2 text-gray-700 dark:text-gray-300">{change.label}</td>
+                            <td className="px-3 py-2 text-right tabular-nums text-gray-600 dark:text-gray-400">
+                              ₵{change.before.toFixed(2)}
+                            </td>
+                            <td className="px-3 py-2 text-right tabular-nums font-medium text-gray-900 dark:text-white">
+                              ₵{change.after.toFixed(2)}
+                            </td>
+                            <td className="px-3 py-2 text-right tabular-nums text-gray-700 dark:text-gray-300">
+                              {change.delta > 0 ? "+" : change.delta < 0 ? "−" : ""}₵
+                              {Math.abs(change.delta).toFixed(2)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {recalculationReview.employees.length > 0 && (
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-2">
+                    Affected employees ({recalculationReview.employees.length})
+                  </h3>
+                  <div className="space-y-3">
+                    {recalculationReview.employees.map((employee) => (
+                      <div
+                        key={employee.staff_id}
+                        className="rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2"
+                      >
+                        <p className="text-sm font-medium text-gray-900 dark:text-white">
+                          {employee.staff_name || "Employee"}
+                        </p>
+                        <dl className="mt-1.5 grid grid-cols-1 sm:grid-cols-3 gap-x-4 gap-y-1 text-xs">
+                          {employee.changes.map((change) => (
+                            <div key={change.field} className="flex items-baseline justify-between gap-2">
+                              <dt className="text-gray-500 dark:text-gray-400">{change.label}</dt>
+                              <dd className="tabular-nums text-gray-800 dark:text-gray-200">
+                                ₵{change.before.toFixed(2)} → ₵{change.after.toFixed(2)}
+                              </dd>
+                            </div>
+                          ))}
+                        </dl>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="shrink-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-6 py-4 border-t border-gray-200 dark:border-gray-700">
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Approval is a separate step. You will need to click Approve payroll again after reviewing.
+              </p>
+              <button
+                type="button"
+                onClick={() => setRecalculationReview(null)}
+                className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700"
+              >
+                Review updated payroll
+              </button>
             </div>
           </div>
         </div>

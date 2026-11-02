@@ -68,6 +68,31 @@ describe("Ghana statutory period boundaries", () => {
     }
   )
 
+  it.each([
+    ["2026-03-01", GHANA_PAYE_2024_01_VERSION, 56.13, 888.87],
+    ["2026-08-01", GHANA_PAYE_2024_01_VERSION, 56.13, 888.87],
+    ["2026-09-01", GHANA_PAYE_2026_09_VERSION, 44.98, 900.02],
+  ] as const)(
+    "%s selects %s",
+    (period, payeVersion, expectedPaye, expectedNet) => {
+      const result = calculatePayroll(
+        {
+          jurisdiction: "GH",
+          effectiveDate: period,
+          basicSalary: 1000,
+          allowances: 0,
+          otherDeductions: 0,
+        },
+        "GH"
+      )
+      expect(result.complianceBreakdown?.payeRateVersion).toBe(payeVersion)
+      expect(
+        result.statutoryDeductions.find((deduction) => deduction.code === "PAYE")?.amount
+      ).toBe(expectedPaye)
+      expect(result.totals.netSalary).toBe(expectedNet)
+    }
+  )
+
   it("calculates September 2026 with Act 1178 and January 2027 with provisional pension", () => {
     const september = calculatePayroll(
       {
