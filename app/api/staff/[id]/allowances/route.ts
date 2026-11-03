@@ -3,7 +3,7 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { normalizeAllowanceType, ALLOWANCE_TYPES } from "@/lib/payrollTypes"
 import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
-import { recalcPayrollEntryForStaffOnDraftRun } from "@/lib/payroll/recalcPayrollEntryForStaff"
+import { recalcDraftRunsForStaffChange } from "@/lib/payroll/recalcDraftRunsForStaff"
 
 export async function POST(
   request: NextRequest,
@@ -142,20 +142,18 @@ export async function POST(
       )
     }
 
-    if (runId) {
-      const businessCountry = business.address_country || business.country_code || null
-      if (businessCountry) {
-        const recalc = await recalcPayrollEntryForStaffOnDraftRun({
-          supabase,
-          businessId: business.id,
-          businessCountry,
-          runId,
-          staffId,
-        })
-        if (!recalc.ok) {
-          await supabase.from("allowances").delete().eq("id", allowance.id)
-          return NextResponse.json({ error: recalc.error }, { status: recalc.status })
-        }
+    const businessCountry = business.address_country || business.country_code || null
+    if (runId && businessCountry) {
+      const recalc = await recalcDraftRunsForStaffChange({
+        supabase,
+        businessId: business.id,
+        businessCountry,
+        staffId,
+        runId,
+      })
+      if (!recalc.ok) {
+        await supabase.from("allowances").delete().eq("id", allowance.id)
+        return NextResponse.json({ error: recalc.error }, { status: recalc.status })
       }
     }
 
