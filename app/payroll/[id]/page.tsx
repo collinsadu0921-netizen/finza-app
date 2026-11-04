@@ -1368,9 +1368,9 @@ export default function PayrollRunViewPage() {
           </button>
         ) : null}
         {paystackTransfer &&
-        (paystackTransfer.status === "pending" ||
-          paystackTransfer.status === "awaiting_authorization" ||
-          paystackTransfer.status === "requires_attention") ? (
+        ["pending", "awaiting_authorization", "requires_attention", "successful", "reversed"].includes(
+          paystackTransfer.status
+        ) ? (
           <button
             type="button"
             disabled={busy}
@@ -1386,7 +1386,7 @@ export default function PayrollRunViewPage() {
             }
             className="px-2 py-0.5 text-[11px] rounded border border-indigo-300 text-indigo-700 hover:bg-indigo-50 dark:border-indigo-800 dark:text-indigo-300 dark:hover:bg-indigo-900/20 disabled:opacity-50"
           >
-            View transfer
+            {paystackTransfer.status === "successful" ? "View receipt" : "View transfer"}
           </button>
         ) : null}
         {item.status === "pending" || item.status === "failed" ? (
@@ -2037,14 +2037,41 @@ export default function PayrollRunViewPage() {
             )
             if (readiness.included_count === 0 || readiness.ready) return null
             return (
-              <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100 whitespace-pre-line">
-                <p className="font-medium mb-1">DT 107A preparation checks</p>
-                <p>{readiness.summary}</p>
-                <p className="mt-2 text-xs opacity-90">
-                  You can still approve monthly payroll if statutory calculations allow. The DT 107A preparation
-                  export is for verification only — confirm amounts before any GRA submission.
-                </p>
-              </div>
+              <details className="group mb-4 rounded-lg border border-amber-300 bg-amber-50 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
+                <summary className="flex cursor-pointer list-none items-start justify-between gap-3 px-4 py-3 [&::-webkit-details-marker]:hidden">
+                  <div className="min-w-0">
+                    <p className="font-semibold">DT 107A preparation checks</p>
+                    <p className="mt-0.5 text-xs opacity-90">
+                      {readiness.issues.length} employee
+                      {readiness.issues.length === 1 ? "" : "s"} need
+                      {readiness.issues.length === 1 ? "s" : ""} filing information
+                    </p>
+                  </div>
+                  <svg
+                    className="mt-0.5 h-4 w-4 shrink-0 transition-transform group-open:rotate-180"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                    aria-hidden="true"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </summary>
+                <div className="border-t border-amber-200 px-4 py-3 dark:border-amber-800">
+                  <ul className="space-y-1">
+                    {readiness.issues.map((issue) => (
+                      <li key={issue.staff_id} className="break-words">
+                        <span className="font-medium">{issue.staff_name}</span>
+                        <span className="opacity-80"> — {issue.problems.join(", ")}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="mt-2 text-xs opacity-90">
+                    You can still approve monthly payroll if statutory calculations allow. The DT 107A
+                    preparation export is for verification only — confirm amounts before any GRA submission.
+                  </p>
+                </div>
+              </details>
             )
           })()}
 
@@ -2755,6 +2782,9 @@ export default function PayrollRunViewPage() {
                                                     {new Date(paystackTransfer.confirmed_at).toLocaleDateString("en-GH")}
                                                   </p>
                                                 ) : null}
+                                                {paystackTransfer.reference ? (
+                                                  <p className="break-all">Ref: {paystackTransfer.reference}</p>
+                                                ) : null}
                                                 {paystackTransfer.failure_reason ? (
                                                   <p className="text-red-600 dark:text-red-400">
                                                     {paystackTransfer.failure_reason}
@@ -2863,6 +2893,7 @@ export default function PayrollRunViewPage() {
                                             <span className="text-[11px] text-gray-500 dark:text-gray-400">
                                               Paystack: {transfer.status.replace(/_/g, " ")}
                                               {transfer.environment === "test" ? " (test)" : ""}
+                                              {transfer.reference ? ` · ${transfer.reference}` : ""}
                                             </span>
                                           ) : null}
                                         </div>
@@ -3211,6 +3242,12 @@ export default function PayrollRunViewPage() {
                     const included = entry.is_included !== false
                     const draft = entryDrafts[entry.id]
                     const baseSnapshot = Number(entry.base_salary_snapshot ?? entry.basic_salary)
+                    const adjustmentAmount = Number(entry.adjustment_amount) || 0
+                    const hasAdjustment = adjustmentAmount !== 0
+                    const salaryBasisLabel = entry.salary_basis
+                      ? entry.salary_basis.charAt(0).toUpperCase() + entry.salary_basis.slice(1)
+                      : null
+                    const finalBasic = Number(entry.period_basic_pay ?? entry.basic_salary)
 
                     return (
                       <tr
@@ -3219,36 +3256,41 @@ export default function PayrollRunViewPage() {
                           !included ? "opacity-60 bg-gray-50/80 dark:bg-gray-900/40" : ""
                         }`}
                       >
-                        <td className="px-5 py-4">
-                          <p className="font-medium text-gray-900 dark:text-white">{entry.staff.name}</p>
-                          {entry.staff.position && <p className="text-xs text-gray-500">{entry.staff.position}</p>}
-                          {!included && entry.exclusion_reason && (
-                            <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">Excluded: {entry.exclusion_reason}</p>
-                          )}
-                          {!included && entry.exclusion_reason && (
-                            <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">
-                              {entry.exclusion_reason}
+                        <td className="px-5 py-3 align-top max-w-[240px]">
+                          <p className="font-medium text-gray-900 dark:text-white break-words leading-snug">
+                            {entry.staff.name}
+                          </p>
+                          {entry.staff.position && entry.staff.position !== entry.staff.name ? (
+                            <p className="text-xs text-gray-500 break-words leading-snug">
+                              {entry.staff.position}
                             </p>
-                          )}
-                          {included && entry.salary_basis && (
-                            <p className="text-xs text-gray-500 mt-1">
-                              Salary basis: {entry.salary_basis}
-                              {entry.base_salary_snapshot != null && (
-                                <> · Original ₵{Number(entry.base_salary_snapshot).toFixed(2)}</>
-                              )}
-                              {Number(entry.adjustment_amount) !== 0 && (
+                          ) : null}
+                          {salaryBasisLabel ? (
+                            <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5 break-words">
+                              {salaryBasisLabel}
+                              {hasAdjustment ? (
                                 <>
-                                  {" "}
-                                  · Adj {Number(entry.adjustment_amount) > 0 ? "+" : ""}
-                                  {Number(entry.adjustment_amount).toFixed(2)} · Final ₵
-                                  {Number(entry.period_basic_pay ?? entry.basic_salary).toFixed(2)}
+                                  {" · "}Adj {adjustmentAmount > 0 ? "+" : ""}₵
+                                  {adjustmentAmount.toFixed(2)}
                                 </>
-                              )}
+                              ) : null}
                             </p>
-                          )}
-                          {included && entry.adjustment_reason && Number(entry.adjustment_amount) !== 0 && (
-                            <p className="text-xs text-blue-700 dark:text-blue-400 mt-1">{entry.adjustment_reason}</p>
-                          )}
+                          ) : null}
+                          {hasAdjustment && Math.abs(baseSnapshot - finalBasic) >= 0.005 ? (
+                            <p className="text-[11px] text-gray-400 dark:text-gray-500 break-words">
+                              Base ₵{baseSnapshot.toFixed(2)} → ₵{finalBasic.toFixed(2)}
+                            </p>
+                          ) : null}
+                          {!included && entry.exclusion_reason ? (
+                            <p className="text-[11px] text-amber-700 dark:text-amber-400 mt-1 break-words">
+                              Excluded: {entry.exclusion_reason}
+                            </p>
+                          ) : null}
+                          {included && hasAdjustment && entry.adjustment_reason ? (
+                            <p className="text-[11px] text-blue-700 dark:text-blue-400 mt-1 break-words">
+                              {entry.adjustment_reason}
+                            </p>
+                          ) : null}
                         </td>
                         {isDraftRun && (
                           <td className="px-3 py-4 text-center">

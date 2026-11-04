@@ -8,7 +8,7 @@ type Preview = {
   code: string
   message: string
   employee: { id: string; name: string | null }
-  payroll: { run_id: string; payroll_month: string | null; batch_id: string; item_id: string }
+  payroll: { run_id: string; payroll_month: string | null; batch_id: string; item_id: string; item_status: string }
   amount: { ghs: number; pesewas: number; currency: string }
   destination: {
     method_type: "bank" | "momo"
@@ -296,6 +296,8 @@ export default function PaystackSalaryPaymentModal({
   const busy = loading || submitting || verifying
   const status = transfer?.status ?? null
   const canRetryVisibly = status === "failed"
+  const settlementPending =
+    status === "successful" && String(preview?.payroll?.item_status || "") !== "paid"
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
@@ -339,7 +341,7 @@ export default function PaystackSalaryPaymentModal({
               </div>
             ) : null}
 
-            {preview.eligible ? (
+            {preview.eligible && status !== "successful" ? (
               <>
                 <div className="rounded-lg border border-gray-200 p-4 text-sm dark:border-gray-700">
                   <div className="flex items-center justify-between gap-3">
@@ -394,13 +396,24 @@ export default function PaystackSalaryPaymentModal({
 
             {transfer ? (
               <div className="rounded-lg border border-gray-200 p-4 text-sm dark:border-gray-700">
+                {status === "successful" ? (
+                  <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-100">
+                    <p className="font-semibold">Paystack transfer successful</p>
+                    <p className="mt-1 text-xs">
+                      {settlementPending
+                        ? "Paystack confirmed the transfer. Finza settlement is still pending; this employee is not marked paid until the payment is recorded."
+                        : "Paystack confirmed the transfer and the salary payment is recorded."}
+                    </p>
+                    <p className="mt-1 break-all text-xs">Reference: {transfer.reference}</p>
+                  </div>
+                ) : null}
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-gray-500 dark:text-gray-400">Transfer status</span>
                   <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusTone(transfer.status)}`}>
                     {transfer.status.replace(/_/g, " ")}
                   </span>
                 </div>
-                {transfer.reference ? (
+                {transfer.reference && status !== "successful" ? (
                   <p className="mt-2 break-all text-xs text-gray-500 dark:text-gray-400">
                     Reference: {transfer.reference}
                   </p>
@@ -408,7 +421,9 @@ export default function PaystackSalaryPaymentModal({
                 {transfer.message ? (
                   <p className="mt-2 text-xs text-gray-600 dark:text-gray-300">{transfer.message}</p>
                 ) : null}
-                {transfer.otp_required || transfer.status === "awaiting_authorization" ? (
+                {status !== "successful" &&
+                status !== "reversed" &&
+                (transfer.otp_required || transfer.status === "awaiting_authorization") ? (
                   <div className="mt-3 space-y-2">
                     <label className="block text-xs font-medium text-gray-700 dark:text-gray-300">
                       Paystack OTP
