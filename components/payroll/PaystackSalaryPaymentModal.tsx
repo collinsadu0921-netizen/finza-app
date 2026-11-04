@@ -164,7 +164,7 @@ export default function PaystackSalaryPaymentModal({
             ? { ...value, status: nextStatus, message: String(body.message || value.message) }
             : value
         )
-        notifyStatusChange(nextStatus)
+        if (nextStatus !== current.status) notifyStatusChange(nextStatus)
         if (nextStatus === "successful" || nextStatus === "reversed") notifyCompleted()
       } catch {
         // Transient failures are retried by the next poll.

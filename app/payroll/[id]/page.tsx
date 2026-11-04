@@ -4123,15 +4123,15 @@ export default function PayrollRunViewPage() {
           amount={paystackTarget.amount}
           onClose={() => setPaystackTarget(null)}
           onCompleted={() => {
-            void loadPaymentBatches()
+            void loadPaymentBatches({ silent: true })
             void expandPaymentBatch(paystackTarget.batchId, { silent: true })
             void loadPayrollPayments()
-            void loadObligations()
-            void loadPayrollRun()
+            void loadObligations({ silent: true })
+            void loadPayrollRun({ silent: true })
             void loadPaystackStatus()
           }}
           onStatusChange={() => {
-            void loadPaymentBatches()
+            void loadPaymentBatches({ silent: true })
             void expandPaymentBatch(paystackTarget.batchId, { silent: true })
           }}
         />
