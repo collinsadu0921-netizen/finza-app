@@ -109,6 +109,18 @@ export default function PaystackSalaryPaymentModal({
         return
       }
       setPreview(body as Preview)
+      const active = (body as Preview).active_transfer
+      if (active) {
+        setTransfer((current) =>
+          current ?? {
+            transfer_id: String(active.id),
+            reference: String(active.reference || ""),
+            status: String(active.status || "pending"),
+            message: "Existing Paystack transfer loaded. Verify its status or enter the OTP below.",
+            otp_required: String(active.status) === "awaiting_authorization",
+          }
+        )
+      }
     } catch {
       setError("Could not check Paystack eligibility.")
     } finally {

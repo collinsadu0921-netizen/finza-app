@@ -454,13 +454,16 @@ export default function PayrollRunViewPage() {
     approvedSnapshotBusinessTin: string | null
   } | null>(null)
 
-  const loadPayrollRun = useCallback(async () => {
+  const loadPayrollRun = useCallback(async (options?: { silent?: boolean }) => {
     try {
       const response = await fetch(`/api/payroll/runs/${runId}`)
       const data = await response.json()
       if (response.ok) {
         setPayrollRun(data.payrollRun)
-        setEntries(data.entries || [])
+        // Background settlement polling must not replace entry rows or reset
+        // in-progress entry edits. Entry financial values do not change when a
+        // payment status changes.
+        if (!options?.silent) setEntries(data.entries || [])
         if (data.paymentSummary) setPaymentSummary(data.paymentSummary)
         if (Array.isArray(data.payments)) setSalaryPayments(data.payments)
         if (data.filingContext) setFilingContext(data.filingContext)
@@ -496,16 +499,23 @@ export default function PayrollRunViewPage() {
     }
   }, [runId])
 
-  const loadPaymentBatches = useCallback(async () => {
-    setLoadingPaymentBatches(true)
+  const loadPaymentBatches = useCallback(async (options?: { silent?: boolean }) => {
+    if (!options?.silent) setLoadingPaymentBatches(true)
     try {
       const response = await fetch(`/api/payroll/runs/${runId}/payment-batches`)
       const data = await response.json()
-      if (response.ok) setPaymentBatches(data.batches || [])
+      if (response.ok) {
+        const next = data.batches || []
+        // Preserve the current array identity when a background poll returns
+        // identical data, avoiding a re-render that can collapse or jump UI.
+        setPaymentBatches((previous) =>
+          JSON.stringify(previous) === JSON.stringify(next) ? previous : next
+        )
+      }
     } catch (err) {
       console.error("Error loading payment batches:", err)
     } finally {
-      setLoadingPaymentBatches(false)
+      if (!options?.silent) setLoadingPaymentBatches(false)
     }
   }, [runId])
 
@@ -530,8 +540,8 @@ export default function PayrollRunViewPage() {
     }
   }, [])
 
-  const loadObligations = useCallback(async () => {
-    setLoadingObligations(true)
+  const loadObligations = useCallback(async (options?: { silent?: boolean }) => {
+    if (!options?.silent) setLoadingObligations(true)
     try {
       const response = await fetch(`/api/payroll/runs/${runId}/obligations`)
       const data = await response.json()
@@ -539,7 +549,7 @@ export default function PayrollRunViewPage() {
     } catch (err) {
       console.error("Error loading obligations:", err)
     } finally {
-      setLoadingObligations(false)
+      if (!options?.silent) setLoadingObligations(false)
     }
   }, [runId])
 
@@ -1257,10 +1267,10 @@ export default function PayrollRunViewPage() {
 
   const refreshSettlementState = useCallback(async () => {
     await Promise.all([
-      loadPaymentBatches(),
+      loadPaymentBatches({ silent: true }),
       loadPayrollPayments(),
-      loadObligations(),
-      loadPayrollRun(),
+      loadObligations({ silent: true }),
+      loadPayrollRun({ silent: true }),
     ])
     if (expandedPaymentBatchId) {
       await expandPaymentBatch(expandedPaymentBatchId, { silent: true })
