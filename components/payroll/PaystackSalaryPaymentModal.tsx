@@ -116,7 +116,9 @@ export default function PaystackSalaryPaymentModal({
             transfer_id: String(active.id),
             reference: String(active.reference || ""),
             status: String(active.status || "pending"),
-            message: "Existing Paystack transfer loaded. Verify its status or enter the OTP below.",
+            message: String(active.status) === "successful"
+              ? "Existing Paystack transfer loaded. The salary payment is already recorded."
+              : "Existing Paystack transfer loaded. Verify its status or enter the OTP below.",
             otp_required: String(active.status) === "awaiting_authorization",
           }
         )
@@ -304,7 +306,9 @@ export default function PaystackSalaryPaymentModal({
       <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl bg-white p-6 shadow-xl dark:bg-gray-800">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h3 className="text-lg font-bold text-gray-900 dark:text-white">Pay with Paystack</h3>
+            <h3 className="text-lg font-bold text-gray-900 dark:text-white">
+              {status === "successful" ? "Paystack transfer receipt" : "Pay with Paystack"}
+            </h3>
             <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
               {employeeName || "Employee"}  -  {money(amount)}
             </p>
