@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
@@ -170,6 +170,8 @@ function FinancingPageInner() {
   const [error, setError]           = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [showConfirm, setShowConfirm]   = useState(false)
+  // Stable across repeated submissions of the same repayment confirmation.
+  const repaymentIdempotencyKey = useRef<string | null>(null)
 
   // ── Load business ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -356,6 +358,14 @@ function FinancingPageInner() {
           const intentType = loanMode === "repayment" ? "LOAN_REPAYMENT" : "LOAN_INTEREST_PAYMENT"
           const defaultDesc =
             loanMode === "repayment" ? "Loan Repayment" : "Loan Interest Payment"
+          const repaymentKey =
+            loanMode === "repayment"
+              ? repaymentIdempotencyKey.current ??
+                (repaymentIdempotencyKey.current =
+                  typeof crypto !== "undefined" && "randomUUID" in crypto
+                    ? crypto.randomUUID()
+                    : `loan-repay-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+              : null
           const intent: any = {
             intent_type:             intentType,
             entry_date:              loanDate,
@@ -370,13 +380,19 @@ function FinancingPageInner() {
 
           const res = await fetch("/api/service/accounting/post-intent", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: {
+              "Content-Type": "application/json",
+              ...(repaymentKey ? { "Idempotency-Key": repaymentKey } : {}),
+            },
             body: JSON.stringify({ business_id: businessId, intent }),
           })
           const data = await res.json()
           if (!res.ok) { setError(data.error ?? "Failed to record transaction."); return }
 
-          if (loanMode === "repayment") await loadLoans()
+          if (loanMode === "repayment") {
+            repaymentIdempotencyKey.current = null
+            await loadLoans()
+          }
           const journalEntryId = data.journal_entry_id
           if (journalEntryId) {
             router.push(`${buildServiceRoute("/service/ledger", businessId)}&highlight=${journalEntryId}`)
@@ -706,7 +722,15 @@ function FinancingPageInner() {
       <button
         type="button"
         disabled={!canPost}
-        onClick={() => setShowConfirm(true)}
+        onClick={() => {
+          if (loanMode === "repayment") {
+            repaymentIdempotencyKey.current =
+              typeof crypto !== "undefined" && "randomUUID" in crypto
+                ? crypto.randomUUID()
+                : `loan-repay-${Date.now()}-${Math.random().toString(36).slice(2)}`
+          }
+          setShowConfirm(true)
+        }}
         className="px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:pointer-events-none font-medium text-sm"
       >
         {isSubmitting ? "Posting…" : "Confirm & Post"}
