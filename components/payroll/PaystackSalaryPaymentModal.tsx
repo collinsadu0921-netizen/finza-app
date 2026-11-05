@@ -111,15 +111,24 @@ export default function PaystackSalaryPaymentModal({
       setPreview(body as Preview)
       const active = (body as Preview).active_transfer
       if (active) {
+        const activeStatus = String(active.status || "pending")
+        const activeMessage =
+          activeStatus === "successful"
+            ? "Existing Paystack transfer loaded. The salary payment is already recorded."
+            : activeStatus === "reversed"
+              ? "Existing Paystack transfer loaded. This transfer was reversed."
+              : activeStatus === "requires_attention"
+                ? "Paystack has confirmed this transfer, but Finza settlement needs review. Do not initiate another payment."
+                : activeStatus === "awaiting_authorization"
+                  ? "Existing Paystack transfer loaded. Verify its status or enter the OTP below."
+                  : "Existing Paystack transfer loaded. Verify its status."
         setTransfer((current) =>
           current ?? {
             transfer_id: String(active.id),
             reference: String(active.reference || ""),
-            status: String(active.status || "pending"),
-            message: String(active.status) === "successful"
-              ? "Existing Paystack transfer loaded. The salary payment is already recorded."
-              : "Existing Paystack transfer loaded. Verify its status or enter the OTP below.",
-            otp_required: String(active.status) === "awaiting_authorization",
+            status: activeStatus,
+            message: activeMessage,
+            otp_required: activeStatus === "awaiting_authorization",
           }
         )
       }
@@ -141,7 +150,7 @@ export default function PaystackSalaryPaymentModal({
   useEffect(() => {
     const transferId = transfer?.transfer_id
     if (!transferId) return
-    const activeStatuses = new Set(["initiating", "pending", "awaiting_authorization", "requires_attention"])
+    const activeStatuses = new Set(["initiating", "pending", "awaiting_authorization"])
     if (!activeStatuses.has(String(transfer?.status || ""))) return
 
     let cancelled = false
@@ -297,6 +306,7 @@ export default function PaystackSalaryPaymentModal({
 
   const busy = loading || submitting || verifying
   const status = transfer?.status ?? null
+  const canStartNewPayment = !transfer || status === "failed" || status === "reversed"
   const canRetryVisibly = status === "failed"
   const settlementPending =
     status === "successful" && String(preview?.payroll?.item_status || "") !== "paid"
@@ -307,7 +317,11 @@ export default function PaystackSalaryPaymentModal({
         <div className="flex items-start justify-between gap-4">
           <div>
             <h3 className="text-lg font-bold text-gray-900 dark:text-white">
-              {status === "successful" ? "Paystack transfer receipt" : "Pay with Paystack"}
+              {status === "successful"
+                ? "Paystack transfer receipt"
+                : status === "requires_attention"
+                  ? "Paystack transfer needs review"
+                  : "Pay with Paystack"}
             </h3>
             <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
               {employeeName || "Employee"}  -  {money(amount)}
@@ -345,7 +359,7 @@ export default function PaystackSalaryPaymentModal({
               </div>
             ) : null}
 
-            {preview.eligible && status !== "successful" ? (
+            {preview.eligible && canStartNewPayment ? (
               <>
                 <div className="rounded-lg border border-gray-200 p-4 text-sm dark:border-gray-700">
                   <div className="flex items-center justify-between gap-3">
@@ -409,6 +423,15 @@ export default function PaystackSalaryPaymentModal({
                         : "Paystack confirmed the transfer and the salary payment is recorded."}
                     </p>
                     <p className="mt-1 break-all text-xs">Reference: {transfer.reference}</p>
+                  </div>
+                ) : null}
+                {status === "requires_attention" ? (
+                  <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
+                    <p className="font-semibold">Settlement needs review</p>
+                    <p className="mt-1 text-xs">
+                      Paystack may have completed this transfer, but Finza has not recorded the salary settlement.
+                      Do not initiate another payment. Use Verify transfer status after the settlement issue is resolved.
+                    </p>
                   </div>
                 ) : null}
                 <div className="flex items-center justify-between gap-3">
