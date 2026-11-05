@@ -92,11 +92,27 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // A repayment may be dated in a month that has not had its accounting period
-    // provisioned yet. Resolve/create that month through the existing period
-    // mechanism before posting. Locked periods are never modified or reopened.
+    const rawIdempotencyKey =
+      request.headers.get("idempotency-key") ??
+      (body as { idempotency_key?: unknown }).idempotency_key
+    const idempotencyKey =
+      typeof rawIdempotencyKey === "string" ? rawIdempotencyKey.trim() : ""
+
     let accountingPeriodCreated = false
     if (intent.intent_type === "LOAN_REPAYMENT") {
+      if (!idempotencyKey || idempotencyKey.length > 128) {
+        return NextResponse.json(
+          {
+            error: "An idempotency key is required to record a loan repayment.",
+            code: "IDEMPOTENCY_REQUIRED",
+          },
+          { status: 400 }
+        )
+      }
+
+      // A repayment may be dated in a month that has not had its accounting period
+      // provisioned yet. Resolve/create that month through the existing period
+      // mechanism before posting. Locked periods are never modified or reopened.
       const periodResult = await ensureLoanRepaymentAccountingPeriod(supabase, {
         businessId,
         userId: user.id,
@@ -111,15 +127,29 @@ export async function POST(request: NextRequest) {
       accountingPeriodCreated = periodResult.created
     }
 
-    const { data: journalEntryId, error: rpcError } = await supabase.rpc(
-      "post_service_intent_to_ledger",
-      {
+    let journalEntryId: string | null = null
+    let rpcError: { message?: string; code?: string } | null = null
+
+    if (intent.intent_type === "LOAN_REPAYMENT") {
+      const result = await supabase.rpc("post_service_intent_to_ledger_idempotent", {
         p_business_id: businessId,
         p_user_id: user.id,
         p_entry_date: intent.entry_date,
         p_intent: intent,
-      }
-    )
+        p_idempotency_key: idempotencyKey,
+      })
+      journalEntryId = result.data
+      rpcError = result.error
+    } else {
+      const result = await supabase.rpc("post_service_intent_to_ledger", {
+        p_business_id: businessId,
+        p_user_id: user.id,
+        p_entry_date: intent.entry_date,
+        p_intent: intent,
+      })
+      journalEntryId = result.data
+      rpcError = result.error
+    }
 
     if (rpcError) {
       console.error("post_service_intent_to_ledger error:", rpcError)
