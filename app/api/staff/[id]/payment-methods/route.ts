@@ -4,7 +4,7 @@ import { getCurrentBusiness } from "@/lib/business"
 import { hasPermission, requirePermission } from "@/lib/userPermissions"
 import { PERMISSIONS } from "@/lib/permissions"
 import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
-import { validateStaffPaymentMethodCreate } from "@/lib/staffPaymentMethods"
+import { validateStaffPaymentMethodCreate, paymentDestinationKey } from "@/lib/staffPaymentMethods"
 
 async function resolveStaffRow(
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
@@ -173,6 +173,44 @@ export async function POST(
     if (methodType === "bank") {
       row.momo_provider = null
       row.momo_number = null
+    }
+
+    const { data: existingRows, error: existingError } = await supabase
+      .from("staff_payment_methods")
+      .select("*")
+      .eq("staff_id", staffId)
+      .eq("business_id", business.id)
+      .is("deleted_at", null)
+
+    if (existingError) {
+      console.error("[payment-methods POST duplicate lookup]", existingError)
+      return NextResponse.json({ error: existingError.message }, { status: 500 })
+    }
+
+    const duplicate = (existingRows || []).find(
+      (existing) => paymentDestinationKey(existing) === paymentDestinationKey(row)
+    )
+
+    if (duplicate) {
+      if (isDefault) {
+        await clearOtherDefaults(supabase, staffId, business.id, duplicate.id)
+        const { data: updated, error: updateError } = await supabase
+          .from("staff_payment_methods")
+          .update({ is_default: true })
+          .eq("id", duplicate.id)
+          .eq("staff_id", staffId)
+          .eq("business_id", business.id)
+          .is("deleted_at", null)
+          .select()
+          .single()
+
+        if (updateError) {
+          console.error("[payment-methods POST duplicate default]", updateError)
+          return NextResponse.json({ error: updateError.message }, { status: 500 })
+        }
+        return NextResponse.json({ paymentMethod: updated, reused: true }, { status: 200 })
+      }
+      return NextResponse.json({ paymentMethod: duplicate, reused: true }, { status: 200 })
     }
 
     if (isDefault) {

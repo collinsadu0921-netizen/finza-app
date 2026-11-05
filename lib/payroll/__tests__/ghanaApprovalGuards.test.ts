@@ -3,6 +3,8 @@ import {
   classifyUnsupportedV3Entry,
   GHANA_PAYROLL_UNSUPPORTED_TAX_PROFILE,
   GHANA_PAYROLL_UNKNOWN_RATE_VERSION,
+  GHANA_PAYROLL_LEGACY_METADATA_INCONSISTENT,
+  GHANA_PAYROLL_LEGACY_METADATA_RECOVERABLE,
   GHANA_PAYROLL_STATUTORY_VALIDATION_FAILED,
 } from "@/lib/payroll/ghanaApprovalGuards"
 import {
@@ -64,14 +66,88 @@ describe("Ghana payroll approval guards (API-facing)", () => {
     }
   })
 
-  it("returns unknown rate version when run versions missing", () => {
+  it("returns an actionable legacy metadata error when run versions are missing and entries are unavailable", () => {
     const result = validateGhanaPayrollRunForApproval({
       businessCountry: "GH",
       run: { ...run, calculation_engine_version: null },
       entries: [],
     })
     expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.code).toBe(GHANA_PAYROLL_UNKNOWN_RATE_VERSION)
+    if (!result.ok) expect(result.code).toBe(GHANA_PAYROLL_LEGACY_METADATA_INCONSISTENT)
+  })
+
+  it("marks a recoverable legacy draft when entry snapshots agree", () => {
+    const result = validateGhanaPayrollRunForApproval({
+      businessCountry: "GH",
+      run: {
+        ...run,
+        calculation_engine_version: null,
+        calculation_jurisdiction: null,
+        statutory_period_basis: null,
+      },
+      entries: [
+        {
+          staff_id: "e1",
+          is_included: true,
+          calculation_engine_version: GHANA_CALCULATION_ENGINE_VERSION,
+          paye_rate_version: "gh-paye-2024-01",
+          pension_rate_version: "gh-pension-2026-01",
+          calculation_jurisdiction: "GH",
+          statutory_period_basis: "2026-01-01",
+          payroll_tax_profile: supportedProfile,
+          filing_employee_name: "Ada",
+          staff: { id: "e1", name: "Ada", employment_type: "full_time", is_tax_resident: true },
+        },
+      ],
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.code).toBe(GHANA_PAYROLL_LEGACY_METADATA_RECOVERABLE)
+      expect(result.message).toContain("repaired")
+    }
+  })
+
+  it("rejects conflicting legacy entry metadata with a structured code", () => {
+    const result = validateGhanaPayrollRunForApproval({
+      businessCountry: "GH",
+      run: {
+        ...run,
+        calculation_engine_version: null,
+        calculation_jurisdiction: null,
+        statutory_period_basis: null,
+      },
+      entries: [
+        {
+          staff_id: "e1",
+          is_included: true,
+          calculation_engine_version: GHANA_NEW_RUN_ENGINE_VERSION,
+          paye_rate_version: "gh-paye-2024-01",
+          pension_rate_version: "gh-pension-2026-01",
+          calculation_jurisdiction: "GH",
+          statutory_period_basis: "2026-01-01",
+          payroll_tax_profile: supportedProfile,
+          filing_employee_name: "Ada",
+          staff: { id: "e1", name: "Ada", employment_type: "full_time", is_tax_resident: true },
+        },
+        {
+          staff_id: "e2",
+          is_included: true,
+          calculation_engine_version: "finza-ghana-v2",
+          paye_rate_version: "gh-paye-2024-01",
+          pension_rate_version: "gh-pension-2026-01",
+          calculation_jurisdiction: "GH",
+          statutory_period_basis: "2026-01-01",
+          payroll_tax_profile: supportedProfile,
+          filing_employee_name: "Kojo",
+          staff: { id: "e2", name: "Kojo", employment_type: "full_time", is_tax_resident: true },
+        },
+      ],
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.code).toBe(GHANA_PAYROLL_LEGACY_METADATA_INCONSISTENT)
+      expect(result.details).toBeTruthy()
+    }
   })
 
   it("blocks casual snapshot even when live staff is full_time", () => {

@@ -11,7 +11,7 @@
  * separately in ghanaStatutoryRates.ts and still fail closed when a year is unverified.
  */
 
-import { extractDatePart, roundPayroll, validateEffectiveDate } from "../versioning"
+import { roundPayroll, toCalendarDate } from "../versioning"
 
 export const GHANA_ENGINE_V2 = "finza-ghana-v2"
 export const GHANA_ENGINE_V3 = "finza-ghana-v3"
@@ -87,8 +87,7 @@ export function getGhanaProfileTaxRatesByVersion(version: string): GhanaProfileT
 }
 
 export function resolveGhanaProfileTaxRatesForPeriod(periodDate: string): GhanaProfileTaxRates {
-  validateEffectiveDate(periodDate)
-  const period = extractDatePart(periodDate)
+  const period = toCalendarDate(periodDate)
   if (period < GHANA_PROFILE_TAX_2024_01.effectiveFrom) {
     throw new GhanaProfileTaxVersionError(
       `No Ghana profile-tax version covers payroll period ${period} (before ${GHANA_PROFILE_TAX_2024_01.effectiveFrom}).`
@@ -105,8 +104,7 @@ export function assertGhanaProfileTaxVersionCoversPeriod(
   periodDate: string
 ): GhanaProfileTaxRates {
   const rates = getGhanaProfileTaxRatesByVersion(version)
-  validateEffectiveDate(periodDate)
-  const period = extractDatePart(periodDate)
+  const period = toCalendarDate(periodDate)
   if (period < rates.effectiveFrom) {
     throw new GhanaProfileTaxVersionError(
       `Stored Ghana profile-tax version "${version}" does not cover payroll period ${period}.`

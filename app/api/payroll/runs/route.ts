@@ -21,6 +21,7 @@ import {
 import {
   resolveCreatePayrollRunPeriod,
 } from "@/lib/payroll/payrollPeriodUtils"
+import { resolveRunStatutoryPeriodDate } from "@/lib/payroll/payrollStatutoryPeriod"
 import { computeStaffScopeFingerprint } from "@/lib/payroll/payrollPeriod"
 import {
   assertNoDuplicatePayrollRun,
@@ -342,8 +343,15 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Validate effectiveDate (use payroll_month as effectiveDate for versioning)
-    const effectiveDate = payroll_month // payroll_month drives effectiveDate for deterministic calculations
+    // Select statutory rates from the run's authoritative calendar period,
+    // never from a timezone-shifted timestamp.
+    const effectiveDate =
+      resolveRunStatutoryPeriodDate({
+        pay_period_start,
+        pay_period_end,
+        payroll_month,
+        payroll_frequency,
+      }) ?? payroll_month
 
     let ghanaRateVersions: {
       payeRateVersion: string

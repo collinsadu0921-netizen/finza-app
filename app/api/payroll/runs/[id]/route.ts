@@ -14,7 +14,7 @@ import {
   nonMonthlyApprovalBlockedMessage,
 } from "@/lib/payroll/salaryBasis"
 import { validateGhanaPayrollRunForApproval } from "@/lib/payroll/ghanaApprovalGuards"
-import { refreshGhanaDraftStatutoryRates } from "@/lib/payroll/refreshGhanaDraftStatutoryRates"
+import { refreshDraftStatutoryRatesForApproval } from "@/lib/payroll/approvalRecalculationSafeguard"
 import { mapApprovePayrollRunAtomicError } from "@/lib/payroll/mapApprovePayrollAtomicError"
 import { mapPayrollPaymentAtomicError } from "@/lib/payroll/mapPayrollPaymentAtomicError"
 import {
@@ -87,7 +87,9 @@ export async function GET(
           position,
           email,
           phone,
-          whatsapp_phone
+          whatsapp_phone,
+          tin_number,
+          gra_position_code
         )
       `
       )
@@ -337,20 +339,27 @@ export async function PUT(
         // validating it. This recalculates entries and clears stale provisional
         // acknowledgement. If no official SSNIT limits exist, the draft remains
         // provisional and requires the employer acknowledgement below.
-        const refreshed = await refreshGhanaDraftStatutoryRates({
+        const refreshed = await refreshDraftStatutoryRatesForApproval({
           supabase,
           businessId: business.id,
           businessCountry,
           runId,
         })
         if (!refreshed.ok) {
-          return NextResponse.json({ error: refreshed.error }, { status: refreshed.status })
+          return NextResponse.json(
+            {
+              error: refreshed.error,
+              ...(refreshed.code ? { code: refreshed.code } : {}),
+              ...(refreshed.details ? { details: refreshed.details } : {}),
+            },
+            { status: refreshed.status }
+          )
         }
 
         const { data: approvalRun, error: approvalRunError } = await supabase
           .from("payroll_runs")
           .select(
-            "status, journal_entry_id, payroll_frequency, calculation_engine_version, paye_rate_version, pension_rate_version, calculation_jurisdiction, statutory_period_basis, pension_limits_provisional, pension_minimum_insurable_earnings, pension_maximum_insurable_earnings, pension_limits_effective_from, provisional_ssnit_acknowledged_at"
+            "status, journal_entry_id, payroll_frequency, payroll_month, pay_period_start, pay_period_end, calculation_engine_version, paye_rate_version, pension_rate_version, calculation_jurisdiction, statutory_period_basis, pension_limits_provisional, pension_minimum_insurable_earnings, pension_maximum_insurable_earnings, pension_limits_effective_from, provisional_ssnit_acknowledged_at"
           )
           .eq("id", runId)
           .eq("business_id", business.id)
@@ -439,6 +448,7 @@ export async function PUT(
               error: ghanaGuard.message,
               code: ghanaGuard.code,
               affectedEmployees: ghanaGuard.affectedEmployees,
+              ...(ghanaGuard.details ? { details: ghanaGuard.details } : {}),
             },
             { status: 400 }
           )

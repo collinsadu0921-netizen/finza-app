@@ -57,6 +57,13 @@ type PaymentRow = {
   amount?: number | null
   payment_date?: string | null
   reference?: string | null
+  payment_account_id?: string | null
+}
+
+type PaymentAccountInfo = {
+  id: string
+  name: string
+  code: string
 }
 
 function embeddedRun(value: EntryRow["payroll_runs"]): EmbeddedRun | null {
@@ -246,7 +253,7 @@ export async function GET(
       if (itemIds.length > 0) {
         const { data: paymentRows, error: paymentError } = await supabase
           .from("payroll_payments")
-          .select("id, batch_item_id, payroll_run_id, amount, payment_date, reference")
+          .select("id, batch_item_id, payroll_run_id, amount, payment_date, reference, payment_account_id")
           .eq("business_id", business.id)
           .in("batch_item_id", itemIds)
           .is("deleted_at", null)
@@ -257,6 +264,33 @@ export async function GET(
           return NextResponse.json({ error: paymentError.message }, { status: 500 })
         }
         payments = (paymentRows || []) as PaymentRow[]
+      }
+    }
+
+    let paymentAccountsById = new Map<string, PaymentAccountInfo>()
+    const paymentAccountIds = Array.from(
+      new Set(
+        payments
+          .map((payment) => payment.payment_account_id)
+          .filter((id): id is string => Boolean(id))
+      )
+    )
+    if (paymentAccountIds.length > 0) {
+      const { data: accountRows, error: accountError } = await supabase
+        .from("accounts")
+        .select("id, name, code")
+        .eq("business_id", business.id)
+        .in("id", paymentAccountIds)
+
+      if (accountError) {
+        console.error("[staff salary history] payment accounts", accountError)
+      } else {
+        paymentAccountsById = new Map(
+          (accountRows || []).map((account) => [
+            String(account.id),
+            { id: String(account.id), name: String(account.name), code: String(account.code) },
+          ])
+        )
       }
     }
 
@@ -326,12 +360,19 @@ export async function GET(
         outstanding_amount: paymentSummary.outstanding_amount,
         unverified_amount: paymentSummary.unverified_amount,
         has_unallocated_aggregate_payment: paymentSummary.has_unallocated_aggregate_payment,
-        payments: confirmedPayments.map((payment) => ({
-          id: payment.id,
-          amount: roundPayrollMoney(payment.amount),
-          payment_date: payment.payment_date ?? null,
-          reference: payment.reference ?? null,
-        })),
+        payments: confirmedPayments.map((payment) => {
+          const account = payment.payment_account_id
+            ? paymentAccountsById.get(payment.payment_account_id)
+            : undefined
+          return {
+            id: payment.id,
+            amount: roundPayrollMoney(payment.amount),
+            payment_date: payment.payment_date ?? null,
+            reference: payment.reference ?? null,
+            payment_method: account?.name ?? null,
+            payment_account_code: account?.code ?? null,
+          }
+        }),
         aggregate_payments: aggregate.map((payment) => ({
           id: payment.id,
           amount: roundPayrollMoney(payment.amount),

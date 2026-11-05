@@ -3,7 +3,7 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { normalizeAllowanceType, ALLOWANCE_TYPES } from "@/lib/payrollTypes"
 import { enforceServiceIndustryMinTier } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
-import { recalcPayrollEntryForStaffOnDraftRun } from "@/lib/payroll/recalcPayrollEntryForStaff"
+import { recalcDraftRunsForStaffChange } from "@/lib/payroll/recalcDraftRunsForStaff"
 
 export async function PUT(
   request: NextRequest,
@@ -120,20 +120,20 @@ export async function PUT(
       )
     }
 
-    const runIdForRecalc = allowance?.payroll_run_id || existing.payroll_run_id
-    if (runIdForRecalc) {
-      const businessCountry = business.address_country || business.country_code || null
-      if (businessCountry) {
-        const recalc = await recalcPayrollEntryForStaffOnDraftRun({
-          supabase,
-          businessId: business.id,
-          businessCountry,
-          runId: String(runIdForRecalc),
-          staffId,
-        })
-        if (!recalc.ok) {
-          return NextResponse.json({ error: recalc.error }, { status: recalc.status })
-        }
+    const runIdForRecalc = allowance?.payroll_run_id
+      ? String(allowance.payroll_run_id)
+      : null
+    const businessCountry = business.address_country || business.country_code || null
+    if (runIdForRecalc && businessCountry) {
+      const recalc = await recalcDraftRunsForStaffChange({
+        supabase,
+        businessId: business.id,
+        businessCountry,
+        staffId,
+        runId: runIdForRecalc,
+      })
+      if (!recalc.ok) {
+        return NextResponse.json({ error: recalc.error }, { status: recalc.status })
       }
     }
 
@@ -177,6 +177,36 @@ export async function DELETE(
     )
     if (denied) return denied
 
+    const { data: existing } = await supabase
+      .from("allowances")
+      .select("id, recurring, payroll_run_id")
+      .eq("id", allowanceId)
+      .eq("staff_id", staffId)
+      .is("deleted_at", null)
+      .maybeSingle()
+
+    if (!existing) {
+      return NextResponse.json({ error: "Allowance not found" }, { status: 404 })
+    }
+
+    if (existing.payroll_run_id) {
+      const { data: run } = await supabase
+        .from("payroll_runs")
+        .select("id, status")
+        .eq("id", existing.payroll_run_id)
+        .eq("business_id", business.id)
+        .maybeSingle()
+      if (run && run.status !== "draft") {
+        return NextResponse.json(
+          {
+            error:
+              "Cannot delete a one-off allowance after its payroll run is no longer a draft. Historical payroll snapshots are preserved.",
+          },
+          { status: 400 }
+        )
+      }
+    }
+
     const { error } = await supabase
       .from("allowances")
       .update({ deleted_at: new Date().toISOString() })
@@ -191,7 +221,32 @@ export async function DELETE(
       )
     }
 
-    return NextResponse.json({ message: "Allowance deleted successfully" })
+    const businessCountry = business.address_country || business.country_code || null
+    let recalculatedRunIds: string[] = []
+    if (existing.payroll_run_id && businessCountry) {
+      const recalc = await recalcDraftRunsForStaffChange({
+        supabase,
+        businessId: business.id,
+        businessCountry,
+        staffId,
+        runId: String(existing.payroll_run_id),
+      })
+      if (!recalc.ok) {
+        // Restore the item if the affected draft could not be recalculated.
+        await supabase
+          .from("allowances")
+          .update({ deleted_at: null })
+          .eq("id", allowanceId)
+          .eq("staff_id", staffId)
+        return NextResponse.json({ error: recalc.error }, { status: recalc.status })
+      }
+      recalculatedRunIds = recalc.runIds
+    }
+
+    return NextResponse.json({
+      message: "Allowance deleted successfully",
+      recalculatedRunIds,
+    })
   } catch (error: any) {
     console.error("Error deleting allowance:", error)
     return NextResponse.json(

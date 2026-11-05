@@ -72,14 +72,39 @@ async function getRunPaymentData(
     return { error: paymentsError.message, status: 500 as const }
   }
 
-  const postedPayments = (payments || []).filter(
+  // Identify payments settled through the tenant Paystack connection so the
+  // reversal dialog can show provider-specific wording. Read-only; no payment
+  // or transfer records are changed.
+  const { data: paystackTransfers, error: paystackTransfersError } = await supabase
+    .from("payroll_paystack_transfers")
+    .select("id, payment_id, status, reference, environment")
+    .eq("business_id", businessId)
+    .eq("payroll_run_id", runId)
+    .not("payment_id", "is", null)
+
+  if (paystackTransfersError) {
+    return { error: paystackTransfersError.message, status: 500 as const }
+  }
+
+  const transferByPaymentId = new Map<string, Record<string, unknown>>()
+  for (const transfer of paystackTransfers || []) {
+    const paymentId = (transfer as { payment_id?: string | null }).payment_id
+    if (paymentId) transferByPaymentId.set(paymentId, transfer as Record<string, unknown>)
+  }
+
+  const paymentsWithSource = (payments || []).map((payment: any) => ({
+    ...payment,
+    paystack_transfer: transferByPaymentId.get(payment.id) ?? null,
+  }))
+
+  const postedPayments = paymentsWithSource.filter(
     (p: any) => p.journal_entry_id != null && p.reversed_at == null
   )
   const paidAmount = postedPayments.reduce((sum, p: any) => sum + Number(p.amount || 0), 0)
   const latestPaymentDate = postedPayments.length > 0 ? postedPayments[0].payment_date : null
   const summary = derivePayrollPaymentSummary(payrollRun.total_net_salary, paidAmount, latestPaymentDate)
 
-  return { payrollRun, payments: payments || [], summary }
+  return { payrollRun, payments: paymentsWithSource, summary }
 }
 
 async function getPaymentAccounts(

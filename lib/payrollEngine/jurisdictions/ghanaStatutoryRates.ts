@@ -26,7 +26,7 @@
  *   are not published/verified, so pension resolution fails closed from 2027-01-01 onward.
  */
 
-import { extractDatePart, roundPayroll, validateEffectiveDate } from "../versioning"
+import { roundPayroll, toCalendarDate } from "../versioning"
 import { GHANA_ENGINE_V2 } from "./ghanaProfileTax"
 
 export const GHANA_CALCULATION_ENGINE_VERSION = GHANA_ENGINE_V2
@@ -211,8 +211,7 @@ function versionCoversDate(
 }
 
 export function assertGhanaPayePeriodSupported(periodDate: string): string {
-  validateEffectiveDate(periodDate)
-  const date = extractDatePart(periodDate)
+  const date = toCalendarDate(periodDate)
   if (date < GHANA_PAYE_VERIFIED_FROM) {
     throw new GhanaStatutoryVersionError(
       `Ghana PAYE period ${date} is before the verified start ${GHANA_PAYE_VERIFIED_FROM}.`
@@ -222,8 +221,7 @@ export function assertGhanaPayePeriodSupported(periodDate: string): string {
 }
 
 export function assertGhanaPensionPeriodWithinVerifiedHorizon(periodDate: string): string {
-  validateEffectiveDate(periodDate)
-  const date = extractDatePart(periodDate)
+  const date = toCalendarDate(periodDate)
   if (date < GHANA_PENSION_VERIFIED_FROM) {
     throw new GhanaStatutoryVersionError(
       `Ghana pension/SSNIT period ${date} is before the verified start ${GHANA_PENSION_VERIFIED_FROM}.`
@@ -309,8 +307,7 @@ export function resolveGhanaStatutoryRatesByVersions(opts: {
   pensionRateVersion: string
   periodBasis: string
 }): GhanaStatutoryRateBundle {
-  validateEffectiveDate(opts.periodBasis)
-  const periodBasis = extractDatePart(opts.periodBasis)
+  const periodBasis = toCalendarDate(opts.periodBasis)
   const paye = getGhanaPayeRatesByVersion(opts.payeRateVersion)
   const pension = getGhanaPensionRatesByVersion(opts.pensionRateVersion)
 

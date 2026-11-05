@@ -639,14 +639,14 @@ describe("Ghana statutory golden — unsupported profile approval blocks", () =>
     }
   })
 
-  it("blocks missing rate version on run", () => {
+  it("blocks missing rate version on run with an actionable metadata code", () => {
     const result = validateGhanaPayrollRunForApproval({
       businessCountry: "GH",
       run: { ...baseRun, paye_rate_version: null },
       entries: [supportedEntry],
     })
     expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.code).toBe("GHANA_PAYROLL_UNKNOWN_RATE_VERSION")
+    if (!result.ok) expect(result.code).toBe("GHANA_PAYROLL_LEGACY_METADATA_RECOVERABLE")
   })
 
   it("blocks mixed run with one unsupported employee", () => {

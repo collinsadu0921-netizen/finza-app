@@ -38,6 +38,7 @@ type LedgerLine = {
   journal_entry_description: string
   reference_type: string | null
   reference_id: string | null
+  payment_reference?: string | null
   line_id: string
   line_description: string | null
   debit: number
@@ -932,7 +933,14 @@ export default function GeneralLedgerScreen({ mode, businessId: businessIdProp }
                           <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
                             {line.line_description || line.journal_entry_description}
                           </td>
-                          <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{getReferenceLabel(line.reference_type)}</td>
+                          <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
+                            {getReferenceLabel(line.reference_type)}
+                            {line.payment_reference ? (
+                              <span className="mt-0.5 block break-all text-[11px] text-gray-500 dark:text-gray-500">
+                                {line.payment_reference}
+                              </span>
+                            ) : null}
+                          </td>
                           <td className="px-4 py-3 text-sm text-right text-gray-900 dark:text-white">
                             {(line.debit ?? 0) > 0 ? formatCurrencySafe(line.debit) : "—"}
                           </td>
@@ -993,7 +1001,14 @@ export default function GeneralLedgerScreen({ mode, businessId: businessIdProp }
                       <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
                         {line.line_description || line.journal_entry_description}
                       </td>
-                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{getReferenceLabel(line.reference_type)}</td>
+                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
+                        {getReferenceLabel(line.reference_type)}
+                        {line.payment_reference ? (
+                          <span className="mt-0.5 block break-all text-[11px] text-gray-500 dark:text-gray-500">
+                            {line.payment_reference}
+                          </span>
+                        ) : null}
+                      </td>
                       <td className="px-4 py-3 text-sm text-right text-gray-900 dark:text-white">
                         {(line.debit ?? 0) > 0 ? formatCurrencySafe(line.debit) : "—"}
                       </td>

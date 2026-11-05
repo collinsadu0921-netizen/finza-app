@@ -53,6 +53,34 @@ export type BuiltBatchItemInsert = {
 
 const TOLERANCE = 0.01
 
+export type BatchDestinationFields = {
+  destination_method_type: string | null
+  destination_provider_name: string | null
+  destination_bank_name: string | null
+  destination_bank_code: string | null
+  destination_branch_name: string | null
+  destination_account_number: string | null
+  destination_account_name: string | null
+  destination_momo_provider: string | null
+  destination_momo_number: string | null
+}
+
+export function destinationFieldsFromPaymentMethod(
+  method: StaffPaymentMethodRowForBatch
+): BatchDestinationFields {
+  return {
+    destination_method_type: String(method.method_type || "").toLowerCase() || null,
+    destination_provider_name: method.provider_name ?? null,
+    destination_bank_name: method.bank_name ?? null,
+    destination_bank_code: method.bank_code ?? null,
+    destination_branch_name: method.branch_name ?? null,
+    destination_account_number: method.account_number ?? null,
+    destination_account_name: method.account_name ?? null,
+    destination_momo_provider: method.momo_provider ?? null,
+    destination_momo_number: method.momo_number ?? null,
+  }
+}
+
 export function roundMoney(n: number): number {
   return Math.round(n * 100) / 100
 }
@@ -140,15 +168,16 @@ export function buildPayrollPaymentBatchItemsFromEntries(input: {
     if (method) {
       staff_payment_method_id = method.id
       legacy_destination_source = "staff_payment_method"
-      destination_method_type = String(method.method_type || "").toLowerCase() || null
-      destination_provider_name = method.provider_name ?? null
-      destination_bank_name = method.bank_name ?? null
-      destination_bank_code = method.bank_code ?? null
-      destination_branch_name = method.branch_name ?? null
-      destination_account_number = method.account_number ?? null
-      destination_account_name = method.account_name ?? null
-      destination_momo_provider = method.momo_provider ?? null
-      destination_momo_number = method.momo_number ?? null
+      const dest = destinationFieldsFromPaymentMethod(method)
+      destination_method_type = dest.destination_method_type
+      destination_provider_name = dest.destination_provider_name
+      destination_bank_name = dest.destination_bank_name
+      destination_bank_code = dest.destination_bank_code
+      destination_branch_name = dest.destination_branch_name
+      destination_account_number = dest.destination_account_number
+      destination_account_name = dest.destination_account_name
+      destination_momo_provider = dest.destination_momo_provider
+      destination_momo_number = dest.destination_momo_number
     } else {
       const payout = resolveNetSalaryExportPayoutFields(legacy, null)
       const hasLegacyBank = Boolean(payout.bankName && payout.bankAccountNumber)

@@ -17,7 +17,11 @@ export { requireBusinessScopeForUser, resolveBusinessScopeForUser }
 
 // ─── localStorage helpers (client-side only) ──────────────────────────────────
 
-const WORKSPACE_KEY = "finza_selected_business_id"
+export const WORKSPACE_STORAGE_KEY = "finza_selected_business_id"
+const WORKSPACE_KEY = WORKSPACE_STORAGE_KEY
+
+let lastSyncedBusinessId: string | null | undefined
+let activeBusinessSyncChain: Promise<void> = Promise.resolve()
 
 export function getSelectedBusinessId(): string | null {
   if (typeof window === "undefined") return null
@@ -28,22 +32,66 @@ export function getSelectedBusinessId(): string | null {
   }
 }
 
+/**
+ * Mirror the browser workspace selection into the server-validated
+ * active-business cookie. The API verifies ownership/membership before setting
+ * the cookie; a forged ID is rejected and does not become server context.
+ */
+function syncActiveBusinessToServer(id: string | null): void {
+  if (typeof window === "undefined") return
+  if (lastSyncedBusinessId === id) return
+  lastSyncedBusinessId = id
+
+  // Serialize writes so a slow older response cannot overwrite a newer
+  // workspace selection in the browser cookie.
+  activeBusinessSyncChain = activeBusinessSyncChain
+    .catch(() => undefined)
+    .then(async () => {
+      try {
+        const response = await fetch("/api/business/select", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          keepalive: true,
+          body: JSON.stringify(id ? { business_id: id } : { clear: true }),
+        })
+        if (!response.ok) {
+          if (lastSyncedBusinessId === id) lastSyncedBusinessId = undefined
+          if (response.status === 403 || response.status === 404) {
+            try {
+              localStorage.removeItem(WORKSPACE_KEY)
+            } catch {}
+          }
+        }
+      } catch {
+        if (lastSyncedBusinessId === id) lastSyncedBusinessId = undefined
+      }
+    })
+}
+
 export function setSelectedBusinessId(id: string | null): void {
   if (typeof window === "undefined") return
   try {
     const current = localStorage.getItem(WORKSPACE_KEY)
-    if (id && current === id) return
-    if (!id && !current) return
     if (id) localStorage.setItem(WORKSPACE_KEY, id)
     else localStorage.removeItem(WORKSPACE_KEY)
-    window.dispatchEvent(
-      new CustomEvent("finza:business-changed", { detail: { businessId: id } })
-    )
+    if (id !== current) {
+      window.dispatchEvent(
+        new CustomEvent("finza:business-changed", { detail: { businessId: id } })
+      )
+    }
+    syncActiveBusinessToServer(id)
   } catch {}
 }
 
 export function clearSelectedBusinessId(): void {
   setSelectedBusinessId(null)
+}
+
+/** Await the server cookie write before navigating into a workspace. */
+export async function ensureSelectedBusinessIdSynced(id: string | null): Promise<void> {
+  if (lastSyncedBusinessId !== id) syncActiveBusinessToServer(id)
+  await activeBusinessSyncChain
 }
 
 // ─── Get ALL businesses a user has access to ─────────────────────────────────
@@ -91,6 +139,35 @@ export async function getAllUserBusinesses(
 // ─── Get one business (respects localStorage workspace preference) ────────────
 
 export async function getCurrentBusiness(
+  supabase: SupabaseClient,
+  userId: string
+) {
+  // Server-side: use the request-scoped, server-validated active-business
+  // cookie via the resolver registered in instrumentation.ts. Never fall back
+  // to "newest business" on the server.
+  if (typeof window === "undefined") {
+    const resolver = (
+      globalThis as typeof globalThis & {
+        __finzaResolveActiveBusiness?: (
+          supabase: SupabaseClient,
+          userId: string
+        ) => Promise<unknown>
+      }
+    ).__finzaResolveActiveBusiness
+
+    if (typeof resolver === "function") {
+      return (await resolver(supabase, userId)) as Awaited<
+        ReturnType<typeof getCurrentBusinessFromClientPreference>
+      >
+    }
+
+    return null
+  }
+
+  return getCurrentBusinessFromClientPreference(supabase, userId)
+}
+
+async function getCurrentBusinessFromClientPreference(
   supabase: SupabaseClient,
   userId: string
 ) {

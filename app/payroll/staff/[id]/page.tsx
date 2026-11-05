@@ -7,6 +7,15 @@ import { useConfirm } from "@/components/ui/ConfirmProvider"
 import { ALLOWANCE_TYPE_OPTIONS, DEDUCTION_TYPE_OPTIONS } from "@/lib/payrollTypes"
 import { formatEmploymentTypeLabel } from "@/lib/payroll/ghanaIncomeTaxDisplay"
 import { usePayrollBasePath } from "@/lib/payrollBasePathContext"
+import {
+  maskAccountNumber,
+  maskMomoNumber,
+  normalizeGhanaMomoProvider,
+} from "@/lib/payroll/paymentDestinationInput"
+import {
+  validateStaffPaymentMethodFields,
+  type StaffPaymentMethodFieldErrors,
+} from "@/lib/staffPaymentMethods"
 
 type Staff = {
   id: string
@@ -51,6 +60,8 @@ type SalaryHistoryPayment = {
   amount: number
   payment_date: string | null
   reference: string | null
+  payment_method?: string | null
+  payment_account_code?: string | null
 }
 
 type SalaryHistoryRow = {
@@ -128,6 +139,9 @@ type StaffPaymentMethod = {
   is_default: boolean
   is_verified: boolean
   verification_status: string
+  paystack_recipient_code?: string | null
+  paystack_recipient_environment?: string | null
+  paystack_recipient_fingerprint?: string | null
 }
 
 const PAYMENT_METHOD_LABELS: Record<string, string> = {
@@ -274,6 +288,7 @@ function SalaryHistoryMobileCard({
                 ? ` on ${new Date(payment.payment_date).toLocaleDateString("en-GH")}`
                 : ""}
               {payment.reference ? ` · ${payment.reference}` : ""}
+              {payment.payment_method ? ` · ${payment.payment_method}` : ""}
             </p>
           ))}
         </div>
@@ -343,10 +358,48 @@ export default function StaffViewPage() {
   })
 
   const [paymentMethodForm, setPaymentMethodForm] = useState(emptyPaymentMethodForm())
+  const [paymentMethodErrors, setPaymentMethodErrors] = useState<StaffPaymentMethodFieldErrors>({})
+  const [savingPaymentMethod, setSavingPaymentMethod] = useState(false)
+  const [paystackDestinations, setPaystackDestinations] = useState<{
+    banks: Array<{ name: string; code: string }>
+    mobile_money: Array<{ name: string; code: string; label: string }>
+    environment: "test" | "live"
+  } | null>(null)
+  const [loadingPaystackDestinations, setLoadingPaystackDestinations] = useState(false)
 
   useEffect(() => {
     loadStaff()
   }, [staffId])
+
+  useEffect(() => {
+    if (!showPaymentMethodModal) return
+    if (paymentMethodForm.method_type !== "bank" && paymentMethodForm.method_type !== "momo") return
+    if (paystackDestinations || loadingPaystackDestinations) return
+    let cancelled = false
+    const loadDestinations = async () => {
+      setLoadingPaystackDestinations(true)
+      try {
+        const response = await fetch("/api/payroll/paystack/banks", { cache: "no-store" })
+        if (!response.ok) return
+        const data = await response.json()
+        if (!cancelled) {
+          setPaystackDestinations({
+            banks: data.banks || [],
+            mobile_money: data.mobile_money || [],
+            environment: data.environment === "live" ? "live" : "test",
+          })
+        }
+      } catch {
+        // Paystack not connected or not eligible: keep manual destination fields.
+      } finally {
+        if (!cancelled) setLoadingPaystackDestinations(false)
+      }
+    }
+    void loadDestinations()
+    return () => {
+      cancelled = true
+    }
+  }, [showPaymentMethodModal, paymentMethodForm.method_type, paystackDestinations, loadingPaystackDestinations])
 
   useEffect(() => {
     loadSalaryHistory()
@@ -550,9 +603,26 @@ export default function StaffViewPage() {
     setShowDeductionModal(true)
   }
 
+  const clearPaymentMethodFieldError = (field: keyof StaffPaymentMethodFieldErrors) => {
+    setPaymentMethodErrors((current) => {
+      if (!current[field]) return current
+      const next = { ...current }
+      delete next[field]
+      return next
+    })
+  }
+
+  const paymentMethodInputClass = (field: keyof StaffPaymentMethodFieldErrors) =>
+    `w-full px-4 py-2 border rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white ${
+      paymentMethodErrors[field]
+        ? "border-red-500 focus:border-red-500"
+        : "border-gray-300 dark:border-gray-600"
+    }`
+
   const openAddPaymentMethod = () => {
     setEditingPaymentMethod(null)
     setPaymentMethodForm(emptyPaymentMethodForm())
+    setPaymentMethodErrors({})
     setShowPaymentMethodModal(true)
   }
 
@@ -562,6 +632,9 @@ export default function StaffViewPage() {
       m.method_type === "bank" || m.method_type === "momo" || m.method_type === "cash"
         ? m.method_type
         : "bank"
+    const momoProvider = m.momo_provider
+      ? normalizeGhanaMomoProvider(m.momo_provider)?.code ?? m.momo_provider
+      : ""
     setPaymentMethodForm({
       method_type: mtKnown,
       provider_name: m.provider_name || "",
@@ -570,14 +643,17 @@ export default function StaffViewPage() {
       branch_name: m.branch_name || "",
       account_number: m.account_number || "",
       account_name: m.account_name || "",
-      momo_provider: m.momo_provider || "",
+      momo_provider: momoProvider,
       momo_number: m.momo_number || "",
       is_default: m.is_default,
     })
+    setPaymentMethodErrors({})
     setShowPaymentMethodModal(true)
   }
 
   const handleSavePaymentMethod = async () => {
+    if (savingPaymentMethod) return
+    setSavingPaymentMethod(true)
     try {
       const url = editingPaymentMethod
         ? `/api/staff/${staffId}/payment-methods/${editingPaymentMethod.id}`
@@ -601,6 +677,16 @@ export default function StaffViewPage() {
         body.account_name = paymentMethodForm.account_name.trim() || null
       }
 
+      const validation = validateStaffPaymentMethodFields(
+        body as Parameters<typeof validateStaffPaymentMethodFields>[0]
+      )
+      if (!validation.ok) {
+        setPaymentMethodErrors(validation.errors)
+        toast.showToast("Check the highlighted payment details.", "error")
+        return
+      }
+      setPaymentMethodErrors({})
+
       const response = await fetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
@@ -618,6 +704,8 @@ export default function StaffViewPage() {
       }
     } catch (err: any) {
       toast.showToast(err.message || "Failed to save payment method", "error")
+    } finally {
+      setSavingPaymentMethod(false)
     }
   }
 
@@ -1007,6 +1095,7 @@ export default function StaffViewPage() {
                                           ? ` on ${new Date(payment.payment_date).toLocaleDateString("en-GH")}`
                                           : ""}
                                         {payment.reference ? ` · ${payment.reference}` : ""}
+                                        {payment.payment_method ? ` · ${payment.payment_method}` : ""}
                                       </li>
                                     ))}
                                   </ul>
@@ -1060,13 +1149,16 @@ export default function StaffViewPage() {
           </div>
 
           {/* Payment methods */}
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700 mb-6">
+          <div
+            id="payment-methods"
+            className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700 mb-6"
+          >
             <div className="flex justify-between items-start mb-4 gap-4">
               <div>
                 <h2 className="text-xl font-bold text-gray-900 dark:text-white">Payment methods</h2>
                 <p className="text-sm text-gray-600 dark:text-gray-400 mt-1 max-w-3xl">
-                  Payment methods are stored for payroll planning and future salary payment workflows. Finza does not
-                  send money from this screen.
+                  Payment methods are used for manual salary records and Business-tier Paystack payouts. A Paystack
+                  transfer only starts after an authorized user explicitly confirms it in the payroll batch.
                 </p>
               </div>
               <button
@@ -1091,28 +1183,40 @@ export default function StaffViewPage() {
                         <span className="font-semibold">
                           {PAYMENT_METHOD_LABELS[m.method_type] || m.method_type}
                         </span>
+                        <MiniBadge label="Saved" />
                         {m.is_default ? <MiniBadge tone="blue" label="Default" /> : null}
-                        <MiniBadge label={`Status: ${m.verification_status}`} />
+                        {m.is_verified || m.verification_status === "verified" ? (
+                          <MiniBadge tone="blue" label="Verified" />
+                        ) : null}
                       </div>
                       {m.method_type === "bank" ? (
                         <ul className="text-gray-600 dark:text-gray-300 list-disc list-inside">
                           {m.bank_name ? <li>Bank: {m.bank_name}</li> : null}
                           {m.branch_name ? <li>Branch: {m.branch_name}</li> : null}
-                          {m.account_number ? <li>Account no.: {m.account_number}</li> : null}
-                          {m.account_name ? <li>Account name: {m.account_name}</li> : null}
-                          {m.bank_code ? <li>Bank code: {m.bank_code}</li> : null}
+                          {m.account_number ? <li>Account no.: {maskAccountNumber(m.account_number)}</li> : null}
+                          {m.account_name ? <li>Account holder: {m.account_name}</li> : null}
                         </ul>
                       ) : null}
                       {m.method_type === "momo" ? (
                         <ul className="text-gray-600 dark:text-gray-300 list-disc list-inside">
-                          {m.momo_provider ? <li>Provider: {m.momo_provider}</li> : null}
-                          {m.momo_number ? <li>Number: {m.momo_number}</li> : null}
-                          {m.account_name ? <li>Registered name: {m.account_name}</li> : null}
+                          {m.momo_provider ? (
+                            <li>
+                              Provider:{" "}
+                              {normalizeGhanaMomoProvider(m.momo_provider)?.label || m.momo_provider}
+                            </li>
+                          ) : null}
+                          {m.momo_number ? <li>Number: {maskMomoNumber(m.momo_number)}</li> : null}
+                          {m.account_name ? <li>Account holder: {m.account_name}</li> : null}
                         </ul>
+                      ) : null}
+                      {m.paystack_recipient_code ? (
+                        <p className="text-[11px] text-emerald-700 dark:text-emerald-400">
+                          Paystack recipient linked ({m.paystack_recipient_environment || "test"}).
+                        </p>
                       ) : null}
                       {m.method_type === "cash" ? (
                         <p className="text-gray-600 dark:text-gray-300">
-                          Cash payment / manual handling — record payouts outside integrated transfers.
+                          Cash payment / manual handling - record payouts outside integrated transfers.
                         </p>
                       ) : null}
                       {m.provider_name ? (
@@ -1426,8 +1530,16 @@ export default function StaffViewPage() {
               {editingPaymentMethod ? "Edit payment method" : "Add payment method"}
             </h3>
             <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-              For planning only — no funds are transferred from Finza.
+              Used for manual salary records and confirmed Paystack payouts. No transfer starts from this dialog.
             </p>
+            {Object.keys(paymentMethodErrors).length > 0 ? (
+              <div
+                role="alert"
+                className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-800 dark:bg-red-950/30 dark:text-red-200"
+              >
+                Please correct the highlighted fields before saving.
+              </div>
+            ) : null}
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Method *</label>
@@ -1435,6 +1547,7 @@ export default function StaffViewPage() {
                   value={paymentMethodForm.method_type}
                   onChange={(e) => {
                     const method_type = e.target.value as "bank" | "momo" | "cash"
+                    setPaymentMethodErrors({})
                     setPaymentMethodForm((f) => ({
                       ...f,
                       method_type,
@@ -1471,13 +1584,57 @@ export default function StaffViewPage() {
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                       Bank name *
                     </label>
-                    <input
-                      value={paymentMethodForm.bank_name}
-                      onChange={(e) =>
-                        setPaymentMethodForm({ ...paymentMethodForm, bank_name: e.target.value })
-                      }
-                      className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                    />
+                    {paystackDestinations && paystackDestinations.banks.length > 0 ? (
+                      <select
+                        value={paymentMethodForm.bank_code}
+                        onChange={(e) => {
+                          const selected = paystackDestinations.banks.find(
+                            (bank) => bank.code === e.target.value
+                          )
+                          setPaymentMethodForm({
+                            ...paymentMethodForm,
+                            bank_code: e.target.value,
+                            bank_name: selected?.name || "",
+                          })
+                          clearPaymentMethodFieldError("bank_name")
+                        }}
+                        className={paymentMethodInputClass("bank_name")}
+                      >
+                        <option value="">Select a supported Ghana bank</option>
+                        {paystackDestinations.banks.map((bank) => (
+                          <option key={bank.code} value={bank.code}>
+                            {bank.name}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        value={paymentMethodForm.bank_name}
+                        onChange={(e) => {
+                          setPaymentMethodForm({ ...paymentMethodForm, bank_name: e.target.value })
+                          clearPaymentMethodFieldError("bank_name")
+                        }}
+                        className={paymentMethodInputClass("bank_name")}
+                        placeholder="Bank name"
+                        aria-invalid={Boolean(paymentMethodErrors.bank_name)}
+                      />
+                    )}
+                    {paymentMethodErrors.bank_name ? (
+                      <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                        {paymentMethodErrors.bank_name}
+                      </p>
+                    ) : null}
+                    {loadingPaystackDestinations ? (
+                      <p className="mt-1 text-[11px] text-gray-500">Loading Paystack banks…</p>
+                    ) : paystackDestinations ? (
+                      <p className="mt-1 text-[11px] text-gray-500">
+                        Paystack-supported bank list · {paystackDestinations.environment} mode
+                      </p>
+                    ) : (
+                      <p className="mt-1 text-[11px] text-gray-500">
+                        Connect Paystack in settings to select a supported bank code.
+                      </p>
+                    )}
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -1497,34 +1654,58 @@ export default function StaffViewPage() {
                     </label>
                     <input
                       value={paymentMethodForm.account_number}
-                      onChange={(e) =>
+                      onChange={(e) => {
                         setPaymentMethodForm({ ...paymentMethodForm, account_number: e.target.value })
-                      }
-                      className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                        clearPaymentMethodFieldError("account_number")
+                      }}
+                      className={paymentMethodInputClass("account_number")}
+                      placeholder="e.g. 1234567890"
+                      inputMode="numeric"
+                      aria-invalid={Boolean(paymentMethodErrors.account_number)}
                     />
+                    <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                      Enter 8–20 digits without spaces.
+                    </p>
+                    {paymentMethodErrors.account_number ? (
+                      <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                        {paymentMethodErrors.account_number}
+                      </p>
+                    ) : null}
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Account name (recommended)
+                      Account holder name *
                     </label>
                     <input
                       value={paymentMethodForm.account_name}
-                      onChange={(e) =>
+                      onChange={(e) => {
                         setPaymentMethodForm({ ...paymentMethodForm, account_name: e.target.value })
-                      }
-                      className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                        clearPaymentMethodFieldError("account_name")
+                      }}
+                      className={paymentMethodInputClass("account_name")}
+                      placeholder="Name on the bank account"
+                      aria-invalid={Boolean(paymentMethodErrors.account_name)}
                     />
+                    <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                      Enter the name exactly as it appears on the bank account.
+                    </p>
+                    {paymentMethodErrors.account_name ? (
+                      <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                        {paymentMethodErrors.account_name}
+                      </p>
+                    ) : null}
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Bank code (optional)
+                      Bank code {paystackDestinations ? "" : "(optional)"}
                     </label>
                     <input
                       value={paymentMethodForm.bank_code}
+                      readOnly={Boolean(paystackDestinations && paystackDestinations.banks.length > 0)}
                       onChange={(e) =>
                         setPaymentMethodForm({ ...paymentMethodForm, bank_code: e.target.value })
                       }
-                      className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white read-only:bg-gray-100 dark:read-only:bg-gray-800"
                     />
                   </div>
                 </>
@@ -1535,14 +1716,45 @@ export default function StaffViewPage() {
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                       Provider *
                     </label>
-                    <input
-                      value={paymentMethodForm.momo_provider}
-                      onChange={(e) =>
-                        setPaymentMethodForm({ ...paymentMethodForm, momo_provider: e.target.value })
-                      }
-                      className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                      placeholder="e.g. MTN, Vodafone"
-                    />
+                    {paystackDestinations && paystackDestinations.mobile_money.length > 0 ? (
+                      <select
+                        value={paymentMethodForm.momo_provider}
+                        onChange={(e) => {
+                          setPaymentMethodForm({ ...paymentMethodForm, momo_provider: e.target.value })
+                          clearPaymentMethodFieldError("momo_provider")
+                        }}
+                        className={paymentMethodInputClass("momo_provider")}
+                        aria-invalid={Boolean(paymentMethodErrors.momo_provider)}
+                      >
+                        <option value="">Select a Mobile Money network</option>
+                        {paystackDestinations.mobile_money.map((network) => (
+                          <option key={network.code} value={network.code}>
+                            {network.label || network.name}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        value={paymentMethodForm.momo_provider}
+                        onChange={(e) => {
+                          setPaymentMethodForm({ ...paymentMethodForm, momo_provider: e.target.value })
+                          clearPaymentMethodFieldError("momo_provider")
+                        }}
+                        className={paymentMethodInputClass("momo_provider")}
+                        placeholder="e.g. MTN, Telecel, AirtelTigo"
+                        aria-invalid={Boolean(paymentMethodErrors.momo_provider)}
+                      />
+                    )}
+                    {paymentMethodErrors.momo_provider ? (
+                      <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                        {paymentMethodErrors.momo_provider}
+                      </p>
+                    ) : null}
+                    <p className="mt-1 text-[11px] text-gray-500">
+                      {paystackDestinations
+                        ? "Paystack supports MTN, Telecel (Vodafone) and AirtelTigo in Ghana."
+                        : "Connect Paystack in settings to load supported networks."}
+                    </p>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -1550,23 +1762,46 @@ export default function StaffViewPage() {
                     </label>
                     <input
                       value={paymentMethodForm.momo_number}
-                      onChange={(e) =>
+                      onChange={(e) => {
                         setPaymentMethodForm({ ...paymentMethodForm, momo_number: e.target.value })
-                      }
-                      className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                        clearPaymentMethodFieldError("momo_number")
+                      }}
+                      className={paymentMethodInputClass("momo_number")}
+                      placeholder="e.g. 0241234567"
+                      inputMode="tel"
+                      aria-invalid={Boolean(paymentMethodErrors.momo_number)}
                     />
+                    <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                      Ghana number, e.g. 0241234567 or +233241234567.
+                    </p>
+                    {paymentMethodErrors.momo_number ? (
+                      <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                        {paymentMethodErrors.momo_number}
+                      </p>
+                    ) : null}
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Registered name (optional)
+                      Account holder name *
                     </label>
                     <input
                       value={paymentMethodForm.account_name}
-                      onChange={(e) =>
+                      onChange={(e) => {
                         setPaymentMethodForm({ ...paymentMethodForm, account_name: e.target.value })
-                      }
-                      className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                        clearPaymentMethodFieldError("account_name")
+                      }}
+                      className={paymentMethodInputClass("account_name")}
+                      placeholder="Name registered on the Mobile Money account"
+                      aria-invalid={Boolean(paymentMethodErrors.account_name)}
                     />
+                    <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                      Enter the name registered on this Mobile Money number.
+                    </p>
+                    {paymentMethodErrors.account_name ? (
+                      <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                        {paymentMethodErrors.account_name}
+                      </p>
+                    ) : null}
                   </div>
                 </>
               ) : null}
@@ -1591,9 +1826,10 @@ export default function StaffViewPage() {
               <button
                 type="button"
                 onClick={handleSavePaymentMethod}
-                className="flex-1 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700"
+                disabled={savingPaymentMethod}
+                className="flex-1 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
               >
-                Save
+                {savingPaymentMethod ? "Saving..." : "Save"}
               </button>
               <button
                 type="button"
@@ -1601,6 +1837,7 @@ export default function StaffViewPage() {
                   setShowPaymentMethodModal(false)
                   setEditingPaymentMethod(null)
                   setPaymentMethodForm(emptyPaymentMethodForm())
+                  setPaymentMethodErrors({})
                 }}
                 className="flex-1 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
               >

@@ -88,6 +88,18 @@ export async function PATCH(
     }
     const finalType = nextTypeResolved ?? existingTypeNorm
 
+    const destinationFields = [
+      "method_type",
+      "bank_name",
+      "bank_code",
+      "branch_name",
+      "account_number",
+      "account_name",
+      "momo_provider",
+      "momo_number",
+    ]
+    const touchesDestination = destinationFields.some((field) => field in patch)
+
     const mergedForValidation = {
       method_type: finalType,
       bank_name:
@@ -96,6 +108,10 @@ export async function PATCH(
         patch.account_number !== undefined
           ? trimNullable(patch.account_number)
           : trimNullable(existing.account_number),
+      account_name:
+        patch.account_name !== undefined
+          ? trimNullable(patch.account_name)
+          : trimNullable(existing.account_name),
       momo_provider:
         patch.momo_provider !== undefined
           ? trimNullable(patch.momo_provider)
@@ -104,7 +120,10 @@ export async function PATCH(
         patch.momo_number !== undefined ? trimNullable(patch.momo_number) : trimNullable(existing.momo_number),
     }
 
-    const v = validateStaffPaymentMethodCreate(mergedForValidation)
+    const v = validateStaffPaymentMethodCreate(mergedForValidation, {
+      validateDestination: touchesDestination,
+      requireAccountName: touchesDestination,
+    })
     if (!v.ok) return NextResponse.json({ error: v.error }, { status: 400 })
 
     const provider_name =

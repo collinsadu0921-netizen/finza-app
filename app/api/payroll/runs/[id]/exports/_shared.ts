@@ -82,8 +82,9 @@ export async function serveImmutablePayrollExport(args: {
   mode: PayrollExportMode
   filenamePrefix: string
   legacyAuditContent?: () => Promise<NextResponse | null>
+  legacyPreparationContent?: () => Promise<NextResponse | null>
 }): Promise<NextResponse> {
-  const { supabase, business, payrollRun, exportType, mode, filenamePrefix, legacyAuditContent } = args
+  const { supabase, business, payrollRun, exportType, mode, filenamePrefix, legacyAuditContent, legacyPreparationContent } = args
   const runStatus = String(payrollRun.status || "").toLowerCase()
 
   if (mode === "preparation" && runStatus === "reversed") {
@@ -101,6 +102,10 @@ export async function serveImmutablePayrollExport(args: {
 
   if ("notFound" in loaded && loaded.notFound) {
     if (mode === "preparation") {
+      if (legacyPreparationContent) {
+        const preparation = await legacyPreparationContent()
+        if (preparation) return preparation
+      }
       return legacySnapshotMissingResponse(mode)
     }
     if (legacyAuditContent) {
