@@ -21,6 +21,7 @@ import {
   enforceServiceWorkspaceAccess,
   enforceServiceWorkspaceWriteAccess,
 } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
+import { mapAccountingPeriodError } from "@/lib/service/accounting/periodErrors"
 
 export async function GET(request: NextRequest) {
   try {
@@ -141,8 +142,12 @@ export async function POST(request: NextRequest) {
 
     if (rpcError) {
       const msg = rpcError.message || "Failed to create loan"
-      if (msg.includes("locked") || msg.includes("period")) {
-        return NextResponse.json({ error: "Cannot post to a locked period. Choose another date." }, { status: 400 })
+      const periodError = mapAccountingPeriodError(msg)
+      if (periodError) {
+        return NextResponse.json(
+          { error: periodError.error, code: periodError.code },
+          { status: periodError.status }
+        )
       }
       return NextResponse.json({ error: msg }, { status: 500 })
     }

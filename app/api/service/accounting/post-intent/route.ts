@@ -15,6 +15,8 @@ import {
   type AccountForValidation,
 } from "@/lib/service/accounting/intentTypes"
 import { enforceServiceWorkspaceWriteAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
+import { ensureLoanRepaymentAccountingPeriod } from "@/lib/service/accounting/ensureLoanRepaymentAccountingPeriod"
+import { mapAccountingPeriodError } from "@/lib/service/accounting/periodErrors"
 
 export async function POST(request: NextRequest) {
   try {
@@ -90,6 +92,25 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // A repayment may be dated in a month that has not had its accounting period
+    // provisioned yet. Resolve/create that month through the existing period
+    // mechanism before posting. Locked periods are never modified or reopened.
+    let accountingPeriodCreated = false
+    if (intent.intent_type === "LOAN_REPAYMENT") {
+      const periodResult = await ensureLoanRepaymentAccountingPeriod(supabase, {
+        businessId,
+        userId: user.id,
+        entryDate: intent.entry_date,
+      })
+      if (!periodResult.ok) {
+        return NextResponse.json(
+          { error: periodResult.message, code: periodResult.code },
+          { status: periodResult.status }
+        )
+      }
+      accountingPeriodCreated = periodResult.created
+    }
+
     const { data: journalEntryId, error: rpcError } = await supabase.rpc(
       "post_service_intent_to_ledger",
       {
@@ -103,10 +124,11 @@ export async function POST(request: NextRequest) {
     if (rpcError) {
       console.error("post_service_intent_to_ledger error:", rpcError)
       const msg = rpcError.message || "Failed to post to ledger"
-      if (msg.includes("locked") || msg.includes("period")) {
+      const periodError = mapAccountingPeriodError(msg)
+      if (periodError) {
         return NextResponse.json(
-          { error: "Cannot post to a locked period. Choose another date." },
-          { status: 400 }
+          { error: periodError.error, code: periodError.code },
+          { status: periodError.status }
         )
       }
       if (msg.includes("Unauthorized") || msg.includes("authorized")) {
@@ -131,6 +153,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       journal_entry_id: journalEntryId,
+      accounting_period_created: accountingPeriodCreated,
     })
   } catch (error: unknown) {
     console.error("post-intent error:", error)
