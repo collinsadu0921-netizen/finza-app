@@ -61,6 +61,45 @@ function providerField(data: Record<string, unknown>, key: string): string | nul
   return value == null ? null : String(value).trim() || null
 }
 
+function settlementPaymentDate(paidAt: string): string {
+  const parsed = new Date(paidAt)
+  if (Number.isNaN(parsed.getTime())) {
+    return new Date().toISOString().slice(0, 10)
+  }
+  return parsed.toISOString().slice(0, 10)
+}
+
+/**
+ * Paystack confirms the payment on the actual transfer date, while the payroll
+ * expense may belong to an earlier month. The salary-payment journal is dated to
+ * the payment date, so that month must have an accounting period. Provision a
+ * genuinely missing month through the existing period mechanism; never reopen or
+ * modify an existing locked period.
+ */
+async function ensureSettlementAccountingPeriod(
+  admin: SupabaseClient,
+  transfer: PayrollPaystackTransferRow,
+  paidAt: string
+): Promise<{ code?: string; message?: string; details?: string } | null> {
+  const paymentDate = settlementPaymentDate(paidAt)
+  let lastError: { code?: string; message?: string; details?: string } | null = null
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const { error } = await admin.rpc("ensure_accounting_period", {
+      p_business_id: transfer.business_id,
+      p_date: paymentDate,
+    })
+
+    if (!error) return null
+
+    lastError = error
+    // A concurrent settlement may have created the same month first.
+    if (error.code !== "23505") break
+  }
+
+  return lastError
+}
+
 /**
  * Applies a provider response/webhook result to a stored transfer attempt.
  * The external HTTP status is never trusted by itself: success is settled only
@@ -136,6 +175,17 @@ export async function processPaystackTransferProviderResult(input: {
       }
     }
 
+    const periodError = await ensureSettlementAccountingPeriod(admin, transfer, paidAt)
+    if (periodError) {
+      console.warn("[paystack transfer] period provisioning failed", {
+        transferId: transfer.id,
+        paymentDate: settlementPaymentDate(paidAt),
+        code: periodError.code ?? null,
+        message: periodError.message ?? null,
+        details: periodError.details ?? null,
+      })
+    }
+
     const { data, error } = await admin.rpc("settle_payroll_paystack_transfer_atomic", {
       p_transfer_id: transfer.id,
       p_provider_status: rawStatus ?? "success",
@@ -157,7 +207,14 @@ export async function processPaystackTransferProviderResult(input: {
             "Paystack confirmed the transfer but salary settlement failed. Do not retry; review the transfer.",
         })
         .eq("id", transfer.id)
-      console.error("[paystack transfer] settlement failed", { transferId: transfer.id, code: error.code })
+      console.error("[paystack transfer] settlement failed", {
+        transferId: transfer.id,
+        paymentDate: settlementPaymentDate(paidAt),
+        code: error.code ?? null,
+        message: error.message ?? null,
+        details: error.details ?? null,
+        hint: error.hint ?? null,
+      })
       return {
         applied: false,
         status: "requires_attention",
