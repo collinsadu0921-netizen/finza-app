@@ -122,7 +122,13 @@ export async function loadPaystackPaymentContext(input: {
     .select("id, status, reference, created_at")
     .eq("business_id", businessId)
     .eq("batch_item_id", itemId)
-    .in("status", ["initiating", "awaiting_authorization", "pending", "successful"])
+    .in("status", [
+      "initiating",
+      "awaiting_authorization",
+      "pending",
+      "successful",
+      "requires_attention",
+    ])
     .maybeSingle()
 
   if (transferError) {
