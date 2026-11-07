@@ -56,7 +56,13 @@ async function loadActiveTransferForItem(
     .select("*")
     .eq("business_id", businessId)
     .eq("batch_item_id", itemId)
-    .in("status", ["initiating", "awaiting_authorization", "pending", "successful"])
+    .in("status", [
+      "initiating",
+      "awaiting_authorization",
+      "pending",
+      "successful",
+      "requires_attention",
+    ])
     .maybeSingle()
   return (data as TransferRow | null) ?? null
 }

@@ -4,6 +4,7 @@ import { normalizeEmploymentTypeForSnapshot } from "@/lib/payroll/staffTaxProfil
 export type GhanaIncomeTaxEntryFields = {
   income_tax_method?: string | null
   income_tax_method_version?: string | null
+  taxable_income?: number | null
   income_tax_regular_base?: number | null
   income_tax_regular_amount?: number | null
   income_tax_bonus_base?: number | null

@@ -321,7 +321,7 @@ export default function PaystackSalaryPaymentModal({
                 ? "Paystack transfer receipt"
                 : status === "requires_attention"
                   ? "Paystack transfer needs review"
-                  : "Pay with Paystack"}
+                  : "Pay employee individually"}
             </h3>
             <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
               {employeeName || "Employee"}  -  {money(amount)}
@@ -407,7 +407,7 @@ export default function PaystackSalaryPaymentModal({
                   disabled={!confirmed || busy}
                   className="w-full rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
                 >
-                  {submitting ? "Contacting Paystack..." : `Pay ${money(preview.amount.ghs)} with Paystack`}
+                  {submitting ? "Contacting Paystack..." : `Pay ${money(preview.amount.ghs)} individually`}
                 </button>
               </>
             ) : null}

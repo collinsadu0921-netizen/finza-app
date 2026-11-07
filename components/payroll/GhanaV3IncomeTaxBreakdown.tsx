@@ -65,7 +65,6 @@ export default function GhanaV3IncomeTaxBreakdown({
   if (!hasGhanaV3IncomeTaxSnapshot(entry)) return null
 
   const method = String(entry.income_tax_method || "").trim()
-  const methodVersion = entry.income_tax_method_version ? String(entry.income_tax_method_version) : "—"
   const totalPaye = Number(entry.paye ?? 0)
 
   return (
@@ -73,15 +72,15 @@ export default function GhanaV3IncomeTaxBreakdown({
       className={`rounded-lg border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-900/40 px-3 py-2 space-y-1.5 ${className}`}
     >
       <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-        Ghana v3 income tax
+        PAYE details
       </div>
       <div className="flex justify-between gap-3 text-xs">
         <span className="text-gray-600 dark:text-gray-400">Tax method</span>
         <span className="text-gray-800 dark:text-gray-200 text-right">{formatGhanaIncomeTaxMethodLabel(method)}</span>
       </div>
       <div className="flex justify-between gap-3 text-xs">
-        <span className="text-gray-600 dark:text-gray-400">Method version</span>
-        <span className="font-mono text-gray-800 dark:text-gray-200 text-right">{methodVersion}</span>
+        <span className="text-gray-600 dark:text-gray-400">Taxable amount</span>
+        <span className="text-gray-800 dark:text-gray-200 text-right">{formatPayrollMoney(Number(entry.taxable_income ?? 0), currencySymbol)}</span>
       </div>
       <AdminRow
         label="Regular tax"

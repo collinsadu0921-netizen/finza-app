@@ -316,6 +316,77 @@ export async function initiatePaystackTransfer(
   })
 }
 
+export type PaystackBulkTransferInput = {
+  source: "balance"
+  currency: "GHS"
+  transfers: Array<{
+    amount: number
+    recipient: string
+    reason: string
+    reference: string
+  }>
+}
+
+/**
+ * Genuine Paystack bulk transfer. The account must have Transfers OTP disabled;
+ * this function never disables or bypasses OTP. If Paystack rejects bulk
+ * transfers, callers must keep the individual transfer workflow available.
+ */
+export async function initiatePaystackBulkTransfer(
+  secretKey: string,
+  input: PaystackBulkTransferInput
+): Promise<PaystackApiResult<Record<string, unknown>[]>> {
+  if (isPaystackPayrollMockMode()) {
+    const rows = input.transfers.map((transfer) => {
+      mockTransferStore.set(transfer.reference, {
+        amount: transfer.amount,
+        currency: "GHS",
+        recipient: transfer.recipient,
+        status: "success",
+        fee: 100,
+      })
+      return {
+        id: mockId(transfer.reference, "mock_transfer"),
+        reference: transfer.reference,
+        recipient: transfer.recipient,
+        amount: transfer.amount,
+        currency: "GHS",
+        status: "success",
+        transfer_code: mockId(transfer.reference, "TRF_mock"),
+        fee: 100,
+        transferred_at: new Date().toISOString(),
+        gateway_response: "Mock Paystack bulk transfer approved",
+      }
+    })
+    return {
+      ok: true,
+      httpStatus: 200,
+      data: rows,
+      message: `${rows.length} mock transfers queued.`,
+    }
+  }
+
+  const result = await paystackRequest(secretKey, "/transfer/bulk", {
+    method: "POST",
+    body: JSON.stringify(input),
+  })
+  if (!result.ok) return result
+
+  const rows = Array.isArray(result.data.items)
+    ? result.data.items
+    : Array.isArray(result.data)
+      ? result.data
+      : []
+  return {
+    ok: true,
+    httpStatus: result.httpStatus,
+    data: rows
+      .map((row) => asRecord(row))
+      .filter((row): row is Record<string, unknown> => Boolean(row)),
+    message: result.message,
+  }
+}
+
 export async function finalizePaystackTransfer(
   secretKey: string,
   transferCode: string,

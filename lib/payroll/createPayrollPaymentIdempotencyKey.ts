@@ -2,7 +2,10 @@
  * Create a stable client idempotency key for payroll payment operations.
  * Keys are generated once per user action and reused for retries.
  */
-export type PayrollPaymentIdempotencyScope = "payroll-payment" | "payroll-batch-item"
+export type PayrollPaymentIdempotencyScope =
+  | "payroll-payment"
+  | "payroll-batch-item"
+  | "payroll-bulk"
 
 const KEY_PATTERN = /^[A-Za-z0-9._:-]{16,128}$/
 
