@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { usePayrollBasePath } from "@/lib/payrollBasePathContext"
 import { useServiceFinancialWrite } from "@/components/service/useServiceFinancialWrite"
@@ -29,6 +29,24 @@ type PayrollRun = {
   created_at: string
 }
 
+const PAYROLL_STATUS_FILTER_ORDER = ["draft", "approved", "locked", "reversed"]
+
+function payrollRunYear(run: PayrollRun): string {
+  return String(run.pay_period_start || run.payroll_month || "").slice(0, 4)
+}
+
+function payrollRunSearchText(run: PayrollRun): string {
+  return [
+    formatPayrollRunLabel(run),
+    formatPayrollRunTypeBadge(run.run_type),
+    run.status,
+    payrollRunYear(run),
+    run.payroll_frequency || "",
+  ]
+    .join(" ")
+    .toLowerCase()
+}
+
 export default function PayrollPage() {
   const router = useRouter()
   const payrollBase = usePayrollBasePath()
@@ -38,6 +56,39 @@ export default function PayrollPage() {
   const [loading, setLoading] = useState(true)
   const [runs, setRuns] = useState<PayrollRun[]>([])
   const [deletingRunId, setDeletingRunId] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState("")
+  const [statusFilter, setStatusFilter] = useState("all")
+  const [yearFilter, setYearFilter] = useState("all")
+
+  const statusOptions = useMemo(() => {
+    const present = new Set(runs.map((run) => run.status))
+    const ordered = PAYROLL_STATUS_FILTER_ORDER.filter((status) => present.has(status))
+    const extras = [...present].filter((status) => !PAYROLL_STATUS_FILTER_ORDER.includes(status)).sort()
+    return [...ordered, ...extras]
+  }, [runs])
+
+  const yearOptions = useMemo(() => {
+    return [...new Set(runs.map(payrollRunYear).filter(Boolean))].sort((a, b) => b.localeCompare(a))
+  }, [runs])
+
+  const filteredRuns = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase()
+    return runs.filter((run) => {
+      if (statusFilter !== "all" && run.status !== statusFilter) return false
+      if (yearFilter !== "all" && payrollRunYear(run) !== yearFilter) return false
+      if (query && !payrollRunSearchText(run).includes(query)) return false
+      return true
+    })
+  }, [runs, searchQuery, statusFilter, yearFilter])
+
+  const filtersActive =
+    searchQuery.trim() !== "" || statusFilter !== "all" || yearFilter !== "all"
+
+  const clearFilters = () => {
+    setSearchQuery("")
+    setStatusFilter("all")
+    setYearFilter("all")
+  }
 
   useEffect(() => {
     loadPayrollRuns()
@@ -161,6 +212,84 @@ export default function PayrollPage() {
           {readOnly && <ServiceReadOnlyNotice scope="payroll" className="mb-4" />}
 
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+            <div className="border-b border-gray-200 dark:border-gray-700 px-4 py-3">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+                  <div className="relative">
+                    <svg
+                      className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                      aria-hidden="true"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z"
+                      />
+                    </svg>
+                    <input
+                      type="search"
+                      value={searchQuery}
+                      onChange={(event) => setSearchQuery(event.target.value)}
+                      placeholder="Search month, year or status"
+                      aria-label="Search payroll runs"
+                      className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:placeholder:text-gray-400 sm:w-64"
+                    />
+                  </div>
+                  <label htmlFor="payroll-status-filter" className="sr-only">
+                    Filter by status
+                  </label>
+                  <select
+                    id="payroll-status-filter"
+                    value={statusFilter}
+                    onChange={(event) => setStatusFilter(event.target.value)}
+                    className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                  >
+                    <option value="all">All statuses</option>
+                    {statusOptions.map((status) => (
+                      <option key={status} value={status}>
+                        {status.charAt(0).toUpperCase() + status.slice(1)}
+                      </option>
+                    ))}
+                  </select>
+                  <label htmlFor="payroll-year-filter" className="sr-only">
+                    Filter by year
+                  </label>
+                  <select
+                    id="payroll-year-filter"
+                    value={yearFilter}
+                    onChange={(event) => setYearFilter(event.target.value)}
+                    className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                  >
+                    <option value="all">All years</option>
+                    {yearOptions.map((year) => (
+                      <option key={year} value={year}>
+                        {year}
+                      </option>
+                    ))}
+                  </select>
+                  {filtersActive ? (
+                    <button
+                      type="button"
+                      onClick={clearFilters}
+                      className="rounded-lg px-2 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50 hover:text-blue-800 dark:text-blue-400 dark:hover:bg-blue-900/20 dark:hover:text-blue-300"
+                    >
+                      Clear filters
+                    </button>
+                  ) : null}
+                </div>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Showing{" "}
+                  <span className="font-medium text-gray-700 dark:text-gray-200">
+                    {filteredRuns.length}
+                  </span>{" "}
+                  of {runs.length} runs
+                </p>
+              </div>
+            </div>
             <div className="hidden md:block">
               <table className="w-full table-fixed">
                 <colgroup>
@@ -198,14 +327,16 @@ export default function PayrollPage() {
                   </tr>
                 </thead>
                 <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                  {runs.length === 0 ? (
+                  {filteredRuns.length === 0 ? (
                     <tr>
                       <td colSpan={7} className="px-4 py-8 text-center text-gray-500 dark:text-gray-400">
-                        No payroll runs found. Create your first payroll run to get started.
+                        {runs.length === 0
+                          ? "No payroll runs found. Create your first payroll run to get started."
+                          : "No payroll runs match these filters."}
                       </td>
                     </tr>
                   ) : (
-                    runs.map((run) => (
+                    filteredRuns.map((run) => (
                       <tr key={run.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
                         <td className="px-3 py-3 align-top text-sm font-medium text-gray-900 dark:text-white break-words whitespace-normal leading-snug">
                           {formatMonth(run)}
@@ -235,12 +366,14 @@ export default function PayrollPage() {
             </div>
 
             <div className="md:hidden divide-y divide-gray-200 dark:divide-gray-700">
-              {runs.length === 0 ? (
+              {filteredRuns.length === 0 ? (
                 <p className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
-                  No payroll runs found. Create your first payroll run to get started.
+                  {runs.length === 0
+                    ? "No payroll runs found. Create your first payroll run to get started."
+                    : "No payroll runs match these filters."}
                 </p>
               ) : (
-                runs.map((run) => (
+                filteredRuns.map((run) => (
                   <div key={run.id} className="p-4 space-y-3">
                     <div className="min-w-0 space-y-1">
                       <p className="text-sm font-semibold text-gray-900 dark:text-white break-words leading-snug">
