@@ -65,6 +65,52 @@ describe("Paystack client safeguards", () => {
     expect(extractPaystackTransferFeePesewas({})).toBeNull()
   })
 
+  it("calls the genuine Paystack /transfer/bulk endpoint", async () => {
+    const previousMode = process.env.PAYSTACK_PAYROLL_MOCK_MODE
+    const previousEnv = process.env.VERCEL_ENV
+    const previousFetch = global.fetch
+    process.env.PAYSTACK_PAYROLL_MOCK_MODE = "false"
+    process.env.VERCEL_ENV = "preview"
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = []
+    global.fetch = (async (url: string, init: RequestInit) => {
+      calls.push({ url: String(url), body: JSON.parse(String(init.body)) })
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          status: true,
+          message: "2 transfers queued.",
+          data: [
+            { reference: "bulk-ref-one", recipient: "RCP_one", amount: 1000, currency: "GHS", status: "success", transfer_code: "TRF_one" },
+            { reference: "bulk-ref-two", recipient: "RCP_two", amount: 2000, currency: "GHS", status: "success", transfer_code: "TRF_two" },
+          ],
+        }),
+      } as unknown as Response
+    }) as unknown as typeof fetch
+    try {
+      const result = await initiatePaystackBulkTransfer("sk_test_bulk", {
+        source: "balance",
+        currency: "GHS",
+        transfers: [
+          { amount: 1000, recipient: "RCP_one", reason: "Salary", reference: "bulk-ref-one" },
+          { amount: 2000, recipient: "RCP_two", reason: "Salary", reference: "bulk-ref-two" },
+        ],
+      })
+      expect(calls).toHaveLength(1)
+      expect(calls[0].url).toBe("https://api.paystack.co/transfer/bulk")
+      expect(calls[0].body).toMatchObject({ source: "balance", currency: "GHS" })
+      expect((calls[0].body.transfers as unknown[]).length).toBe(2)
+      expect(result.ok).toBe(true)
+      if (result.ok) expect(result.data).toHaveLength(2)
+    } finally {
+      global.fetch = previousFetch
+      if (previousMode === undefined) delete process.env.PAYSTACK_PAYROLL_MOCK_MODE
+      else process.env.PAYSTACK_PAYROLL_MOCK_MODE = previousMode
+      if (previousEnv === undefined) delete process.env.VERCEL_ENV
+      else process.env.VERCEL_ENV = previousEnv
+    }
+  })
+
   it("submits a genuine bulk request in staging mock mode", async () => {
     const previousMode = process.env.PAYSTACK_PAYROLL_MOCK_MODE
     const previousEnv = process.env.VERCEL_ENV
