@@ -38,10 +38,10 @@ function client(options: {
 }
 
 const allDefaultsActive = [
-  { account_code: "2100", is_active: true },
-  { account_code: "2110", is_active: true },
-  { account_code: "2120", is_active: true },
-  { account_code: "2130", is_active: true },
+  { account_code: "2100", is_active: true, account_type: "liability" },
+  { account_code: "2110", is_active: true, account_type: "liability" },
+  { account_code: "2120", is_active: true, account_type: "liability" },
+  { account_code: "2130", is_active: true, account_type: "liability" },
 ]
 
 describe("getTaxControlAccountCodes", () => {
@@ -61,7 +61,7 @@ describe("getTaxControlAccountCodes", () => {
   it("honours an explicit mapping instead of the default", async () => {
     const { supabase } = client({
       mappings: [{ control_key: "VAT_PAYABLE", account_code: "2200" }],
-      accounts: [...allDefaultsActive, { account_code: "2200", is_active: true }],
+      accounts: [...allDefaultsActive, { account_code: "2200", is_active: true, account_type: "liability" }],
     })
 
     const codes = await getTaxControlAccountCodes(supabase, "biz-1")
@@ -73,7 +73,22 @@ describe("getTaxControlAccountCodes", () => {
   it("does not silently replace an explicit but inactive mapping", async () => {
     const { supabase } = client({
       mappings: [{ control_key: "VAT_PAYABLE", account_code: "2200" }],
-      accounts: [...allDefaultsActive, { account_code: "2200", is_active: false }],
+      accounts: [...allDefaultsActive, { account_code: "2200", is_active: false, account_type: "liability" }],
+    })
+
+    const codes = await getTaxControlAccountCodes(supabase, "biz-1")
+
+    expect(codes.vat).toBeNull()
+    expect(codes.nhil).toBe("2110")
+  })
+
+  it("rejects an explicit mapping to a non-liability account", async () => {
+    const { supabase } = client({
+      mappings: [{ control_key: "VAT_PAYABLE", account_code: "2200" }],
+      accounts: [
+        ...allDefaultsActive,
+        { account_code: "2200", is_active: true, account_type: "asset" },
+      ],
     })
 
     const codes = await getTaxControlAccountCodes(supabase, "biz-1")
@@ -85,10 +100,10 @@ describe("getTaxControlAccountCodes", () => {
   it("returns null when a default account is inactive", async () => {
     const { supabase } = client({
       accounts: [
-        { account_code: "2100", is_active: false },
-        { account_code: "2110", is_active: true },
-        { account_code: "2120", is_active: true },
-        { account_code: "2130", is_active: true },
+        { account_code: "2100", is_active: false, account_type: "liability" },
+        { account_code: "2110", is_active: true, account_type: "liability" },
+        { account_code: "2120", is_active: true, account_type: "liability" },
+        { account_code: "2130", is_active: true, account_type: "liability" },
       ],
     })
 
@@ -129,3 +144,4 @@ describe("getTaxControlAccountCodes", () => {
     )
   })
 })
+
