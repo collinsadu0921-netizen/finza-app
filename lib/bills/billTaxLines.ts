@@ -19,10 +19,13 @@ export function toBillTaxLinesJsonb(
   return {
     tax_lines: result.lines.map((line) => {
       const meta = line.meta ?? {}
+      const isRounding =
+        line.code === "ROUNDING" || meta.ledger_account_code === "7990"
       const absorbed =
-        meta.absorbed_to_cost === true ||
-        meta.is_creditable_input === false ||
-        meta.ledger_account_code == null
+        !isRounding &&
+        (meta.absorbed_to_cost === true ||
+          meta.is_creditable_input === false ||
+          meta.ledger_account_code == null)
 
       return {
         code: line.code,
