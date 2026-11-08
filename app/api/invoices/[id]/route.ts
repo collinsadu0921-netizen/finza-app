@@ -508,7 +508,7 @@ export async function PUT(
 
     const { data: existingInvoice } = await supabase
       .from("invoices")
-      .select("id, business_id, status, sent_at, paid_at, apply_taxes, invoice_number")
+      .select("id, business_id, status, sent_at, paid_at, apply_taxes, invoice_number, issue_date")
       .eq("id", invoiceId)
       .eq("business_id", scopedBusinessId)
       .single()
@@ -543,22 +543,45 @@ export async function PUT(
     let materialValidationForItems: Awaited<ReturnType<typeof validateInvoiceLineMaterials>> | null =
       null
 
-    if (items && items.length > 0) {
-      materialValidationForItems = await validateInvoiceLineMaterials(
-        supabase,
-        businessId,
-        items,
-        { excludeInvoiceId: invoiceId }
-      )
-      if (!materialValidationForItems.ok) {
-        return NextResponse.json(
-          { error: materialValidationForItems.error },
-          { status: materialValidationForItems.status }
+    // A draft invoice's issue date is its legal tax date. Changing the date
+    // without resubmitting lines must still recalculate the persisted tax
+    // breakdown, using the invoice's existing lines as the base.
+    let existingTaxItems: any[] | null = null
+    if (
+      existingInvoice.status === "draft" &&
+      issue_date !== undefined &&
+      (!items || items.length === 0)
+    ) {
+      const { data: existingInvoiceItems } = await supabase
+        .from("invoice_items")
+        .select(
+          "description, qty, unit_price, discount_amount, product_service_id, product_id, material_id"
         )
+        .eq("invoice_id", invoiceId)
+        .order("created_at", { ascending: true })
+      existingTaxItems = existingInvoiceItems ?? []
+    }
+
+    const taxItems = items && items.length > 0 ? items : existingTaxItems
+
+    if (taxItems && taxItems.length > 0) {
+      if (items && items.length > 0) {
+        materialValidationForItems = await validateInvoiceLineMaterials(
+          supabase,
+          businessId,
+          items,
+          { excludeInvoiceId: invoiceId }
+        )
+        if (!materialValidationForItems.ok) {
+          return NextResponse.json(
+            { error: materialValidationForItems.error },
+            { status: materialValidationForItems.status }
+          )
+        }
       }
 
       // Prepare line items for tax calculation
-      const lineItems = items.map((item: any) => ({
+      const lineItems = taxItems.map((item: any) => ({
         quantity: Number(item.qty) || 0,
         unit_price: Number(item.unit_price) || 0,
         discount_amount: Number(item.discount_amount) || 0,
@@ -566,11 +589,13 @@ export async function PUT(
 
       const shouldApplyTaxes = apply_taxes !== undefined ? apply_taxes : existingInvoice.apply_taxes !== false
 
-      // Determine effective date: use sent_at if invoice has been sent, otherwise use issue_date
-      // When updating a draft that becomes sent, we'll use the new sent_at timestamp
-      const effectiveDate = existingInvoice.sent_at
-        ? existingInvoice.sent_at
-        : (issue_date || (existingInvoice as any).issue_date || new Date().toISOString().split("T")[0])
+      // The invoice issue date is the legal tax date and the ledger posting
+      // date. Sent invoices are immutable, but a draft's new issue date must
+      // drive recalculation rather than the current sent_at timestamp.
+      const effectiveDate =
+        issue_date ||
+        (existingInvoice as any).issue_date ||
+        new Date().toISOString().split("T")[0]
       const effectiveDateStr = String(effectiveDate).split("T")[0]
 
       // Get business country for tax calculation
@@ -736,11 +761,10 @@ export async function PUT(
       )
     }
 
-    // If status is changing to "sent", set sent_at timestamp (this is the tax effective date)
+    // The issue date remains the legal tax date. sent_at is only an
+    // operational delivery timestamp and never replaces issue_date.
     if (status === "sent" && existingInvoice.status !== "sent") {
       updateData.sent_at = new Date().toISOString()
-      // Note: When status changes to "sent", sent_at becomes the tax effective date
-      // If items are being updated at the same time, tax recalculation should use this new sent_at date
     }
     
     if (issue_date) updateData.issue_date = issue_date

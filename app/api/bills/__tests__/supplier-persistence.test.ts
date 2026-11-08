@@ -201,6 +201,19 @@ describe("bill supplier persistence", () => {
             })),
           }
         }
+        if (table === "wht_rates") {
+          const chain: any = {}
+          chain.select = jest.fn(() => chain)
+          chain.eq = jest.fn(() => chain)
+          chain.lte = jest.fn(() => chain)
+          chain.or = jest.fn(() => chain)
+          chain.order = jest.fn(() => chain)
+          chain.limit = jest.fn(() => chain)
+          chain.maybeSingle = jest.fn(() =>
+            Promise.resolve({ data: null, error: null })
+          )
+          return chain
+        }
         return {
           select: jest.fn(() => ({
             eq: jest.fn(() => ({
@@ -384,6 +397,69 @@ describe("bill supplier persistence", () => {
     const body = await res.json()
     expect(body.code).toBe("WHT_CATEGORY_INVALID")
     expect(lastInsert).toBeNull()
+  })
+
+  it("rejects a pre-2026 bill mixing inventory materials and services", async () => {
+    const req = new NextRequest("http://localhost/api/bills/create", {
+      method: "POST",
+      body: JSON.stringify({
+        business_id: BUSINESS_ID,
+        supplier_name: "Supplier A",
+        bill_number: "B-MIXED-PRE-2026",
+        issue_date: "2025-12-31",
+        apply_taxes: true,
+        items: [
+          {
+            description: "Material",
+            qty: 1,
+            unit_price: 100,
+            discount_amount: 0,
+            material_id: "mat-1",
+          },
+          {
+            description: "Service",
+            qty: 1,
+            unit_price: 50,
+            discount_amount: 0,
+          },
+        ],
+      }),
+    })
+    const res = await POST(req)
+    expect(res.status).toBe(400)
+    const body = await res.json()
+    expect(body.code).toBe("BILL_MIXED_MATERIAL_TAX_UNSUPPORTED")
+    expect(lastInsert).toBeNull()
+  })
+
+  it("rejects a pre-2026 bill update mixing inventory materials and services", async () => {
+    const req = new NextRequest(`http://localhost/api/bills/${BILL_ID}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        issue_date: "2025-12-31",
+        apply_taxes: true,
+        items: [
+          {
+            description: "Material",
+            qty: 1,
+            unit_price: 100,
+            discount_amount: 0,
+            material_id: "mat-1",
+          },
+          {
+            description: "Service",
+            qty: 1,
+            unit_price: 50,
+            discount_amount: 0,
+          },
+        ],
+      }),
+    })
+    const res = await PUT(req, { params: { id: BILL_ID } })
+    expect(res.status).toBe(400)
+    const body = await res.json()
+    expect(body.code).toBe("BILL_MIXED_MATERIAL_TAX_UNSUPPORTED")
+    expect(lastUpdate).toBeNull()
   })
 
   it("uses the bill issue date for pre-2026 tax and persists absorbed input levies", async () => {

@@ -5,7 +5,7 @@
  * 1. Uses canonical tax engine (TaxResult)
  * 2. Persists canonical values (subtotal, total_tax, total, tax_lines)
  * 3. Derives legacy columns from tax_lines (no rate/cutoff/country logic)
- * 4. Effective date logic: Draft uses issue_date, Sent uses sent_at
+ * 4. Effective date logic: the invoice issue_date is the legal tax date
  */
 
 import { POST } from '../create/route'
@@ -191,6 +191,19 @@ describe('POST /api/invoices/create - Canonical Tax Engine', () => {
           chain.maybeSingle = jest.fn(() => Promise.resolve({ data: null, error: null }))
           return chain
         }
+        if (table === 'wht_rates') {
+          const chain: any = {}
+          chain.select = jest.fn(() => chain)
+          chain.eq = jest.fn(() => chain)
+          chain.lte = jest.fn(() => chain)
+          chain.or = jest.fn(() => chain)
+          chain.order = jest.fn(() => chain)
+          chain.limit = jest.fn(() => chain)
+          chain.maybeSingle = jest.fn(() =>
+            Promise.resolve({ data: null, error: null })
+          )
+          return chain
+        }
         if (table === 'products_services') {
           return {
             select: jest.fn(() => ({
@@ -322,9 +335,7 @@ describe('POST /api/invoices/create - Canonical Tax Engine', () => {
     expect(invoiceData.sent_at).toBeUndefined()
   })
 
-  it('uses sent_at (current date) as effective date for sent invoices', async () => {
-    const currentDate = new Date().toISOString().split('T')[0]
-    
+  it('uses issue_date as effective date for sent invoices', async () => {
     const request = new NextRequest('http://localhost/api/invoices/create', {
       method: 'POST',
       body: JSON.stringify({
@@ -341,9 +352,9 @@ describe('POST /api/invoices/create - Canonical Tax Engine', () => {
     await POST(request)
 
     const invoiceData = invoicesTableMock.insert.mock.calls[0][0]
-    
-    // Verify effective date is current date for sent
-    expect(invoiceData.tax_engine_effective_from).toBe(currentDate)
+
+    // The legal issue date drives tax and posting for sent invoices too.
+    expect(invoiceData.tax_engine_effective_from).toBe('2025-12-31')
     expect(invoiceData.sent_at).toBeDefined()
   })
 
