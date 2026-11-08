@@ -4,6 +4,11 @@ import { normalizeCountry } from "@/lib/payments/eligibility"
 import { resolveProfessionalVatBusinessId } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 import { calculateVatReturnTotals } from "@/lib/vat/vatReturnCalculation"
 import { isCalendarMonthPeriod } from "@/lib/vat/vatPeriod"
+import {
+  parseVatTaxableBases,
+  taxableBaseInputs,
+  vatTaxableBaseException,
+} from "@/lib/vat/taxableBases"
 
 export async function POST(request: NextRequest) {
   try {
@@ -96,6 +101,32 @@ export async function POST(request: NextRequest) {
       closing_balance: number
     }> = ledgerData || []
 
+    // Taxable bases come from persisted tax-line bases and classified retail
+    // supplies. They are never derived from VAT / 15%.
+    const { data: basesData, error: basesError } = await supabase.rpc(
+      "extract_vat_taxable_bases",
+      {
+        p_business_id: businessId,
+        p_start_date: period_start_date,
+        p_end_date: period_end_date,
+      }
+    )
+
+    if (basesError) {
+      console.error("Error calling extract_vat_taxable_bases:", basesError)
+      return NextResponse.json(
+        {
+          error:
+            "Taxable sales and purchases could not be determined from transaction evidence.",
+          code: "VAT_TAXABLE_BASE_UNAVAILABLE",
+          details: basesError.message,
+        },
+        { status: 500 }
+      )
+    }
+
+    const bases = parseVatTaxableBases(basesData)
+
     const missingAccounts: string[] = []
     if (!rows.some((r) => r.tax_code === "VAT")) missingAccounts.push("2100 (VAT)")
     if (!rows.some((r) => r.tax_code === "NHIL")) missingAccounts.push("2110 (NHIL)")
@@ -106,14 +137,28 @@ export async function POST(request: NextRequest) {
     const calculation = calculateVatReturnTotals({
       rows,
       periodEndDate: period_end_date,
+      ...taxableBaseInputs(bases),
+    })
+
+    const dataQualityException = vatTaxableBaseException({
+      totalOutputVat: calculation.total_output_vat,
+      totalInputVat: calculation.total_input_vat,
+      standardRatedSales: calculation.total_standard_rated_sales,
+      standardRatedPurchases: calculation.total_standard_rated_purchases,
+      taxableBasesComplete: calculation.taxable_bases_complete,
     })
 
     const responseBody: Record<string, unknown> = {
       calculation,
+      taxable_bases: bases,
       ledger_source: true,
     }
 
-    const warnings = [...calculation.warnings]
+    if (dataQualityException) {
+      responseBody.data_quality_exception = dataQualityException
+    }
+
+    const warnings = [...calculation.warnings, ...bases.warnings]
     if (missingAccounts.length > 0) {
       warnings.push(
         `The following tax control accounts were not found in the ledger for this period: ${missingAccounts.join(", ")}. ` +

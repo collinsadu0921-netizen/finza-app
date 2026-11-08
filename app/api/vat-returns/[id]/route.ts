@@ -234,12 +234,16 @@ export async function PUT(
       notes,
       // Allow recalculating these fields for draft returns
       total_taxable_sales,
+      total_zero_rated_sales,
+      total_exempt_sales,
       total_output_nhil,
       total_output_getfund,
       total_output_covid,
       total_output_vat,
       total_output_tax,
       total_taxable_purchases,
+      total_zero_rated_purchases,
+      total_exempt_purchases,
       total_input_nhil,
       total_input_getfund,
       total_input_covid,
@@ -290,12 +294,16 @@ export async function PUT(
     // Allow recalculating all tax fields if status is draft
     if (existingReturn.status === "draft") {
       if (total_taxable_sales !== undefined) updateData.total_taxable_sales = Number(total_taxable_sales)
+      if (total_zero_rated_sales !== undefined) updateData.total_zero_rated_sales = Number(total_zero_rated_sales)
+      if (total_exempt_sales !== undefined) updateData.total_exempt_sales = Number(total_exempt_sales)
       if (total_output_nhil !== undefined) updateData.total_output_nhil = Number(total_output_nhil)
       if (total_output_getfund !== undefined) updateData.total_output_getfund = Number(total_output_getfund)
       if (total_output_covid !== undefined) updateData.total_output_covid = Number(total_output_covid)
       if (total_output_vat !== undefined) updateData.total_output_vat = Number(total_output_vat)
       if (total_output_tax !== undefined) updateData.total_output_tax = Number(total_output_tax)
       if (total_taxable_purchases !== undefined) updateData.total_taxable_purchases = Number(total_taxable_purchases)
+      if (total_zero_rated_purchases !== undefined) updateData.total_zero_rated_purchases = Number(total_zero_rated_purchases)
+      if (total_exempt_purchases !== undefined) updateData.total_exempt_purchases = Number(total_exempt_purchases)
       if (total_input_nhil !== undefined) updateData.total_input_nhil = Number(total_input_nhil)
       if (total_input_getfund !== undefined) updateData.total_input_getfund = Number(total_input_getfund)
       if (total_input_covid !== undefined) updateData.total_input_covid = Number(total_input_covid)
@@ -325,7 +333,24 @@ export async function PUT(
         return Number((existingReturn as Record<string, unknown>)[key] || 0)
       }
 
+      // Stored total_taxable_sales includes zero-rated supplies. Reconstruct
+      // the standard-rated base for the shared calculation.
+      const standardRatedSales = Math.max(
+        effective("total_taxable_sales") - effective("total_zero_rated_sales"),
+        0
+      )
+      const standardRatedPurchases = Math.max(
+        effective("total_taxable_purchases") - effective("total_zero_rated_purchases"),
+        0
+      )
+
       const calculation = calculateVatReturnTotals({
+        taxableSales: standardRatedSales,
+        taxablePurchases: standardRatedPurchases,
+        zeroRatedSales: effective("total_zero_rated_sales"),
+        exemptSales: effective("total_exempt_sales"),
+        zeroRatedPurchases: effective("total_zero_rated_purchases"),
+        exemptPurchases: effective("total_exempt_purchases"),
         rows: [
           {
             tax_code: "VAT",

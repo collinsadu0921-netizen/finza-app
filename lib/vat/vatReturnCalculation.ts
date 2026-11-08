@@ -18,8 +18,9 @@ export type VatReturnCalculationInput = {
   outputAdjustment?: number | null
   inputAdjustment?: number | null
   /**
-   * Standard-rated taxable sales/purchases. When omitted, the legacy
-   * VAT / 15% fallback is used and a warning is returned.
+   * Standard-rated taxable sales/purchases. These must come from persisted
+   * transaction evidence (tax-line bases or classified retail categories).
+   * They are never derived from VAT / 15%.
    */
   taxableSales?: number | null
   taxablePurchases?: number | null
@@ -30,7 +31,9 @@ export type VatReturnCalculationInput = {
 }
 
 export type VatReturnCalculation = {
+  /** Standard-rated plus zero-rated taxable sales (excludes exempt). */
   total_taxable_sales: number
+  total_standard_rated_sales: number
   total_zero_rated_sales: number
   total_exempt_sales: number
   total_output_nhil: number
@@ -38,7 +41,9 @@ export type VatReturnCalculation = {
   total_output_covid: number
   total_output_vat: number
   total_output_tax: number
+  /** Standard-rated plus zero-rated taxable purchases (excludes exempt). */
   total_taxable_purchases: number
+  total_standard_rated_purchases: number
   total_zero_rated_purchases: number
   total_exempt_purchases: number
   total_input_nhil: number
@@ -49,7 +54,8 @@ export type VatReturnCalculation = {
   net_vat_payable: number
   net_vat_refund: number
   period_is_post_2026: boolean
-  taxable_bases_source: "provided" | "derived_from_vat"
+  taxable_bases_source: "provided" | "unavailable"
+  taxable_bases_complete: boolean
   warnings: string[]
 }
 
@@ -119,36 +125,36 @@ export function calculateVatReturnTotals(
   const netVatPayable = Math.max(adjustedNet, 0)
   const netVatRefund = Math.max(-adjustedNet, 0)
 
-  const explicitTaxableSales = providedNumber(input.taxableSales)
-  const explicitTaxablePurchases = providedNumber(input.taxablePurchases)
+  const standardRatedSales = providedNumber(input.taxableSales)
+  const standardRatedPurchases = providedNumber(input.taxablePurchases)
   const zeroRatedSales = providedNumber(input.zeroRatedSales) ?? 0
   const exemptSales = providedNumber(input.exemptSales) ?? 0
   const zeroRatedPurchases = providedNumber(input.zeroRatedPurchases) ?? 0
   const exemptPurchases = providedNumber(input.exemptPurchases) ?? 0
 
   const warnings: string[] = []
-  let taxableBasesSource: "provided" | "derived_from_vat" = "provided"
+  const taxableBasesComplete =
+    standardRatedSales != null && standardRatedPurchases != null
 
-  let totalTaxableSales = explicitTaxableSales
-  if (totalTaxableSales == null) {
-    totalTaxableSales = totalOutputVat > 0 ? roundMoney(totalOutputVat / 0.15) : 0
-    taxableBasesSource = "derived_from_vat"
-  }
-
-  let totalTaxablePurchases = explicitTaxablePurchases
-  if (totalTaxablePurchases == null) {
-    totalTaxablePurchases = totalInputVat > 0 ? roundMoney(totalInputVat / 0.15) : 0
-    taxableBasesSource = "derived_from_vat"
-  }
-
-  if (taxableBasesSource === "derived_from_vat") {
+  if (standardRatedSales == null) {
     warnings.push(
-      "Taxable sales/purchases were derived from VAT at 15%. Zero-rated and exempt supplies require explicit classification and are not inferred."
+      "Standard-rated taxable sales could not be determined from transaction evidence. The return cannot be filed until sales are classified."
+    )
+  }
+  if (standardRatedPurchases == null) {
+    warnings.push(
+      "Standard-rated taxable purchases could not be determined from transaction evidence. The return cannot be filed until purchases are classified."
     )
   }
 
+  const totalTaxableSales = roundMoney((standardRatedSales ?? 0) + zeroRatedSales)
+  const totalTaxablePurchases = roundMoney(
+    (standardRatedPurchases ?? 0) + zeroRatedPurchases
+  )
+
   return {
-    total_taxable_sales: roundMoney(totalTaxableSales),
+    total_taxable_sales: totalTaxableSales,
+    total_standard_rated_sales: roundMoney(standardRatedSales ?? 0),
     total_zero_rated_sales: roundMoney(zeroRatedSales),
     total_exempt_sales: roundMoney(exemptSales),
     total_output_nhil: totalOutputNhil,
@@ -156,7 +162,8 @@ export function calculateVatReturnTotals(
     total_output_covid: totalOutputCovid,
     total_output_vat: totalOutputVat,
     total_output_tax: roundMoney(rawOutputTax + outputAdjustment),
-    total_taxable_purchases: roundMoney(totalTaxablePurchases),
+    total_taxable_purchases: totalTaxablePurchases,
+    total_standard_rated_purchases: roundMoney(standardRatedPurchases ?? 0),
     total_zero_rated_purchases: roundMoney(zeroRatedPurchases),
     total_exempt_purchases: roundMoney(exemptPurchases),
     total_input_nhil: totalInputNhil,
@@ -167,7 +174,8 @@ export function calculateVatReturnTotals(
     net_vat_payable: roundMoney(netVatPayable),
     net_vat_refund: roundMoney(netVatRefund),
     period_is_post_2026: periodIsPost2026,
-    taxable_bases_source: taxableBasesSource,
+    taxable_bases_source: taxableBasesComplete ? "provided" : "unavailable",
+    taxable_bases_complete: taxableBasesComplete,
     warnings,
   }
 }

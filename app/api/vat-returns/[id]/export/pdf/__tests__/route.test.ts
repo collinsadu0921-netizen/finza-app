@@ -165,4 +165,22 @@ describe("GET VAT 3 PDF", () => {
     expect(parsed.text).toContain("203.17")
     expect(parsed.text).not.toContain("Maximum call stack size exceeded")
   })
+
+  it("shows supplemental zero-rated and exempt classification", async () => {
+    const { response, parsed } = await render(
+      filing({
+        total_zero_rated_sales: 50,
+        total_exempt_sales: 25,
+        total_zero_rated_purchases: 10,
+        total_exempt_purchases: 5,
+      })
+    )
+
+    expect(response.status).toBe(200)
+    expect(parsed.text).toContain("Supplemental classification")
+    expect(parsed.text).toContain("zero-rated sales")
+    expect(parsed.text).toContain("exempt sales")
+    expect(parsed.text).toContain("50.00")
+    expect(parsed.text).toContain("25.00")
+  })
 })

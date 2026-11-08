@@ -429,6 +429,39 @@ export async function GET(
     doc.fillColor("#000000")
     y += 62
 
+    // ── SUPPLEMENTAL CLASSIFICATION ───────────────────────────────────────────
+    // GRA VAT 3 Box 2/9 include zero-rated taxable supplies. The separate
+    // zero-rated and exempt amounts are shown here for reconciliation.
+    const zeroRatedSales = Number(vatReturn.total_zero_rated_sales || 0)
+    const exemptSales = Number(vatReturn.total_exempt_sales || 0)
+    const zeroRatedPurchases = Number(vatReturn.total_zero_rated_purchases || 0)
+    const exemptPurchases = Number(vatReturn.total_exempt_purchases || 0)
+
+    if (
+      zeroRatedSales > 0 ||
+      exemptSales > 0 ||
+      zeroRatedPurchases > 0 ||
+      exemptPurchases > 0
+    ) {
+      if (y + 34 > PAGE_BOTTOM) {
+        doc.addPage()
+        y = 50
+      }
+      doc
+        .fontSize(7.5)
+        .font("Helvetica")
+        .fillColor("#4b5563")
+        .text(
+          `Supplemental classification: zero-rated sales ${fmt(zeroRatedSales)}; exempt sales ${fmt(exemptSales)}; ` +
+            `zero-rated purchases ${fmt(zeroRatedPurchases)}; exempt purchases ${fmt(exemptPurchases)}.`,
+          COL_BOX,
+          y,
+          { width: W_BOX + W_DESC + W_RATE + W_AMOUNT }
+        )
+      doc.fillColor("#000000")
+      y += 30
+    }
+
     // ── ADJUSTMENTS NOTE ──────────────────────────────────────────────────────
     const outAdj = Number(vatReturn.output_adjustment || 0)
     const inAdj = Number(vatReturn.input_adjustment || 0)

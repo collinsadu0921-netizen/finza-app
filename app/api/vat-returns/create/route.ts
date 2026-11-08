@@ -4,6 +4,11 @@ import { normalizeCountry } from "@/lib/payments/eligibility"
 import { resolveProfessionalVatBusinessId } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 import { calculateVatReturnTotals } from "@/lib/vat/vatReturnCalculation"
 import { isCalendarMonthPeriod } from "@/lib/vat/vatPeriod"
+import {
+  parseVatTaxableBases,
+  taxableBaseInputs,
+  vatTaxableBaseException,
+} from "@/lib/vat/taxableBases"
 
 export async function POST(request: NextRequest) {
   try {
@@ -152,12 +157,59 @@ export async function POST(request: NextRequest) {
       period_credits: number
     }> = ledgerData || []
 
+    // Taxable bases come from persisted tax-line bases and classified retail
+    // supplies. They are never derived from VAT / 15%.
+    const { data: basesData, error: basesError } = await supabase.rpc(
+      "extract_vat_taxable_bases",
+      {
+        p_business_id: businessId,
+        p_start_date: period_start_date,
+        p_end_date: period_end_date,
+      }
+    )
+
+    if (basesError) {
+      console.error("Error calling extract_vat_taxable_bases:", basesError)
+      return NextResponse.json(
+        {
+          error:
+            "Taxable sales and purchases could not be determined from transaction evidence.",
+          code: "VAT_TAXABLE_BASE_UNAVAILABLE",
+          details: basesError.message,
+        },
+        { status: 500 }
+      )
+    }
+
+    const bases = parseVatTaxableBases(basesData)
+
     const calculation = calculateVatReturnTotals({
       rows,
       periodEndDate: period_end_date,
       outputAdjustment: output_adjustment,
       inputAdjustment: input_adjustment,
+      ...taxableBaseInputs(bases),
     })
+
+    const dataQualityException = vatTaxableBaseException({
+      totalOutputVat: calculation.total_output_vat,
+      totalInputVat: calculation.total_input_vat,
+      standardRatedSales: calculation.total_standard_rated_sales,
+      standardRatedPurchases: calculation.total_standard_rated_purchases,
+      taxableBasesComplete: calculation.taxable_bases_complete,
+    })
+
+    if (dataQualityException) {
+      return NextResponse.json(
+        {
+          error: dataQualityException.message,
+          code: dataQualityException.code,
+          taxable_bases: bases,
+          warnings: [...calculation.warnings, ...bases.warnings],
+        },
+        { status: 409 }
+      )
+    }
 
     // ledger_authority: true — figures sourced exclusively from the immutable ledger
     const { data: vatReturn, error } = await supabase
@@ -169,12 +221,16 @@ export async function POST(request: NextRequest) {
         status: "draft",
         ledger_authority: true,
         total_taxable_sales: calculation.total_taxable_sales,
+        total_zero_rated_sales: calculation.total_zero_rated_sales,
+        total_exempt_sales: calculation.total_exempt_sales,
         total_output_nhil: calculation.total_output_nhil,
         total_output_getfund: calculation.total_output_getfund,
         total_output_covid: calculation.total_output_covid,
         total_output_vat: calculation.total_output_vat,
         total_output_tax: calculation.total_output_tax,
         total_taxable_purchases: calculation.total_taxable_purchases,
+        total_zero_rated_purchases: calculation.total_zero_rated_purchases,
+        total_exempt_purchases: calculation.total_exempt_purchases,
         total_input_nhil: calculation.total_input_nhil,
         total_input_getfund: calculation.total_input_getfund,
         total_input_covid: calculation.total_input_covid,
@@ -205,10 +261,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
+    const warnings = [...calculation.warnings, ...bases.warnings]
     return NextResponse.json(
       {
         vatReturn,
-        ...(calculation.warnings.length > 0 ? { warnings: calculation.warnings } : {}),
+        taxable_bases: bases,
+        ...(warnings.length > 0 ? { warnings } : {}),
       },
       { status: 201 }
     )
