@@ -15,6 +15,7 @@ import {
 } from "@/lib/tax/ghanaTaxScheduleMetadata"
 import { enforceServiceIndustryFinancialWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryFinancialWrite"
 import { calculateWHTForRate } from "@/lib/wht"
+import { resolveDocumentVatClassification } from "@/lib/tax/classification"
 import {
   resolveWhtRateForDate,
   WhtRateResolutionError,
@@ -72,6 +73,7 @@ export async function POST(request: NextRequest) {
       wht_receivable_rate = null,
       wht_receivable_rate_code = null,
       wht_receivable_amount = 0,
+      vat_classification,
     } = body
 
     // Validate required fields (business comes from session)
@@ -281,11 +283,11 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Determine effective date: Draft uses issue_date, Sent uses sent_at (current date)
-    // Note: effectiveDate should be YYYY-MM-DD format for tax engine
-    const effectiveDateForCalculation = status === "sent" 
-      ? new Date().toISOString().split('T')[0]
-      : (issue_date || new Date().toISOString().split('T')[0])
+    // The invoice issue date is the legal tax effective date and the ledger
+    // posting date. Sent invoices must not switch to the current date, which
+    // would let tax, WHT and ledger dates diverge on a backdated invoice.
+    const effectiveDateForCalculation =
+      issue_date || new Date().toISOString().split('T')[0]
 
     // Calculate taxes using canonical tax engine (tax-inclusive mode)
     const jurisdiction = countryCode
@@ -399,6 +401,20 @@ export async function POST(request: NextRequest) {
       publicToken = Buffer.from(`${business_id}-${Date.now()}`).toString("base64url")
     }
 
+    // Document-level VAT classification. Unknown documents stay unclassified;
+    // a classification that conflicts with tax evidence is rejected.
+    const classification = resolveDocumentVatClassification({
+      requested: vat_classification,
+      taxLines: taxResult?.lines ?? [],
+      totalTax: taxResult?.total_tax ?? 0,
+    })
+    if (!classification.ok) {
+      return NextResponse.json(
+        { error: classification.message, code: classification.code },
+        { status: 400 }
+      )
+    }
+
     // Prepare invoice data with validated numeric values
     // Persist canonical tax values directly from TaxResult
     const invoiceData: any = {
@@ -429,6 +445,7 @@ export async function POST(request: NextRequest) {
       tax_engine_code: apply_taxes ? taxEngineCode : null,
       tax_engine_effective_from: apply_taxes ? effectiveDateForCalculation : null, // issue_date for drafts, sent_at date for sent
       tax_jurisdiction: apply_taxes ? jurisdiction : null,
+      vat_classification: classification.classification,
       // Legacy columns derived from tax_lines (no Ghana-specific logic)
       nhil: apply_taxes ? Math.round(legacyTaxColumns.nhil * 100) / 100 : 0,
       getfund: apply_taxes ? Math.round(legacyTaxColumns.getfund * 100) / 100 : 0,

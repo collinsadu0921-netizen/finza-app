@@ -19,6 +19,9 @@ export type VatTaxableBases = {
   unclassified_purchases_count: number
   fallback_sales_count: number
   fallback_purchases_count: number
+  invalid_fx_count: number
+  classification_conflict_count: number
+  unsupported_fx_credit_note_count: number
   warnings: string[]
 }
 
@@ -50,6 +53,11 @@ export function parseVatTaxableBases(value: unknown): VatTaxableBases {
     unclassified_purchases_count: integer(row.unclassified_purchases_count),
     fallback_sales_count: integer(row.fallback_sales_count),
     fallback_purchases_count: integer(row.fallback_purchases_count),
+    invalid_fx_count: integer(row.invalid_fx_count),
+    classification_conflict_count: integer(row.classification_conflict_count),
+    unsupported_fx_credit_note_count: integer(
+      row.unsupported_fx_credit_note_count
+    ),
     warnings: Array.isArray(row.warnings)
       ? row.warnings.filter((warning): warning is string => typeof warning === "string")
       : [],
@@ -78,17 +86,75 @@ export type VatTaxableBaseException = {
  * base (or input VAT but no purchase base) is a data-quality exception.
  */
 export function vatTaxableBaseException(input: {
+  bases: VatTaxableBases
   totalOutputVat: number
   totalInputVat: number
   standardRatedSales: number
   standardRatedPurchases: number
   taxableBasesComplete: boolean
 }): VatTaxableBaseException | null {
+  const { bases } = input
+
   if (!input.taxableBasesComplete) {
     return {
       code: "VAT_TAXABLE_BASE_UNAVAILABLE",
       message:
         "Taxable sales and purchases could not be determined from transaction evidence. Classify the period's documents before filing.",
+    }
+  }
+
+  if (
+    bases.unclassified_sales_count > 0 ||
+    bases.unclassified_purchases_count > 0
+  ) {
+    return {
+      code: "VAT_TAXABLE_BASE_UNCLASSIFIED",
+      message:
+        "One or more sales or purchase documents have no VAT classification. Classify them before filing; zero-rated and exempt supplies are not inferred.",
+    }
+  }
+
+  if (bases.fallback_sales_count > 0 || bases.fallback_purchases_count > 0) {
+    return {
+      code: "VAT_TAXABLE_BASE_FALLBACK",
+      message:
+        "One or more standard-rated documents have no persisted tax-line base. Review their tax breakdown before filing.",
+    }
+  }
+
+  if (bases.invalid_fx_count > 0) {
+    return {
+      code: "VAT_TAXABLE_BASE_FX_INVALID",
+      message:
+        "One or more foreign-currency documents have a missing or invalid exchange rate. Their GHS taxable base cannot be determined.",
+    }
+  }
+
+  if (bases.classification_conflict_count > 0) {
+    return {
+      code: "VAT_TAXABLE_BASE_CLASSIFICATION_CONFLICT",
+      message:
+        "One or more documents have a VAT classification that conflicts with their tax evidence. Correct the classification before filing.",
+    }
+  }
+
+  if (bases.unsupported_fx_credit_note_count > 0) {
+    return {
+      code: "VAT_TAXABLE_BASE_FX_CREDIT_NOTE_UNSUPPORTED",
+      message:
+        "One or more foreign-currency credit notes cannot be converted using the linked invoice FX evidence. Review them before filing.",
+    }
+  }
+
+  const taxableSales =
+    bases.standard_rated_sales +
+    bases.zero_rated_sales +
+    bases.exempt_sales
+  if (Math.abs(taxableSales - bases.ledger_revenue_credits) > 0.05) {
+    return {
+      code: "VAT_TAXABLE_BASE_LEDGER_MISMATCH",
+      message:
+        "Taxable sales do not reconcile to ledger revenue credits for this period. Review revenue postings and document classification before filing.",
     }
   }
 
