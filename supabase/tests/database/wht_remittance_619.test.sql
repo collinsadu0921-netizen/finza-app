@@ -249,7 +249,17 @@ BEGIN
   END;
 
   INSERT INTO public.payments (business_id, invoice_id, amount, date, method, wht_amount)
-  VALUES (v_biz, v_invoice, 50, CURRENT_DATE, 'cash', 5);
+  VALUES (v_biz, v_invoice, 20, CURRENT_DATE, 'cash', 2);
+
+  INSERT INTO public.payments (business_id, invoice_id, amount, date, method, wht_amount)
+  VALUES (v_biz, v_invoice, 30, CURRENT_DATE, 'cash', 3);
+
+  SELECT COALESCE(SUM(wht_amount), 0) INTO v_debit
+  FROM public.payments
+  WHERE invoice_id = v_invoice AND deleted_at IS NULL;
+  IF v_debit <> 5 THEN
+    RAISE EXCEPTION 'TEST_FAILED: partial payment WHT total is %, expected 5', v_debit;
+  END IF;
 
   BEGIN
     INSERT INTO public.payments (business_id, invoice_id, amount, date, method, wht_amount)

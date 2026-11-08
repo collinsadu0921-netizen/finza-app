@@ -12,6 +12,7 @@ DECLARE
   v_owner UUID;
   v_biz UUID := gen_random_uuid();
   v_bill UUID;
+  v_bill_ghs UUID;
   v_bad_wht UUID;
   v_missing_fx UUID;
   v_missing_rate UUID;
@@ -74,6 +75,16 @@ BEGIN
     100, 0, 100, TRUE, 0.05, 'GH_SVC_5', 5, 'standard', '[]'::jsonb,
     'USD', 10, 1000
   ) RETURNING id INTO v_bill;
+
+  -- Second eligible GHS bill for partial selection.
+  INSERT INTO public.bills (
+    business_id, supplier_name, bill_number, issue_date, due_date, status,
+    subtotal, total_tax, total, wht_applicable, wht_rate, wht_rate_code,
+    wht_amount, bill_type, tax_lines
+  ) VALUES (
+    v_biz, '623 GHS Supplier', 'TEST-WHT-623-GHS', CURRENT_DATE, CURRENT_DATE, 'open',
+    100, 0, 100, TRUE, 0.05, 'GH_SVC_5', 5, 'standard', '[]'::jsonb
+  ) RETURNING id INTO v_bill_ghs;
 
   -- Stored WHT that does not match rate * base.
   INSERT INTO public.bills (
@@ -202,6 +213,34 @@ BEGIN
      OR (v_retry ->> 'remittance_id')::UUID <> v_remittance_id
      OR (v_retry ->> 'amount')::NUMERIC <> 50 THEN
     RAISE EXCEPTION 'TEST_FAILED: FX WHT retry was not idempotent';
+  END IF;
+
+  -- A second remittance can be created for a different eligible bill without
+  -- duplicating or re-converting the first one.
+  v_remittance := public.create_wht_remittance_atomic(
+    v_biz, ARRAY[v_bill_ghs], CURRENT_DATE, 'TEST-WHT-623-GHS', 'GHS WHT', '1010'
+  );
+  IF (v_remittance ->> 'amount')::NUMERIC <> 5 THEN
+    RAISE EXCEPTION 'TEST_FAILED: partial GHS remittance amount was %',
+      v_remittance ->> 'amount';
+  END IF;
+
+  SELECT wht_amount, source_wht_amount, source_currency_code, fx_rate
+  INTO v_amount, v_source_amount, v_source_currency, v_fx
+  FROM public.wht_remittance_bills
+  WHERE remittance_id = (v_remittance ->> 'remittance_id')::UUID
+    AND bill_id = v_bill_ghs;
+
+  IF v_amount <> 5 OR v_source_amount <> 5
+     OR v_source_currency IS NOT NULL OR v_fx IS NOT NULL THEN
+    RAISE EXCEPTION 'TEST_FAILED: GHS source WHT evidence is wrong (% / % / % / %)',
+      v_amount, v_source_amount, v_source_currency, v_fx;
+  END IF;
+
+  SELECT amount INTO v_amount
+  FROM public.wht_remittances WHERE id = v_remittance_id;
+  IF v_amount <> 50 THEN
+    RAISE EXCEPTION 'TEST_FAILED: first FX remittance changed to %', v_amount;
   END IF;
 
   RAISE NOTICE 'PASS: FX-aware WHT remittance and stored WHT evidence (623)';
