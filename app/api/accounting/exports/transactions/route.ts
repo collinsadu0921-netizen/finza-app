@@ -3,6 +3,7 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getTaxControlAccountCodes } from "@/lib/accounting/taxControlAccounts"
 import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/accounting/permissions"
 import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
+import { yearMonthToEnd, yearMonthToStart } from "@/lib/vat/vatPeriod"
 
 /**
  * GET /api/accounting/exports/transactions
@@ -98,17 +99,15 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Parse period (YYYY-MM) to period_start and period_end
-    const [year, month] = periodParam.split("-").map(Number)
-    if (!year || !month || month < 1 || month > 12) {
+    // Parse period (YYYY-MM) to date-only period boundaries.
+    const periodStart = yearMonthToStart(periodParam)
+    const periodEnd = yearMonthToEnd(periodParam)
+    if (!periodStart || !periodEnd) {
       return NextResponse.json(
         { error: "Invalid period format. Use YYYY-MM" },
         { status: 400 }
       )
     }
-
-    const periodStart = new Date(year, month - 1, 1).toISOString().split("T")[0]
-    const periodEnd = new Date(year, month, 0).toISOString().split("T")[0] // Last day of month
 
     // Resolve tax control account codes from control map
     const taxControlCodes = await getTaxControlAccountCodes(supabase, resolvedBusinessId)

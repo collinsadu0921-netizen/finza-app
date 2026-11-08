@@ -7,6 +7,8 @@ import {
 } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 import { repairMojibake } from "@/lib/text/repairMojibake"
 import { vatPaymentState } from "@/lib/vat/vatReturnPayment"
+import { createAuditLog } from "@/lib/auditLog"
+import { calculateVatReturnTotals } from "@/lib/vat/vatReturnCalculation"
 
 export async function GET(
   request: NextRequest,
@@ -202,9 +204,7 @@ export async function PUT(
 
     const { data: existingReturn, error: loadErr } = await supabase
       .from("vat_returns")
-      .select(
-        "business_id, status, total_output_tax, total_input_tax, output_adjustment, input_adjustment, submission_date, payment_date"
-      )
+      .select("*")
       .eq("id", returnId)
       .is("deleted_at", null)
       .maybeSingle()
@@ -249,7 +249,7 @@ export async function PUT(
       net_vat_refund,
     } = body
 
-    if (status === "paid") {
+    if (status === "paid" && existingReturn.status !== "paid") {
       return NextResponse.json(
         {
           error: "VAT_PAYMENT_REQUIRED",
@@ -260,9 +260,28 @@ export async function PUT(
       )
     }
 
-    // If submitted, lock the return (only notes editable)
-    if (status === "submitted" && existingReturn.status !== "submitted") {
-      // Lock the return - no further edits to calculations
+    // Status transitions are intentionally monotonic. Paid filings cannot be
+    // reopened through the ordinary API; corrections require a separate,
+    // auditable administrative workflow.
+    const allowedStatusTransitions: Record<string, string[]> = {
+      draft: ["submitted"],
+      submitted: ["paid"],
+      paid: [],
+    }
+    if (status && status !== existingReturn.status) {
+      const allowed = allowedStatusTransitions[existingReturn.status] || []
+      if (!allowed.includes(status)) {
+        return NextResponse.json(
+          {
+            error: "VAT_STATUS_TRANSITION_INVALID",
+            code: "VAT_STATUS_TRANSITION_INVALID",
+            message: `VAT filing cannot move from ${existingReturn.status} to ${status}.`,
+            current_status: existingReturn.status,
+            requested_status: status,
+          },
+          { status: 409 }
+        )
+      }
     }
 
     const updateData: any = {}
@@ -287,29 +306,58 @@ export async function PUT(
     }
     if (output_adjustment !== undefined && existingReturn.status === "draft") {
       updateData.output_adjustment = Number(output_adjustment)
-      // Recalculate net VAT with adjustments
-      const adjustedOutputTax = existingReturn.total_output_tax + Number(output_adjustment) - (existingReturn.output_adjustment || 0)
-      const adjustedInputTax = existingReturn.total_input_tax + Number(input_adjustment || 0) - (existingReturn.input_adjustment || 0)
-      updateData.total_output_tax = adjustedOutputTax
-      updateData.total_input_tax = adjustedInputTax
-      updateData.net_vat_payable = Math.max(adjustedOutputTax - adjustedInputTax, 0)
-      updateData.net_vat_refund = Math.max(adjustedInputTax - adjustedOutputTax, 0)
     }
     if (input_adjustment !== undefined && existingReturn.status === "draft") {
       updateData.input_adjustment = Number(input_adjustment)
-      // Recalculate net VAT with adjustments
-      const adjustedOutputTax = existingReturn.total_output_tax + Number(output_adjustment || 0) - (existingReturn.output_adjustment || 0)
-      const adjustedInputTax = existingReturn.total_input_tax + Number(input_adjustment) - (existingReturn.input_adjustment || 0)
-      updateData.total_output_tax = adjustedOutputTax
-      updateData.total_input_tax = adjustedInputTax
-      updateData.net_vat_payable = Math.max(adjustedOutputTax - adjustedInputTax, 0)
-      updateData.net_vat_refund = Math.max(adjustedInputTax - adjustedOutputTax, 0)
     }
     if (adjustment_reason !== undefined && existingReturn.status === "draft") {
       updateData.adjustment_reason = adjustment_reason?.trim() || null
     }
     if (submission_date !== undefined) updateData.submission_date = submission_date || null
     if (notes !== undefined) updateData.notes = notes?.trim() || null
+
+    // Draft tax totals and net VAT are derived from the same shared
+    // regime-aware calculation used by /calculate and /create. Do not trust
+    // client-submitted total/net fields as the accounting authority.
+    if (existingReturn.status === "draft") {
+      const effective = (key: string): number => {
+        if (updateData[key] !== undefined) return Number(updateData[key] || 0)
+        return Number((existingReturn as Record<string, unknown>)[key] || 0)
+      }
+
+      const calculation = calculateVatReturnTotals({
+        rows: [
+          {
+            tax_code: "VAT",
+            period_credits: effective("total_output_vat"),
+            period_debits: effective("total_input_vat"),
+          },
+          {
+            tax_code: "NHIL",
+            period_credits: effective("total_output_nhil"),
+            period_debits: effective("total_input_nhil"),
+          },
+          {
+            tax_code: "GETFund",
+            period_credits: effective("total_output_getfund"),
+            period_debits: effective("total_input_getfund"),
+          },
+          {
+            tax_code: "COVID",
+            period_credits: effective("total_output_covid"),
+            period_debits: effective("total_input_covid"),
+          },
+        ],
+        periodEndDate: String(existingReturn.period_end_date || ""),
+        outputAdjustment: effective("output_adjustment"),
+        inputAdjustment: effective("input_adjustment"),
+      })
+
+      updateData.total_output_tax = calculation.total_output_tax
+      updateData.total_input_tax = calculation.total_input_tax
+      updateData.net_vat_payable = calculation.net_vat_payable
+      updateData.net_vat_refund = calculation.net_vat_refund
+    }
 
     if (status === "submitted" && !existingReturn.submission_date) {
       updateData.submission_date = new Date().toISOString().split("T")[0]
@@ -324,10 +372,35 @@ export async function PUT(
 
     if (error) {
       console.error("Error updating VAT return:", error)
+      const message = String(error.message || "")
+      if (message.includes("VAT_RETURN_STATUS_TRANSITION_INVALID")) {
+        return NextResponse.json(
+          {
+            error: "VAT_STATUS_TRANSITION_INVALID",
+            code: "VAT_STATUS_TRANSITION_INVALID",
+            message,
+          },
+          { status: 409 }
+        )
+      }
       return NextResponse.json(
         { error: error.message },
         { status: 500 }
       )
+    }
+
+    if (status && status !== existingReturn.status) {
+      await createAuditLog({
+        businessId: existingReturn.business_id,
+        userId: user?.id || null,
+        actionType: "vat_return.status_changed",
+        entityType: "vat_return",
+        entityId: returnId,
+        oldValues: { status: existingReturn.status },
+        newValues: { status },
+        description: `VAT filing status changed from ${existingReturn.status} to ${status}`,
+        request,
+      })
     }
 
     return NextResponse.json({ vatReturn })
