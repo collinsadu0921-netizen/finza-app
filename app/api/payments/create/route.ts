@@ -83,7 +83,9 @@ export async function POST(request: NextRequest) {
     // Verify invoice exists and belongs to session business only (never trust body.business_id)
     const { data: invoice } = await supabase
       .from("invoices")
-      .select("id, business_id, total, status, fx_rate, currency_code")
+      .select(
+        "id, business_id, total, status, fx_rate, currency_code, wht_receivable_applicable, wht_receivable_amount"
+      )
       .eq("id", invoice_id)
       .eq("business_id", business.id)
       .single()
@@ -203,7 +205,7 @@ export async function POST(request: NextRequest) {
     // Calculate remaining balance for validation (payments + applied credit notes reduce balance)
     const { data: existingPayments } = await supabase
       .from("payments")
-      .select("amount")
+      .select("amount, wht_amount")
       .eq("invoice_id", invoice_id)
       .is("deleted_at", null)
 
@@ -230,6 +232,77 @@ export async function POST(request: NextRequest) {
         },
         { status: 400 }
       )
+    }
+
+    // Server-authoritative WHT validation. The invoice's stored WHT is the
+    // permitted total for the document; prior payments reduce what remains.
+    // Zero WHT stays valid for non-WHT invoices and partial payments.
+    const requestedWhtAmount = Number(wht_amount)
+    if (!Number.isFinite(requestedWhtAmount) || requestedWhtAmount < 0) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "WHT amount must be a non-negative number.",
+          code: "WHT_AMOUNT_INVALID",
+        },
+        { status: 400 }
+      )
+    }
+
+    if (requestedWhtAmount > 0) {
+      if (!invoice.wht_receivable_applicable) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "This invoice does not have customer withholding tax applied.",
+            code: "WHT_NOT_APPLICABLE",
+          },
+          { status: 400 }
+        )
+      }
+
+      const invoiceWhtTotal =
+        Math.round((Number(invoice.wht_receivable_amount) || 0) * 100) / 100
+      if (invoiceWhtTotal <= 0) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "This invoice has no withholding tax amount to deduct.",
+            code: "WHT_NOT_APPLICABLE",
+          },
+          { status: 400 }
+        )
+      }
+
+      const priorWhtTotal =
+        existingPayments?.reduce(
+          (sum, p) => sum + Number((p as { wht_amount?: number | null }).wht_amount || 0),
+          0
+        ) || 0
+      const remainingWht =
+        Math.round((invoiceWhtTotal - priorWhtTotal) * 100) / 100
+
+      if (requestedWhtAmount > remainingWht + 0.01) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `WHT amount (${requestedWhtAmount.toFixed(2)}) exceeds the remaining withholding on this invoice (${Math.max(remainingWht, 0).toFixed(2)}).`,
+            code: "WHT_EXCEEDS_INVOICE",
+          },
+          { status: 400 }
+        )
+      }
+
+      if (requestedWhtAmount > amountNum + 0.01) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "WHT amount cannot exceed the payment amount.",
+            code: "WHT_EXCEEDS_PAYMENT",
+          },
+          { status: 400 }
+        )
+      }
     }
 
     // Ledger reconciliation check (VALIDATE, zero tolerance) — observe only, do not block
@@ -272,7 +345,7 @@ export async function POST(request: NextRequest) {
         e_levy_amount: eLevyAmount,
         public_token: publicToken,
         settlement_fx_rate: isFxInvoice ? parsedSettlementFxRate : null,
-        wht_amount: Number(wht_amount) || 0,
+        wht_amount: requestedWhtAmount,
       })
       .select()
       .single()

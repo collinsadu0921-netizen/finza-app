@@ -14,7 +14,11 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { calculateTaxes } from "@/lib/taxEngine"
-import { calculateWHTForRate, getWHTRate } from "@/lib/wht"
+import { calculateWHTForRate } from "@/lib/wht"
+import {
+  resolveWhtRateForDate,
+  WhtRateResolutionError,
+} from "@/lib/wht/rateResolver"
 import {
   generateFinancialDocumentHTML,
   type BusinessInfo,
@@ -174,13 +178,33 @@ export async function POST(request: NextRequest) {
     })
 
     // WHT: applied on pre-tax base (subtotal), not on VAT-inclusive total.
-    // The category determines the rate; a submitted rate is only a fallback
-    // for legacy preview callers that do not send a code.
+    // The category and transaction date determine the rate. A submitted rate
+    // is not authoritative.
     const whtCode = wht_applicable ? wht_code || null : null
-    const knownWhtRate = whtCode ? getWHTRate(whtCode) : undefined
-    const effectiveWhtRate = wht_applicable
-      ? knownWhtRate?.rate ?? (Number(wht_rate) || 0)
-      : 0
+    let effectiveWhtRate = 0
+    if (wht_applicable) {
+      if (!whtCode) {
+        return NextResponse.json(
+          {
+            error: "Select a WHT category before applying withholding tax.",
+            code: "WHT_CATEGORY_REQUIRED",
+          },
+          { status: 400 }
+        )
+      }
+      try {
+        const resolved = await resolveWhtRateForDate(supabase, whtCode, issue_date)
+        effectiveWhtRate = resolved.rate
+      } catch (error) {
+        if (error instanceof WhtRateResolutionError) {
+          return NextResponse.json(
+            { error: error.message, code: error.code },
+            { status: 400 }
+          )
+        }
+        throw error
+      }
+    }
     const whtAmount =
       wht_applicable && effectiveWhtRate > 0 && subtotal > 0
         ? calculateWHTForRate({

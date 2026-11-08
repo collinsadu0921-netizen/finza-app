@@ -3,10 +3,11 @@ import { waitUntil } from "@vercel/functions"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getUserRole } from "@/lib/userRoles"
 import { fireAfterAccountingPost } from "@/lib/server/fireAfterAccountingPost"
+import { calculateWHTForRate } from "@/lib/wht"
 import {
-  calculateWHTForRate,
-  getWHTRate,
-} from "@/lib/wht"
+  resolveWhtRateForDate,
+  WhtRateResolutionError,
+} from "@/lib/wht/rateResolver"
 import {
   getIncomingDocumentForBusiness,
   linkIncomingDocumentToEntity,
@@ -178,15 +179,20 @@ export async function POST(request: NextRequest) {
           { status: 400 }
         )
       }
-      if (!getWHTRate(wht_rate_code)) {
-        return NextResponse.json(
-          {
-            success: false,
-            error: "Select a valid WHT category.",
-            code: "WHT_CATEGORY_INVALID",
-          },
-          { status: 400 }
-        )
+      try {
+        await resolveWhtRateForDate(supabase, wht_rate_code, issue_date)
+      } catch (error) {
+        if (error instanceof WhtRateResolutionError) {
+          return NextResponse.json(
+            {
+              success: false,
+              error: error.message,
+              code: error.code,
+            },
+            { status: 400 }
+          )
+        }
+        throw error
       }
     }
 
@@ -315,8 +321,25 @@ export async function POST(request: NextRequest) {
     // Server-authoritative WHT: calculate on the pre-tax contract value, never
     // on VAT/NHIL/GETFund. Submitted rate/amount values are ignored.
     const whtCode = apply_wht ? wht_rate_code || null : null
-    const knownWhtRate = whtCode ? getWHTRate(whtCode) : undefined
-    const effectiveWhtRate = apply_wht ? knownWhtRate?.rate ?? 0 : 0
+    let resolvedWhtRate = null
+    if (apply_wht && whtCode) {
+      try {
+        resolvedWhtRate = await resolveWhtRateForDate(supabase, whtCode, issue_date)
+      } catch (error) {
+        if (error instanceof WhtRateResolutionError) {
+          return NextResponse.json(
+            {
+              success: false,
+              error: error.message,
+              code: error.code,
+            },
+            { status: 400 }
+          )
+        }
+        throw error
+      }
+    }
+    const effectiveWhtRate = apply_wht ? resolvedWhtRate?.rate ?? 0 : 0
     const whtBaseAmount = Number(taxResult.subtotalBeforeTax) || 0
     const whtBaseGhs =
       isFxBill && parsedFxRate

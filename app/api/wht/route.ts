@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const { business_id, bill_ids, remittance_date, reference, notes, payment_account = "1010" } = body
 
-    if (!business_id || !bill_ids?.length || !remittance_date) {
+    if (!business_id || !Array.isArray(bill_ids) || bill_ids.length === 0 || !remittance_date) {
       return NextResponse.json({ error: "business_id, bill_ids, and remittance_date are required" }, { status: 400 })
     }
 
@@ -73,88 +73,103 @@ export async function POST(request: NextRequest) {
     })
     if (deniedPost) return deniedPost
 
-    // Fetch bills to get their WHT amounts
-    const { data: bills, error: fetchErr } = await supabase
-      .from("bills")
-      .select("id, wht_amount, wht_applicable, wht_remitted_at")
-      .in("id", bill_ids)
-      .eq("business_id", business_id)
-      .eq("wht_applicable", true)
-      .is("wht_remitted_at", null)
+    // One atomic RPC records the remittance, links and marks the source bills,
+    // enforces the period lock, and posts the journal through the canonical
+    // posting infrastructure. A failure rolls back every step.
+    const { data, error } = await supabase.rpc("create_wht_remittance_atomic", {
+      p_business_id: business_id,
+      p_bill_ids: bill_ids,
+      p_remittance_date: remittance_date,
+      p_reference: reference || null,
+      p_notes: notes || null,
+      p_payment_account_code: payment_account || "1010",
+    })
 
-    if (fetchErr) return NextResponse.json({ error: fetchErr.message }, { status: 500 })
-    if (!bills?.length) return NextResponse.json({ error: "No eligible bills found" }, { status: 400 })
+    if (error) {
+      const message = String(error.message || "")
+      console.error("WHT remittance error:", message)
 
-    const totalWHT = bills.reduce((s, b) => s + Number(b.wht_amount), 0)
+      if (message.includes("WHT_REMITTANCE_NOT_AUTHORIZED")) {
+        return NextResponse.json({ success: false, error: message }, { status: 403 })
+      }
+      if (
+        message.includes("WHT_REMITTANCE_ALREADY_REMITTED") ||
+        message.includes("WHT_REMITTANCE_PARTIAL_ALREADY_REMITTED") ||
+        message.includes("WHT_REMITTANCE_LEGACY_WITHOUT_JOURNAL")
+      ) {
+        return NextResponse.json({ success: false, error: message }, { status: 409 })
+      }
+      if (message.includes("WHT_REMITTANCE_PERIOD_LOCKED")) {
+        return NextResponse.json({ success: false, error: message }, { status: 409 })
+      }
+      if (
+        message.includes("WHT_REMITTANCE_INVALID") ||
+        message.includes("WHT_REMITTANCE_NO_BILLS") ||
+        message.includes("WHT_REMITTANCE_BILL_NOT_FOUND") ||
+        message.includes("WHT_REMITTANCE_BILL_NOT_POSTED") ||
+        message.includes("WHT_REMITTANCE_BILL_NOT_ELIGIBLE")
+      ) {
+        return NextResponse.json({ success: false, error: message }, { status: 400 })
+      }
 
-    // Create remittance record
-    const { data: remittance, error: remErr } = await supabase
-      .from("wht_remittances")
-      .insert({
-        business_id,
-        remittance_date,
-        amount: totalWHT,
-        reference: reference || null,
-        notes: notes || null,
-        created_by: user?.id || null,
-      })
-      .select()
-      .single()
+      return NextResponse.json({ success: false, error: message }, { status: 500 })
+    }
 
-    if (remErr) return NextResponse.json({ error: remErr.message }, { status: 500 })
+    const result = (data || {}) as {
+      reused?: boolean
+      remittance_id?: string
+      journal_entry_id?: string
+      amount?: number
+      reference?: string | null
+      bill_ids?: string[]
+    }
 
-    // Link bills to remittance
-    const links = bills.map(b => ({
-      remittance_id: remittance.id,
-      bill_id: b.id,
-      wht_amount: Number(b.wht_amount),
-    }))
-    await supabase.from("wht_remittance_bills").insert(links)
-
-    // Mark bills as remitted
-    await supabase
-      .from("bills")
-      .update({
-        wht_remitted_at: new Date().toISOString(),
-        wht_remittance_ref: reference || null,
-      })
-      .in("id", bill_ids)
-
-    // Post to ledger: Dr WHT Payable (2150) / Cr Bank (1010)
-    const { data: jeId, error: ledgerErr } = await supabase
-      .rpc("post_wht_remittance_to_ledger", {
-        p_remittance_id: remittance.id,
-        p_payment_account_code: payment_account,
-      })
-
-    if (ledgerErr) {
-      console.error("WHT ledger post error:", ledgerErr)
-      // Ledger posting failed — return error so the UI can surface it.
-      // The remittance row and bill updates are still committed (no transaction wrapping),
-      // so the ledger can be corrected manually, but the user must know it failed.
+    if (!result.reused && (!result.remittance_id || !result.journal_entry_id)) {
       return NextResponse.json(
         {
           success: false,
-          error: `WHT remittance recorded but ledger posting failed: ${ledgerErr.message}. Please contact support to correct the journal entry.`,
-          remittance,
-          total_remitted: totalWHT,
+          error: "WHT remittance did not return a linked journal. Nothing was committed.",
         },
-        { status: 207 }  // 207 Multi-Status: partial success
+        { status: 500 }
       )
     }
 
-    await createAuditLog({
-      businessId: business_id,
-      userId: user?.id || null,
-      actionType: "wht.remitted",
-      entityType: "wht_remittance",
-      entityId: remittance.id,
-      oldValues: null,
-      newValues: { bill_ids, totalWHT, remittance_date, reference },
-      request,
-    })
+    const remittance = {
+      id: result.remittance_id,
+      business_id,
+      remittance_date,
+      amount: Number(result.amount || 0),
+      reference: result.reference ?? (reference || null),
+      notes: notes || null,
+      journal_entry_id: result.journal_entry_id,
+    }
 
-    return NextResponse.json({ success: true, remittance, total_remitted: totalWHT })
+    if (!result.reused) {
+      await createAuditLog({
+        businessId: business_id,
+        userId: user?.id || null,
+        actionType: "wht.remitted",
+        entityType: "wht_remittance",
+        entityId: result.remittance_id,
+        oldValues: null,
+        newValues: {
+          bill_ids,
+          totalWHT: result.amount,
+          remittance_date,
+          reference,
+          journal_entry_id: result.journal_entry_id,
+        },
+        request,
+      })
+    }
+
+    return NextResponse.json({
+      success: true,
+      reused: Boolean(result.reused),
+      remittance,
+      total_remitted: Number(result.amount || 0),
+      journal_entry_id: result.journal_entry_id,
+    })
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 })
   }

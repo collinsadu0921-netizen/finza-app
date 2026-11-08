@@ -26,6 +26,28 @@ jest.mock('@/lib/payments/eligibility', () => ({
 jest.mock('@/lib/countryCurrency', () => ({
   assertCountryCurrency: jest.fn(() => {}),
 }))
+// Harness-only mocks: these modules query tables outside the scope of these
+// invoice tax/WHT tests.
+jest.mock('@/lib/business', () => ({
+  getCurrentBusiness: jest.fn(() =>
+    Promise.resolve({
+      id: 'test-business',
+      address_country: 'GH',
+      default_currency: 'GHS',
+      owner_id: 'test-user',
+      archived_at: null,
+    })
+  ),
+}))
+jest.mock('@/lib/archivedBusiness', () => ({
+  assertBusinessNotArchived: jest.fn(() => Promise.resolve()),
+}))
+jest.mock('@/lib/serviceWorkspace/enforceServiceIndustryFinancialWrite', () => ({
+  enforceServiceIndustryFinancialWrite: jest.fn(() => Promise.resolve(null)),
+}))
+jest.mock('@/lib/growth/recordBusinessActivationEvent', () => ({
+  voidRecordBusinessActivationEvent: jest.fn(),
+}))
 
 // Mock canonical tax engine
 const mockTaxResult: TaxResult = {
@@ -356,7 +378,7 @@ describe('POST /api/invoices/create - Canonical Tax Engine', () => {
       method: 'POST',
       body: JSON.stringify({
         business_id: 'test-business',
-        issue_date: '2025-12-31',
+        issue_date: '2026-01-01',
         items: [{ qty: 1, unit_price: 121.90, discount_amount: 0 }],
         apply_taxes: true,
         wht_receivable_applicable: true,
@@ -380,7 +402,7 @@ describe('POST /api/invoices/create - Canonical Tax Engine', () => {
       method: 'POST',
       body: JSON.stringify({
         business_id: 'test-business',
-        issue_date: '2025-12-31',
+        issue_date: '2026-01-01',
         items: [{ qty: 1, unit_price: 121.90, discount_amount: 0 }],
         apply_taxes: true,
         wht_receivable_applicable: true,
@@ -398,7 +420,7 @@ describe('POST /api/invoices/create - Canonical Tax Engine', () => {
       method: 'POST',
       body: JSON.stringify({
         business_id: 'test-business',
-        issue_date: '2025-12-31',
+        issue_date: '2026-01-01',
         items: [{ qty: 1, unit_price: 121.90, discount_amount: 0 }],
         apply_taxes: true,
         wht_receivable_applicable: true,
