@@ -5,6 +5,7 @@ import {
   getAccountingDataClient,
   resolveAccountingRequestAuthority,
 } from "@/lib/accounting/resolveAccountingRequestAuthority"
+import { yearMonthToEnd, yearMonthToStart } from "@/lib/vat/vatPeriod"
 
 /**
  * GET /api/accounting/exports/transactions
@@ -55,19 +56,19 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const [year, month] = periodParam.split("-").map(Number)
-    if (!year || !month || month < 1 || month > 12) {
+    // Parse period (YYYY-MM) to date-only period boundaries.
+    const periodStart = yearMonthToStart(periodParam)
+    const periodEnd = yearMonthToEnd(periodParam)
+    if (!periodStart || !periodEnd) {
       return NextResponse.json(
         { error: "Invalid period format. Use YYYY-MM", error_code: "INVALID_PERIOD" },
         { status: 400 }
       )
     }
 
-    const periodStart = new Date(year, month - 1, 1).toISOString().split("T")[0]
-    const periodEnd = new Date(year, month, 0).toISOString().split("T")[0]
-
     const taxControlCodes = await getTaxControlAccountCodes(dataClient, resolvedBusinessId)
 
+    // Build tax account codes list (exclude COVID for periods >= 2026-01-01)
     const excludeCovid = periodStart >= "2026-01-01"
     const taxAccountCodes: string[] = []
     const taxCodeMap: Record<string, string> = {}

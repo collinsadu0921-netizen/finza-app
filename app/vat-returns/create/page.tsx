@@ -7,6 +7,7 @@ import ProtectedLayout from "@/components/ProtectedLayout"
 import { useToast } from "@/components/ui/ToastProvider"
 import TierGate from "@/components/service/TierGate"
 import { vatFilingHref, vatFilingsHref } from "@/lib/vat/vatRoutes"
+import { currentYearMonth, yearMonthToEnd, yearMonthToStart } from "@/lib/vat/vatPeriod"
 
 function CreateVatReturnContent() {
   const router = useRouter()
@@ -17,9 +18,10 @@ function CreateVatReturnContent() {
   const [loading, setLoading] = useState(false)
   const [calculating, setCalculating] = useState(false)
   const [calculation, setCalculation] = useState<any>(null)
+  const defaultYearMonth = currentYearMonth()
   const [formData, setFormData] = useState({
-    period_start_date: searchParams.get("start") || new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split("T")[0],
-    period_end_date: searchParams.get("end") || new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).toISOString().split("T")[0],
+    period_start_date: searchParams.get("start") || yearMonthToStart(defaultYearMonth) || "",
+    period_end_date: searchParams.get("end") || yearMonthToEnd(defaultYearMonth) || "",
     output_adjustment: "0",
     input_adjustment: "0",
     adjustment_reason: "",
@@ -174,13 +176,11 @@ function CreateVatReturnContent() {
                       value={formData.period_start_date.substring(0, 7)}
                       onChange={(e) => {
                         const yearMonth = e.target.value
-                        const startDate = `${yearMonth}-01`
-                        const endDate = new Date(
-                          new Date(yearMonth + "-01").getFullYear(),
-                          new Date(yearMonth + "-01").getMonth() + 1,
-                          0
-                        ).toISOString().split("T")[0]
-                        setFormData({ ...formData, period_start_date: startDate, period_end_date: endDate })
+                        const startDate = yearMonthToStart(yearMonth)
+                        const endDate = yearMonthToEnd(yearMonth)
+                        if (startDate && endDate) {
+                          setFormData({ ...formData, period_start_date: startDate, period_end_date: endDate })
+                        }
                       }}
                       className="w-full px-3 py-2 text-sm border border-slate-200 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-slate-300"
                     />

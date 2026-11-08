@@ -10,6 +10,7 @@ import {
   jsonResponseWithServerTiming,
   timedStepMs,
 } from "@/lib/server/routeDiagnostics"
+import { yearMonthToEnd, yearMonthToStart } from "@/lib/vat/vatPeriod"
 
 /**
  * GET /api/accounting/exports/vat
@@ -78,16 +79,15 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const [year, month] = periodParam.split("-").map(Number)
-    if (!year || !month || month < 1 || month > 12) {
+    // Parse period (YYYY-MM) to date-only period boundaries.
+    const periodStart = yearMonthToStart(periodParam)
+    const periodEnd = yearMonthToEnd(periodParam)
+    if (!periodStart || !periodEnd) {
       return NextResponse.json(
         { error: "Invalid period format. Use YYYY-MM", error_code: "INVALID_PERIOD" },
         { status: 400 }
       )
     }
-
-    const periodStart = new Date(year, month - 1, 1).toISOString().split("T")[0]
-    const periodEnd = new Date(year, month, 0).toISOString().split("T")[0]
 
     await dataClient
       .from("accounting_periods")
