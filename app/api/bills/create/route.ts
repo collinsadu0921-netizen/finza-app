@@ -12,8 +12,10 @@ import {
   getIncomingDocumentForBusiness,
   linkIncomingDocumentToEntity,
 } from "@/lib/documents/incomingDocumentsService"
-import { calculateGhanaTaxesFromLineItems, calculateBaseFromTotalIncludingTaxes } from "@/lib/ghanaTaxEngine"
 import { createAuditLog } from "@/lib/auditLog"
+import { ghanaTaxEngineCanonical } from "@/lib/taxEngine/jurisdictions/ghana"
+import { deriveLegacyTaxColumnsFromTaxLines } from "@/lib/taxEngine/helpers"
+import { toBillTaxLinesJsonb, emptyBillTaxResult } from "@/lib/bills/billTaxLines"
 import { getCurrencySymbol } from "@/lib/currency"
 import { enforceServiceIndustryMinTierWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
 import { resolveMaterialInventoryAccount } from "@/lib/bills/resolveMaterialInventoryAccount"
@@ -253,7 +255,26 @@ export async function POST(request: NextRequest) {
     const fxCurrencySymbol = isFxBill ? (getCurrencySymbol(currency_code) || currency_code) : null
 
     // Calculate totals using Ghana Tax Engine
-    let taxResult
+    const hasMaterialLines =
+      (items ?? []).some(
+        (item: any) =>
+          item.material_id != null && String(item.material_id).trim() !== ""
+      ) ||
+      (bill_type === "import" &&
+        import_material_id != null &&
+        String(import_material_id).trim() !== "")
+    const absorptionAccountCode = hasMaterialLines ? "1450" : "5200"
+
+    let taxResult: {
+      subtotalBeforeTax: number
+      nhil: number
+      getfund: number
+      covid: number
+      vat: number
+      totalTax: number
+      grandTotal: number
+    }
+    let billTaxLines: Record<string, unknown>
 
     if (bill_type === "import") {
       // Import bill: VAT/NHIL/GETFund applied ON TOP of the VAT base
@@ -268,23 +289,32 @@ export async function POST(request: NextRequest) {
       ) * 100) / 100
 
       if (apply_taxes) {
-        // For imports, taxes are applied ON TOP (exclusive), not extracted from total
-        const importTax = calculateGhanaTaxesFromLineItems([{ quantity: 1, unit_price: vatBase }])
+        const canonical = ghanaTaxEngineCanonical.calculateFromAmount(vatBase, {
+          jurisdiction: "GH",
+          effectiveDate: issue_date,
+          taxInclusive: false,
+          transactionType: "purchase",
+        })
+        const legacy = deriveLegacyTaxColumnsFromTaxLines(canonical.lines)
         taxResult = {
-          subtotalBeforeTax: vatBase,
-          nhil: importTax.nhil ?? 0,
-          getfund: importTax.getfund ?? 0,
-          covid: 0,
-          vat: importTax.vat ?? 0,
-          totalTax: importTax.totalTax ?? 0,
-          grandTotal: vatBase + (importTax.totalTax ?? 0) + Number(clearing_agent_fee),
+          subtotalBeforeTax: canonical.base_amount,
+          ...legacy,
+          totalTax: canonical.total_tax,
+          grandTotal: canonical.total_amount + Number(clearing_agent_fee),
         }
+        billTaxLines = toBillTaxLinesJsonb(canonical, absorptionAccountCode)
       } else {
+        const canonical = emptyBillTaxResult({
+          baseAmount: vatBase,
+          effectiveDate: issue_date,
+          pricingMode: "exclusive",
+        })
         taxResult = {
           subtotalBeforeTax: vatBase,
           nhil: 0, getfund: 0, covid: 0, vat: 0, totalTax: 0,
           grandTotal: vatBase + Number(clearing_agent_fee),
         }
+        billTaxLines = toBillTaxLinesJsonb(canonical, absorptionAccountCode)
       }
     } else {
       // Standard bill: line items come in tax-inclusive, extract base.
@@ -296,25 +326,35 @@ export async function POST(request: NextRequest) {
       }, 0) * 100) / 100
 
       if (apply_taxes) {
-        const { baseAmount, taxBreakdown } = calculateBaseFromTotalIncludingTaxes(
+        const canonical = ghanaTaxEngineCanonical.reverseCalculate(
           subtotalIncludingTaxes,
-          true
+          {
+            jurisdiction: "GH",
+            effectiveDate: issue_date,
+            taxInclusive: true,
+            transactionType: "purchase",
+          }
         )
+        const legacy = deriveLegacyTaxColumnsFromTaxLines(canonical.lines)
         taxResult = {
-          subtotalBeforeTax: baseAmount,
-          nhil: taxBreakdown.nhil,
-          getfund: taxBreakdown.getfund,
-          covid: taxBreakdown.covid,
-          vat: taxBreakdown.vat,
-          totalTax: taxBreakdown.totalTax,
+          subtotalBeforeTax: canonical.base_amount,
+          ...legacy,
+          totalTax: canonical.total_tax,
           grandTotal: subtotalIncludingTaxes,
         }
+        billTaxLines = toBillTaxLinesJsonb(canonical, absorptionAccountCode)
       } else {
+        const canonical = emptyBillTaxResult({
+          baseAmount: subtotalIncludingTaxes,
+          effectiveDate: issue_date,
+          pricingMode: "inclusive",
+        })
         taxResult = {
           subtotalBeforeTax: subtotalIncludingTaxes,
           nhil: 0, getfund: 0, covid: 0, vat: 0, totalTax: 0,
           grandTotal: subtotalIncludingTaxes,
         }
+        billTaxLines = toBillTaxLinesJsonb(canonical, absorptionAccountCode)
       }
     }
 
@@ -383,6 +423,10 @@ export async function POST(request: NextRequest) {
         vat: taxResult.vat,
         total_tax: taxResult.totalTax,
         total: taxResult.grandTotal,
+        tax_lines: billTaxLines,
+        tax_engine_code: "ghana",
+        tax_engine_effective_from: issue_date,
+        tax_jurisdiction: "GH",
         wht_applicable: apply_wht,
         wht_rate_code: apply_wht ? whtCode : null,
         wht_rate: apply_wht ? effectiveWhtRate : null,

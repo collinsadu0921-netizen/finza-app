@@ -386,6 +386,107 @@ describe("bill supplier persistence", () => {
     expect(lastInsert).toBeNull()
   })
 
+  it("uses the bill issue date for pre-2026 tax and persists absorbed input levies", async () => {
+    const req = new NextRequest("http://localhost/api/bills/create", {
+      method: "POST",
+      body: JSON.stringify({
+        business_id: BUSINESS_ID,
+        supplier_id: SUPPLIER_A,
+        supplier_name: "Supplier A",
+        bill_number: "B-TAX-2025",
+        issue_date: "2025-12-31",
+        apply_taxes: true,
+        apply_wht: false,
+        items: [{ description: "Service", qty: 1, unit_price: 121.9, discount_amount: 0 }],
+      }),
+    })
+    const res = await POST(req)
+    expect(res.status).toBe(201)
+    expect(lastInsert?.subtotal).toBeCloseTo(100, 2)
+    expect(lastInsert?.nhil).toBeCloseTo(2.5, 2)
+    expect(lastInsert?.getfund).toBeCloseTo(2.5, 2)
+    expect(lastInsert?.covid).toBeCloseTo(1, 2)
+    expect(lastInsert?.vat).toBeCloseTo(15.9, 2)
+    expect(lastInsert?.total_tax).toBeCloseTo(21.9, 2)
+    expect(lastInsert?.tax_engine_effective_from).toBe("2025-12-31")
+
+    const taxLines = (lastInsert?.tax_lines as any)?.tax_lines as any[]
+    const byCode = Object.fromEntries(taxLines.map((line) => [line.code, line]))
+    expect(byCode.NHIL.ledger_account_code).toBe("5200")
+    expect(byCode.NHIL.ledger_side).toBe("debit")
+    expect(byCode.NHIL.absorbed_to_cost).toBe(true)
+    expect(byCode.NHIL.is_creditable_input).toBe(false)
+    expect(byCode.GETFUND.ledger_account_code).toBe("5200")
+    expect(byCode.COVID.ledger_account_code).toBe("5200")
+    expect(byCode.VAT.ledger_account_code).toBe("2100")
+    expect(byCode.VAT.is_creditable_input).toBe(true)
+    expect(byCode.VAT.absorbed_to_cost).toBe(false)
+  })
+
+  it("uses the bill issue date for post-2026 tax and persists creditable input lines", async () => {
+    const req = new NextRequest("http://localhost/api/bills/create", {
+      method: "POST",
+      body: JSON.stringify({
+        business_id: BUSINESS_ID,
+        supplier_id: SUPPLIER_A,
+        supplier_name: "Supplier A",
+        bill_number: "B-TAX-2026",
+        issue_date: "2026-01-01",
+        apply_taxes: true,
+        apply_wht: false,
+        items: [{ description: "Service", qty: 1, unit_price: 120, discount_amount: 0 }],
+      }),
+    })
+    const res = await POST(req)
+    expect(res.status).toBe(201)
+    expect(lastInsert?.subtotal).toBeCloseTo(100, 2)
+    expect(lastInsert?.nhil).toBeCloseTo(2.5, 2)
+    expect(lastInsert?.getfund).toBeCloseTo(2.5, 2)
+    expect(lastInsert?.covid).toBe(0)
+    expect(lastInsert?.vat).toBeCloseTo(15, 2)
+    expect(lastInsert?.total_tax).toBeCloseTo(20, 2)
+    expect(lastInsert?.tax_engine_effective_from).toBe("2026-01-01")
+
+    const taxLines = (lastInsert?.tax_lines as any)?.tax_lines as any[]
+    const byCode = Object.fromEntries(taxLines.map((line) => [line.code, line]))
+    expect(byCode.NHIL.ledger_account_code).toBe("2110")
+    expect(byCode.NHIL.is_creditable_input).toBe(true)
+    expect(byCode.NHIL.absorbed_to_cost).toBe(false)
+    expect(byCode.GETFUND.ledger_account_code).toBe("2120")
+    expect(byCode.VAT.ledger_account_code).toBe("2100")
+    expect(byCode.VAT.is_creditable_input).toBe(true)
+  })
+
+  it("persists tax lines in the bill currency for foreign-currency bills", async () => {
+    const req = new NextRequest("http://localhost/api/bills/create", {
+      method: "POST",
+      body: JSON.stringify({
+        business_id: BUSINESS_ID,
+        supplier_id: SUPPLIER_A,
+        supplier_name: "Supplier A",
+        bill_number: "B-TAX-USD",
+        issue_date: "2026-01-01",
+        currency_code: "USD",
+        fx_rate: 15,
+        apply_taxes: true,
+        apply_wht: false,
+        items: [{ description: "Service", qty: 1, unit_price: 120, discount_amount: 0 }],
+      }),
+    })
+    const res = await POST(req)
+    expect(res.status).toBe(201)
+    expect(lastInsert?.currency_code).toBe("USD")
+    expect(lastInsert?.fx_rate).toBe(15)
+    expect(lastInsert?.subtotal).toBeCloseTo(100, 2)
+    expect(lastInsert?.vat).toBeCloseTo(15, 2)
+    expect(lastInsert?.home_currency_total).toBeCloseTo(1800, 2)
+
+    const taxLines = (lastInsert?.tax_lines as any)?.tax_lines as any[]
+    const vat = taxLines.find((line) => line.code === "VAT")
+    expect(vat?.amount).toBeCloseTo(15, 2)
+    expect(vat?.ledger_account_code).toBe("2100")
+  })
+
   it("stores no WHT when the tenant leaves withholding off", async () => {
     const req = new NextRequest("http://localhost/api/bills/create", {
       method: "POST",
@@ -408,6 +509,35 @@ describe("bill supplier persistence", () => {
     expect(lastInsert?.wht_applicable).toBe(false)
     expect(lastInsert?.wht_rate).toBeNull()
     expect(lastInsert?.wht_amount).toBe(0)
+  })
+
+  it("recalculates draft bill tax with the new issue date and persists tax lines", async () => {
+    const req = new NextRequest(`http://localhost/api/bills/${BILL_ID}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        supplier_id: SUPPLIER_A,
+        supplier_name: "Supplier A",
+        bill_number: "B-TAX-EDIT",
+        issue_date: "2025-12-31",
+        apply_taxes: true,
+        items: [{ description: "Service", qty: 1, unit_price: 121.9, discount_amount: 0 }],
+      }),
+    })
+    const res = await PUT(req, { params: { id: BILL_ID } })
+    expect(res.status).toBe(200)
+    expect(lastUpdate?.subtotal).toBeCloseTo(100, 2)
+    expect(lastUpdate?.nhil).toBeCloseTo(2.5, 2)
+    expect(lastUpdate?.getfund).toBeCloseTo(2.5, 2)
+    expect(lastUpdate?.covid).toBeCloseTo(1, 2)
+    expect(lastUpdate?.vat).toBeCloseTo(15.9, 2)
+    expect(lastUpdate?.tax_engine_effective_from).toBe("2025-12-31")
+
+    const taxLines = (lastUpdate?.tax_lines as any)?.tax_lines as any[]
+    const byCode = Object.fromEntries(taxLines.map((line) => [line.code, line]))
+    expect(byCode.NHIL.ledger_account_code).toBe("5200")
+    expect(byCode.NHIL.absorbed_to_cost).toBe(true)
+    expect(byCode.VAT.ledger_account_code).toBe("2100")
+    expect(byCode.VAT.is_creditable_input).toBe(true)
   })
 
   it("explicit null supplier_id on update clears the relationship", async () => {
