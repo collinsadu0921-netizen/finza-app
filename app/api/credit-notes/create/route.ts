@@ -3,6 +3,7 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { getTaxEngineCode, deriveLegacyTaxColumnsFromTaxLines, getCanonicalTaxResultFromLineItems } from "@/lib/taxEngine/helpers"
 import { toTaxLinesJsonb } from "@/lib/taxEngine/serialize"
+import { resolveDocumentVatClassification } from "@/lib/tax/classification"
 import { normalizeCountry } from "@/lib/payments/eligibility"
 import type { TaxEngineConfig } from "@/lib/taxEngine/types"
 import { createReconciliationEngine } from "@/lib/accounting/reconciliation/engine-impl"
@@ -36,6 +37,7 @@ export async function POST(request: NextRequest) {
       notes,
       items,
       apply_taxes = true,
+      vat_classification,
     } = body
 
     if (!invoice_id) {
@@ -65,7 +67,7 @@ export async function POST(request: NextRequest) {
 
     const { data: invoice } = await supabase
       .from("invoices")
-      .select("id, total, subtotal, total_tax, customer_id")
+      .select("id, total, subtotal, total_tax, customer_id, vat_classification")
       .eq("id", invoice_id)
       .eq("business_id", business_id)
       .is("deleted_at", null)
@@ -266,6 +268,18 @@ export async function POST(request: NextRequest) {
       publicToken = Buffer.from(`${business_id}-${invoice_id}-${Date.now()}`).toString("base64url")
     }
 
+    const classification = resolveDocumentVatClassification({
+      requested: vat_classification ?? invoice.vat_classification,
+      taxLines: taxResult?.lines ?? [],
+      totalTax: taxResult?.total_tax ?? 0,
+    })
+    if (!classification.ok) {
+      return NextResponse.json(
+        { error: classification.message, code: classification.code },
+        { status: 400 }
+      )
+    }
+
     // Create credit note. Credit notes do NOT have apply_taxes; tax comes from tax_lines only.
     const creditNoteData: any = {
       business_id,
@@ -283,6 +297,7 @@ export async function POST(request: NextRequest) {
       tax_engine_code: taxResult ? taxEngineCode : null,
       tax_engine_effective_from: taxResult ? effectiveDate : null,
       tax_jurisdiction: taxResult ? jurisdiction : null,
+      vat_classification: classification.classification,
       nhil: taxResult ? Math.round(legacyTaxColumns.nhil * 100) / 100 : 0,
       getfund: taxResult ? Math.round(legacyTaxColumns.getfund * 100) / 100 : 0,
       covid: taxResult ? Math.round(legacyTaxColumns.covid * 100) / 100 : 0,

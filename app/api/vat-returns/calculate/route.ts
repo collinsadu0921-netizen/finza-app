@@ -141,6 +141,7 @@ export async function POST(request: NextRequest) {
     })
 
     const dataQualityException = vatTaxableBaseException({
+      bases,
       totalOutputVat: calculation.total_output_vat,
       totalInputVat: calculation.total_input_vat,
       standardRatedSales: calculation.total_standard_rated_sales,

@@ -4,6 +4,7 @@ import { createAuditLog } from "@/lib/auditLog"
 import { assertBusinessNotArchived } from "@/lib/archivedBusiness"
 import { ensureAccountingInitialized } from "@/lib/accountingBootstrap"
 import { getCurrencySymbol } from "@/lib/currency"
+import { resolveDocumentVatClassification } from "@/lib/tax/classification"
 
 export type InsertExpensePayload = {
   supplier: string
@@ -19,6 +20,7 @@ export type InsertExpensePayload = {
   receipt_path?: string | null
   currency_code?: string | null
   fx_rate?: number | null
+  vat_classification?: string | null
 }
 
 export type InsertExpenseResult =
@@ -57,6 +59,7 @@ export async function insertExpenseForBusiness(
     receipt_path,
     currency_code,
     fx_rate,
+    vat_classification,
   } = payload
 
   if (!supplier?.trim() || !date || amount == null || Number.isNaN(Number(amount))) {
@@ -106,6 +109,24 @@ export async function insertExpenseForBusiness(
 
   const fxCurrencySymbol = isFxExpense ? (getCurrencySymbol(currency_code!) || currency_code) : null
 
+  const expenseClassification = resolveDocumentVatClassification({
+    requested: vat_classification,
+    taxLines: [],
+    totalTax:
+      Number(vat || 0) +
+      Number(nhil || 0) +
+      Number(getfund || 0) +
+      Number(covid || 0),
+  })
+  if (!expenseClassification.ok) {
+    return {
+      ok: false,
+      status: 400,
+      error: expenseClassification.message,
+      code: expenseClassification.code,
+    }
+  }
+
   const { error: bootstrapErr } = await ensureAccountingInitialized(supabase, businessId)
   if (bootstrapErr) {
     return { ok: false, status: 500, error: bootstrapErr }
@@ -134,6 +155,7 @@ export async function insertExpenseForBusiness(
         isFxExpense && parsedFxRate
           ? Math.round(Number(total ?? amount) * parsedFxRate * 100) / 100
           : null,
+      vat_classification: expenseClassification.classification,
     })
     .select(
       `

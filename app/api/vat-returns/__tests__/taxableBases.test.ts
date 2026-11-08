@@ -33,6 +33,9 @@ const completeBases = {
   unclassified_purchases_count: 0,
   fallback_sales_count: 0,
   fallback_purchases_count: 0,
+  invalid_fx_count: 0,
+  classification_conflict_count: 0,
+  unsupported_fx_credit_note_count: 0,
   warnings: [],
 }
 
@@ -151,7 +154,13 @@ describe("VAT return taxable bases - calculate", () => {
 
   it("surfaces a data-quality exception when output VAT has no sales base", async () => {
     setupSupabase({
-      bases: { ...completeBases, standard_rated_sales: 0, zero_rated_sales: 0 },
+      bases: {
+        ...completeBases,
+        standard_rated_sales: 0,
+        zero_rated_sales: 0,
+        exempt_sales: 0,
+        ledger_revenue_credits: 0,
+      },
     })
 
     const response = await calculatePost(request("/api/vat-returns/calculate"))
@@ -197,7 +206,13 @@ describe("VAT return taxable bases - create", () => {
 
   it("blocks creation when output VAT has no standard-rated sales base", async () => {
     const { insert } = setupSupabase({
-      bases: { ...completeBases, standard_rated_sales: 0, zero_rated_sales: 0 },
+      bases: {
+        ...completeBases,
+        standard_rated_sales: 0,
+        zero_rated_sales: 0,
+        exempt_sales: 0,
+        ledger_revenue_credits: 0,
+      },
     })
 
     const response = await createPost(request("/api/vat-returns/create"))

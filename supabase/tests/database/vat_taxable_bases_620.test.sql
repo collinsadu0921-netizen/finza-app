@@ -79,7 +79,8 @@ BEGIN
 
   -- Standard-rated invoice: 100 base, 15 VAT, 2.5 NHIL, 2.5 GETFund.
   INSERT INTO public.invoices (
-    business_id, subtotal, total_tax, total, issue_date, status, tax_lines
+    business_id, subtotal, total_tax, total, issue_date, status, tax_lines,
+    vat_classification
   ) VALUES (
     v_biz, 100, 20, 120, CURRENT_DATE, 'sent',
     jsonb_build_object(
@@ -92,13 +93,15 @@ BEGIN
           'meta', jsonb_build_object('base', 100))
       ),
       'pricing_mode', 'exclusive'
-    )
+    ),
+    'standard'
   )
   RETURNING id INTO v_invoice;
 
   -- Applied credit note reduces standard-rated sales by 10.
   INSERT INTO public.credit_notes (
-    business_id, invoice_id, credit_number, date, subtotal, total, status, tax_lines
+    business_id, invoice_id, credit_number, date, subtotal, total, status,
+    tax_lines, vat_classification
   ) VALUES (
     v_biz, v_invoice, 'CN-620', CURRENT_DATE, 10, 12, 'applied',
     jsonb_build_object(
@@ -106,7 +109,8 @@ BEGIN
         jsonb_build_object('code', 'VAT', 'amount', 1.5, 'rate', 0.15,
           'meta', jsonb_build_object('base', 10))
       )
-    )
+    ),
+    'standard'
   )
   RETURNING id INTO v_credit;
 
@@ -154,7 +158,7 @@ BEGIN
   -- Standard-rated bill: 40 base.
   INSERT INTO public.bills (
     business_id, supplier_name, bill_number, issue_date, due_date, status,
-    subtotal, total_tax, total, bill_type, tax_lines
+    subtotal, total_tax, total, bill_type, tax_lines, vat_classification
   ) VALUES (
     v_biz, '620 Supplier', 'BILL-620', CURRENT_DATE, CURRENT_DATE, 'open',
     40, 8, 48, 'standard',
@@ -163,15 +167,18 @@ BEGIN
         jsonb_build_object('code', 'VAT', 'amount', 6, 'rate', 0.15,
           'meta', jsonb_build_object('base', 40))
       )
-    )
+    ),
+    'standard'
   )
   RETURNING id INTO v_bill;
 
   -- Expense with input VAT: 50 base.
   INSERT INTO public.expenses (
-    id, business_id, supplier, amount, vat, nhil, getfund, covid, total, date
+    id, business_id, supplier, amount, vat, nhil, getfund, covid, total, date,
+    vat_classification
   ) VALUES (
-    v_expense, v_biz, '620 Expense Supplier', 50, 7.5, 0, 0, 0, 57.5, CURRENT_DATE
+    v_expense, v_biz, '620 Expense Supplier', 50, 7.5, 0, 0, 0, 57.5, CURRENT_DATE,
+    'standard'
   );
 
   ALTER TABLE public.invoices ENABLE TRIGGER USER;
@@ -226,9 +233,10 @@ BEGIN
 
   -- An unclassified sale must produce a warning, not a guessed figure.
   INSERT INTO public.invoices (
-    business_id, subtotal, total_tax, total, issue_date, status, tax_lines
+    business_id, subtotal, total_tax, total, issue_date, status, tax_lines,
+    vat_classification
   ) VALUES (
-    v_biz, 10, 0, 10, CURRENT_DATE, 'sent', '[]'::jsonb
+    v_biz, 10, 0, 10, CURRENT_DATE, 'sent', '[]'::jsonb, 'unclassified'
   );
 
   v_bases := public.extract_vat_taxable_bases(
@@ -241,7 +249,7 @@ BEGIN
     RAISE EXCEPTION 'TEST_FAILED: unclassified sales count expected 1, got %',
       v_bases->>'unclassified_sales_count';
   END IF;
-  IF NOT (v_bases->'warnings')::TEXT LIKE '%no tax classification%' THEN
+  IF NOT (v_bases->'warnings')::TEXT LIKE '%no VAT classification%' THEN
     RAISE EXCEPTION 'TEST_FAILED: missing unclassified sales warning';
   END IF;
 

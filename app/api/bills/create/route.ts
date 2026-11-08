@@ -16,6 +16,7 @@ import { createAuditLog } from "@/lib/auditLog"
 import { ghanaTaxEngineCanonical } from "@/lib/taxEngine/jurisdictions/ghana"
 import { deriveLegacyTaxColumnsFromTaxLines } from "@/lib/taxEngine/helpers"
 import { toBillTaxLinesJsonb, emptyBillTaxResult } from "@/lib/bills/billTaxLines"
+import { resolveDocumentVatClassification } from "@/lib/tax/classification"
 import { getCurrencySymbol } from "@/lib/currency"
 import { enforceServiceIndustryMinTierWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryMinTier"
 import { resolveMaterialInventoryAccount } from "@/lib/bills/resolveMaterialInventoryAccount"
@@ -91,6 +92,7 @@ export async function POST(request: NextRequest) {
       apply_taxes = true,
       apply_wht = false,
       wht_rate_code = null,
+      vat_classification,
       status = "draft",
       attachment_path,
       // Import bill fields
@@ -265,6 +267,29 @@ export async function POST(request: NextRequest) {
         String(import_material_id).trim() !== "")
     const absorptionAccountCode = hasMaterialLines ? "1450" : "5200"
 
+    const standardMaterialLines = (items ?? []).filter(
+      (item: any) =>
+        item.material_id != null && String(item.material_id).trim() !== ""
+    ).length
+    const standardServiceLines = (items ?? []).length - standardMaterialLines
+    if (
+      bill_type === "standard" &&
+      apply_taxes &&
+      issue_date < "2026-01-01" &&
+      standardMaterialLines > 0 &&
+      standardServiceLines > 0
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "Pre-2026 bills that mix inventory materials and services cannot allocate non-creditable NHIL/GETFund/COVID accurately. Split the bill into material and service bills.",
+          code: "BILL_MIXED_MATERIAL_TAX_UNSUPPORTED",
+        },
+        { status: 400 }
+      )
+    }
+
     let taxResult: {
       subtotalBeforeTax: number
       nhil: number
@@ -358,6 +383,24 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Document-level VAT classification. Unknown documents stay unclassified.
+    const billClassification = resolveDocumentVatClassification({
+      requested: vat_classification,
+      taxLines: (billTaxLines as { tax_lines?: Array<{ code: string; amount: number }> })
+        .tax_lines ?? [],
+      totalTax: taxResult.totalTax,
+    })
+    if (!billClassification.ok) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: billClassification.message,
+          code: billClassification.code,
+        },
+        { status: 400 }
+      )
+    }
+
     // Server-authoritative WHT: calculate on the pre-tax contract value, never
     // on VAT/NHIL/GETFund. Submitted rate/amount values are ignored.
     const whtCode = apply_wht ? wht_rate_code || null : null
@@ -427,6 +470,7 @@ export async function POST(request: NextRequest) {
         tax_engine_code: "ghana",
         tax_engine_effective_from: issue_date,
         tax_jurisdiction: "GH",
+        vat_classification: billClassification.classification,
         wht_applicable: apply_wht,
         wht_rate_code: apply_wht ? whtCode : null,
         wht_rate: apply_wht ? effectiveWhtRate : null,

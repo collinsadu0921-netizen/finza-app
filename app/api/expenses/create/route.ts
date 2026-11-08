@@ -39,6 +39,7 @@ export async function POST(request: NextRequest) {
       incoming_document_id,
       currency_code,
       fx_rate,
+      vat_classification,
     } = body
 
     if (!business_id || !supplier || !date || amount == null) {
@@ -75,6 +76,7 @@ export async function POST(request: NextRequest) {
         receipt_path,
         currency_code,
         fx_rate,
+        vat_classification,
       },
       request,
       profileSettingsLabel: "Business Profile",
