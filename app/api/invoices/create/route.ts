@@ -14,10 +14,11 @@ import {
   fetchGhanaEvatLevyScheduleMetadataMap,
 } from "@/lib/tax/ghanaTaxScheduleMetadata"
 import { enforceServiceIndustryFinancialWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryFinancialWrite"
+import { calculateWHTForRate } from "@/lib/wht"
 import {
-  calculateWHTForRate,
-  getWHTRate,
-} from "@/lib/wht"
+  resolveWhtRateForDate,
+  WhtRateResolutionError,
+} from "@/lib/wht/rateResolver"
 import { voidRecordBusinessActivationEvent } from "@/lib/growth/recordBusinessActivationEvent"
 import {
   mapInvoiceItemsForInsert,
@@ -80,14 +81,35 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       )
     }
-    if (wht_receivable_applicable && !wht_receivable_rate_code) {
-      return NextResponse.json(
-        {
-          error: "Select a WHT category before applying withholding tax.",
-          code: "WHT_CATEGORY_REQUIRED",
-        },
-        { status: 400 }
-      )
+    // Resolve customer WHT by the invoice transaction date. The configured
+    // rate table is authoritative; a current rate is never substituted for a
+    // historical document.
+    let resolvedInvoiceWhtRate = null
+    if (wht_receivable_applicable) {
+      if (!wht_receivable_rate_code) {
+        return NextResponse.json(
+          {
+            error: "Select a WHT category before applying withholding tax.",
+            code: "WHT_CATEGORY_REQUIRED",
+          },
+          { status: 400 }
+        )
+      }
+      try {
+        resolvedInvoiceWhtRate = await resolveWhtRateForDate(
+          supabase,
+          wht_receivable_rate_code,
+          issue_date
+        )
+      } catch (error) {
+        if (error instanceof WhtRateResolutionError) {
+          return NextResponse.json(
+            { error: error.message, code: error.code },
+            { status: 400 }
+          )
+        }
+        throw error
+      }
     }
 
     const business_id = business.id
@@ -347,9 +369,8 @@ export async function POST(request: NextRequest) {
     const whtCode = wht_receivable_applicable
       ? wht_receivable_rate_code || null
       : null
-    const knownWhtRate = whtCode ? getWHTRate(whtCode) : undefined
     const effectiveWhtRate = wht_receivable_applicable
-      ? knownWhtRate?.rate ?? (Number(wht_receivable_rate) || 0)
+      ? resolvedInvoiceWhtRate?.rate ?? 0
       : 0
     const whtBaseGhs =
       isFxInvoice && parsedFxRate

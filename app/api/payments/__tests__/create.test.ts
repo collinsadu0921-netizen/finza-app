@@ -37,6 +37,14 @@ jest.mock('@/lib/payments/eligibility', () => ({
   normalizeCountry: jest.fn((country: string) => 'GH'),
   assertMethodAllowed: jest.fn(() => {}),
 }))
+// Harness-only mocks: these modules query tables that are outside the scope of
+// these payment-total tests.
+jest.mock('@/lib/serviceWorkspace/enforceServiceIndustryFinancialWrite', () => ({
+  enforceServiceIndustryFinancialWrite: jest.fn(() => Promise.resolve(null)),
+}))
+jest.mock('@/lib/payments/assertPaymentJournalPosted', () => ({
+  assertPaymentJournalPosted: jest.fn(() => Promise.resolve({ ok: true, journalEntryId: 'je-1' })),
+}))
 
 // Mock invoice with mismatching tax data
 // Invoice total is 120.00, but legacy columns would sum to 125.00

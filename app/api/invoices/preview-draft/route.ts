@@ -16,6 +16,10 @@ import { getCurrentBusiness } from "@/lib/business"
 import { calculateTaxes } from "@/lib/taxEngine"
 import { calculateWHTForRate } from "@/lib/wht"
 import {
+  resolveWhtRateForDate,
+  WhtRateResolutionError,
+} from "@/lib/wht/rateResolver"
+import {
   generateFinancialDocumentHTML,
   type BusinessInfo,
   type CustomerInfo,
@@ -174,13 +178,39 @@ export async function POST(request: NextRequest) {
     })
 
     // WHT: applied on pre-tax base (subtotal), not on VAT-inclusive total.
-    // Resident contract threshold is tested on the GHS equivalent base.
+    // The category and transaction date determine the rate. A submitted rate
+    // is not authoritative.
+    const whtCode = wht_applicable ? wht_code || null : null
+    let effectiveWhtRate = 0
+    if (wht_applicable) {
+      if (!whtCode) {
+        return NextResponse.json(
+          {
+            error: "Select a WHT category before applying withholding tax.",
+            code: "WHT_CATEGORY_REQUIRED",
+          },
+          { status: 400 }
+        )
+      }
+      try {
+        const resolved = await resolveWhtRateForDate(supabase, whtCode, issue_date)
+        effectiveWhtRate = resolved.rate
+      } catch (error) {
+        if (error instanceof WhtRateResolutionError) {
+          return NextResponse.json(
+            { error: error.message, code: error.code },
+            { status: 400 }
+          )
+        }
+        throw error
+      }
+    }
     const whtAmount =
-      wht_applicable && wht_rate && subtotal > 0
+      wht_applicable && effectiveWhtRate > 0 && subtotal > 0
         ? calculateWHTForRate({
             baseAmount: subtotal,
-            rate: Number(wht_rate),
-            code: wht_code || null,
+            rate: effectiveWhtRate,
+            code: whtCode,
             baseAmountGhs:
               wht_base_ghs != null ? Number(wht_base_ghs) : subtotal,
           }).whtAmount
@@ -192,7 +222,7 @@ export async function POST(request: NextRequest) {
       total,
       ...(wht_applicable && whtAmount > 0 ? {
         wht_applicable: true,
-        wht_rate:       Number(wht_rate),
+        wht_rate:       effectiveWhtRate,
         wht_amount:     whtAmount,
         net_payable:    Math.round((total - whtAmount) * 100) / 100,
       } : {}),

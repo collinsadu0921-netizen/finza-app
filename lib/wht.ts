@@ -149,6 +149,35 @@ export const LEGACY_WHT_RATE_CODES = new Set([
   "GH_NR_20",
 ])
 
+/**
+ * Historical rates retained only as an offline fallback when the configured
+ * wht_rates table cannot be read. They are never used for current-period
+ * transactions.
+ */
+export const LEGACY_WHT_RATES: WHTRate[] = [
+  {
+    code: "GH_SVC_5",
+    name: "Services - Resident (5%) - legacy",
+    rate: 0.05,
+    description: "Historical resident service rate used before 2026-01-01.",
+    category: "resident_contract",
+  },
+  {
+    code: "GH_RENT_8",
+    name: "Rent (8%) - legacy",
+    rate: 0.08,
+    description: "Historical rent rate used before 2026-01-01.",
+    category: "resident_rent",
+  },
+  {
+    code: "GH_NR_20",
+    name: "Non-Resident Payments (20%) - legacy",
+    rate: 0.2,
+    description: "Historical general non-resident rate used before 2026-01-01.",
+    category: "non_resident",
+  },
+]
+
 export function isResidentContractWhtCode(
   code: string | null | undefined
 ): boolean {

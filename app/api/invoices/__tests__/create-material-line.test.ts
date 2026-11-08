@@ -18,6 +18,20 @@ jest.mock("@/lib/payments/eligibility", () => ({
 jest.mock("@/lib/countryCurrency", () => ({
   assertCountryCurrency: jest.fn(() => {}),
 }))
+jest.mock("@/lib/business", () => ({
+  getCurrentBusiness: jest.fn(() =>
+    Promise.resolve({
+      id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      address_country: "GH",
+      default_currency: "GHS",
+      owner_id: "test-user",
+      archived_at: null,
+    })
+  ),
+}))
+jest.mock("@/lib/archivedBusiness", () => ({
+  assertBusinessNotArchived: jest.fn(() => Promise.resolve()),
+}))
 jest.mock("@/lib/taxEngine/helpers", () => ({
   getTaxEngineCode: jest.fn(() => "ghana"),
   deriveLegacyTaxColumnsFromTaxLines: jest.fn(() => ({

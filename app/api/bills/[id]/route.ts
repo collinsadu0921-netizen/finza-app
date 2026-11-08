@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { calculateGhanaTaxesFromLineItems, calculateBaseFromTotalIncludingTaxes } from "@/lib/ghanaTaxEngine"
+import { calculateWHTForRate } from "@/lib/wht"
+import { resolveWhtRateForDate, WhtRateResolutionError } from "@/lib/wht/rateResolver"
 import { createAuditLog } from "@/lib/auditLog"
 import { billSupplierBalanceRemaining } from "@/lib/billBalance"
 import {
@@ -157,7 +159,7 @@ export async function PUT(
 
     const { data: existingBill, error: billLookupError } = await supabase
       .from("bills")
-      .select("id, status, total, currency_code, fx_rate, business_id")
+      .select("id, status, total, subtotal, issue_date, wht_applicable, wht_rate_code, wht_rate, wht_amount, currency_code, fx_rate, business_id")
       .eq("id", billId)
       .is("deleted_at", null)
       .maybeSingle()
@@ -188,6 +190,8 @@ export async function PUT(
       notes,
       items,
       apply_taxes,
+      apply_wht,
+      wht_rate_code,
       status,
       attachment_path,
       // Import bill fields
@@ -337,6 +341,81 @@ export async function PUT(
       updateData.total      = taxResult.grandTotal
       updateData.material_id = null
       updateData.quantity = null
+    }
+
+    // Draft bills may be edited after their WHT was originally calculated.
+    // Recompute WHT from the effective subtotal and transaction date so the
+    // stored withholding never drifts from the bill base. Unrelated edits
+    // (for example notes) leave the stored WHT untouched.
+    const whtInputsChanged =
+      apply_wht !== undefined ||
+      wht_rate_code !== undefined ||
+      items !== undefined ||
+      issue_date !== undefined ||
+      body_fx_rate !== undefined
+
+    if (existingBill.status === "draft" && whtInputsChanged) {
+      const effectiveWhtApplicable =
+        apply_wht !== undefined ? Boolean(apply_wht) : Boolean(existingBill.wht_applicable)
+      const effectiveWhtCode =
+        wht_rate_code !== undefined ? wht_rate_code : existingBill.wht_rate_code
+      const effectiveIssueDate =
+        issue_date !== undefined ? issue_date : existingBill.issue_date
+
+      if (effectiveWhtApplicable) {
+        if (!effectiveWhtCode) {
+          return NextResponse.json(
+            {
+              error: "Select a WHT category before applying withholding tax.",
+              code: "WHT_CATEGORY_REQUIRED",
+            },
+            { status: 400 }
+          )
+        }
+
+        let resolvedWhtRate
+        try {
+          resolvedWhtRate = await resolveWhtRateForDate(
+            supabase,
+            effectiveWhtCode,
+            effectiveIssueDate
+          )
+        } catch (error) {
+          if (error instanceof WhtRateResolutionError) {
+            return NextResponse.json(
+              { error: error.message, code: error.code },
+              { status: 400 }
+            )
+          }
+          throw error
+        }
+
+        const whtBaseAmount = Number(
+          updateData.subtotal ?? existingBill.subtotal ?? 0
+        )
+        const effectiveFxRate =
+          body_fx_rate !== undefined
+            ? Number(body_fx_rate)
+            : Number(existingBill.fx_rate || 0)
+        const whtBaseGhs =
+          effectiveFxRate > 0 ? whtBaseAmount * effectiveFxRate : whtBaseAmount
+        const whtCalculation = calculateWHTForRate({
+          baseAmount: whtBaseAmount,
+          rate: resolvedWhtRate.rate,
+          code: effectiveWhtCode,
+          baseAmountGhs: whtBaseGhs,
+        })
+
+        updateData.wht_applicable = true
+        updateData.wht_rate_code = effectiveWhtCode
+        updateData.wht_rate = resolvedWhtRate.rate
+        updateData.wht_amount = whtCalculation.whtAmount
+      } else if (apply_wht === false) {
+        updateData.wht_applicable = false
+        updateData.wht_rate_code = null
+        updateData.wht_rate = null
+        updateData.wht_amount = 0
+      }
     }
 
     if (
