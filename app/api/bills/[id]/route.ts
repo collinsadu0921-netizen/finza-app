@@ -161,7 +161,7 @@ export async function PUT(
 
     const { data: existingBill, error: billLookupError } = await supabase
       .from("bills")
-      .select("id, status, total, subtotal, issue_date, material_id, wht_applicable, wht_rate_code, wht_rate, wht_amount, currency_code, fx_rate, business_id")
+      .select("id, status, total, subtotal, total_tax, issue_date, material_id, bill_type, cif_value, import_duty_rate, import_duty_amount, ecowas_levy, au_levy, exim_levy, sil_levy, examination_fee, clearing_agent_fee, landed_cost_account_code, wht_applicable, wht_rate_code, wht_rate, wht_amount, currency_code, fx_rate, business_id")
       .eq("id", billId)
       .is("deleted_at", null)
       .maybeSingle()
@@ -247,13 +247,41 @@ export async function PUT(
       updated_at: new Date().toISOString(),
     }
 
-    const isImportBill = bill_type === "import"
+    const effectiveBillType =
+      bill_type !== undefined ? bill_type : existingBill.bill_type ?? "standard"
+    const isImportBill = effectiveBillType === "import"
     const effectiveIssueDate =
       issue_date !== undefined ? issue_date : existingBill.issue_date
     const effectiveImportMaterialId =
       body_material_id !== undefined ? body_material_id : existingBill.material_id
+
+    let existingTaxItems: any[] | null = null
+    if (
+      existingBill.status === "draft" &&
+      issue_date !== undefined &&
+      (!items || items.length === 0) &&
+      !isImportBill
+    ) {
+      const { data: existingBillItems } = await supabase
+        .from("bill_items")
+        .select(
+          "description, qty, unit_price, discount_amount, line_subtotal, account_id, material_id"
+        )
+        .eq("bill_id", billId)
+        .order("created_at", { ascending: true })
+      existingTaxItems = (existingBillItems ?? []).map((item: any) => ({
+        description: item.description,
+        qty: item.qty,
+        unit_price: item.unit_price,
+        discount_amount: item.discount_amount,
+        account_id: item.account_id,
+        material_id: item.material_id,
+      }))
+    }
+
+    const taxItems = items ?? existingTaxItems
     const hasMaterialLines =
-      (items ?? []).some(
+      (taxItems ?? []).some(
         (item: any) =>
           item.material_id != null && String(item.material_id).trim() !== ""
       ) ||
@@ -262,19 +290,63 @@ export async function PUT(
         String(effectiveImportMaterialId).trim() !== "")
     const absorptionAccountCode = hasMaterialLines ? "1450" : "5200"
 
-    if (isImportBill) {
+    const updateApplyTaxes =
+      apply_taxes !== undefined
+        ? apply_taxes
+        : Number(existingBill.total_tax || 0) > 0
+    const taxMaterialLines = (taxItems ?? []).filter(
+      (item: any) =>
+        item.material_id != null && String(item.material_id).trim() !== ""
+    ).length
+    const taxServiceLines = (taxItems ?? []).length - taxMaterialLines
+    if (
+      !isImportBill &&
+      updateApplyTaxes &&
+      effectiveIssueDate < "2026-01-01" &&
+      taxMaterialLines > 0 &&
+      taxServiceLines > 0
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Pre-2026 bills that mix inventory materials and services cannot allocate non-creditable NHIL/GETFund/COVID accurately. Split the bill into material and service bills.",
+          code: "BILL_MIXED_MATERIAL_TAX_UNSUPPORTED",
+        },
+        { status: 400 }
+      )
+    }
+
+    const importTaxInputsChanged =
+      cif_value !== undefined ||
+      import_duty_rate !== undefined ||
+      import_duty_amount !== undefined ||
+      ecowas_levy !== undefined ||
+      au_levy !== undefined ||
+      exim_levy !== undefined ||
+      sil_levy !== undefined ||
+      examination_fee !== undefined ||
+      clearing_agent_fee !== undefined ||
+      landed_cost_account_code !== undefined
+
+    if (
+      isImportBill &&
+      (issue_date !== undefined || importTaxInputsChanged || items !== undefined)
+    ) {
       // ── Import bill: forward-calculate taxes on the VAT base ──────────────
-      const cifNum      = Number(cif_value)          || 0
-      const dutyAmt     = Number(import_duty_amount) || 0
-      const ecowasAmt   = Number(ecowas_levy)        || 0
-      const auAmt       = Number(au_levy)            || 0
-      const eximAmt     = Number(exim_levy)          || 0
-      const silAmt      = Number(sil_levy)           || 0
-      const examAmt     = Number(examination_fee)    || 0
-      const clearingAmt = Number(clearing_agent_fee) || 0
+      const cifNum      = Number(cif_value !== undefined ? cif_value : existingBill.cif_value) || 0
+      const dutyAmt     = Number(import_duty_amount !== undefined ? import_duty_amount : existingBill.import_duty_amount) || 0
+      const ecowasAmt   = Number(ecowas_levy !== undefined ? ecowas_levy : existingBill.ecowas_levy) || 0
+      const auAmt       = Number(au_levy !== undefined ? au_levy : existingBill.au_levy) || 0
+      const eximAmt     = Number(exim_levy !== undefined ? exim_levy : existingBill.exim_levy) || 0
+      const silAmt      = Number(sil_levy !== undefined ? sil_levy : existingBill.sil_levy) || 0
+      const examAmt     = Number(examination_fee !== undefined ? examination_fee : existingBill.examination_fee) || 0
+      const clearingAmt = Number(clearing_agent_fee !== undefined ? clearing_agent_fee : existingBill.clearing_agent_fee) || 0
       const vatBase     = Math.round((cifNum + dutyAmt + ecowasAmt + auAmt + eximAmt + silAmt + examAmt) * 100) / 100
 
-      const applyGhanaTax = apply_taxes !== undefined ? apply_taxes : true
+      const applyGhanaTax =
+        apply_taxes !== undefined
+          ? apply_taxes
+          : Number(existingBill.total_tax || 0) > 0
       let nhil = 0, getfund = 0, covid = 0, vat = 0, totalTax = 0
       let billTaxLines: Record<string, unknown>
 
@@ -327,11 +399,11 @@ export async function PUT(
       updateData.tax_engine_effective_from = effectiveIssueDate
       updateData.tax_jurisdiction         = "GH"
 
-    } else if (items && items.length > 0) {
+    } else if (!isImportBill && taxItems && taxItems.length > 0) {
       // ── Standard bill: reverse-calculate taxes from tax-inclusive total ───
       updateData.bill_type = "standard"
 
-      const subtotalIncludingTaxes = items.reduce((sum: number, item: any) => {
+      const subtotalIncludingTaxes = taxItems.reduce((sum: number, item: any) => {
         const lineTotal = (Number(item.qty) || 0) * (Number(item.unit_price) || 0)
         const discount = Number(item.discount_amount) || 0
         return sum + lineTotal - discount
@@ -395,8 +467,10 @@ export async function PUT(
       updateData.tax_engine_code = "ghana"
       updateData.tax_engine_effective_from = effectiveIssueDate
       updateData.tax_jurisdiction = "GH"
-      updateData.material_id = null
-      updateData.quantity = null
+      if (items !== undefined) {
+        updateData.material_id = null
+        updateData.quantity = null
+      }
     }
 
     // Draft bills may be edited after their WHT was originally calculated.

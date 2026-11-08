@@ -8,6 +8,11 @@ import {
 import { vatPaymentState } from "@/lib/vat/vatReturnPayment"
 import { createAuditLog } from "@/lib/auditLog"
 import { calculateVatReturnTotals } from "@/lib/vat/vatReturnCalculation"
+import {
+  parseVatTaxableBases,
+  taxableBaseInputs,
+  vatTaxableBaseException,
+} from "@/lib/vat/taxableBases"
 
 export async function GET(
   request: NextRequest,
@@ -221,25 +226,6 @@ export async function PUT(
       payment_date,
       payment_reference,
       notes,
-      // Allow recalculating these fields for draft returns
-      total_taxable_sales,
-      total_zero_rated_sales,
-      total_exempt_sales,
-      total_output_nhil,
-      total_output_getfund,
-      total_output_covid,
-      total_output_vat,
-      total_output_tax,
-      total_taxable_purchases,
-      total_zero_rated_purchases,
-      total_exempt_purchases,
-      total_input_nhil,
-      total_input_getfund,
-      total_input_covid,
-      total_input_vat,
-      total_input_tax,
-      net_vat_payable,
-      net_vat_refund,
     } = body
 
     if (status === "paid" && existingReturn.status !== "paid") {
@@ -279,102 +265,147 @@ export async function PUT(
 
     const updateData: any = {}
     if (status) updateData.status = status
-
-    // Allow recalculating all tax fields if status is draft
-    if (existingReturn.status === "draft") {
-      if (total_taxable_sales !== undefined) updateData.total_taxable_sales = Number(total_taxable_sales)
-      if (total_zero_rated_sales !== undefined) updateData.total_zero_rated_sales = Number(total_zero_rated_sales)
-      if (total_exempt_sales !== undefined) updateData.total_exempt_sales = Number(total_exempt_sales)
-      if (total_output_nhil !== undefined) updateData.total_output_nhil = Number(total_output_nhil)
-      if (total_output_getfund !== undefined) updateData.total_output_getfund = Number(total_output_getfund)
-      if (total_output_covid !== undefined) updateData.total_output_covid = Number(total_output_covid)
-      if (total_output_vat !== undefined) updateData.total_output_vat = Number(total_output_vat)
-      if (total_output_tax !== undefined) updateData.total_output_tax = Number(total_output_tax)
-      if (total_taxable_purchases !== undefined) updateData.total_taxable_purchases = Number(total_taxable_purchases)
-      if (total_zero_rated_purchases !== undefined) updateData.total_zero_rated_purchases = Number(total_zero_rated_purchases)
-      if (total_exempt_purchases !== undefined) updateData.total_exempt_purchases = Number(total_exempt_purchases)
-      if (total_input_nhil !== undefined) updateData.total_input_nhil = Number(total_input_nhil)
-      if (total_input_getfund !== undefined) updateData.total_input_getfund = Number(total_input_getfund)
-      if (total_input_covid !== undefined) updateData.total_input_covid = Number(total_input_covid)
-      if (total_input_vat !== undefined) updateData.total_input_vat = Number(total_input_vat)
-      if (total_input_tax !== undefined) updateData.total_input_tax = Number(total_input_tax)
-      if (net_vat_payable !== undefined) updateData.net_vat_payable = Number(net_vat_payable)
-      if (net_vat_refund !== undefined) updateData.net_vat_refund = Number(net_vat_refund)
-    }
-    if (output_adjustment !== undefined && existingReturn.status === "draft") {
-      updateData.output_adjustment = Number(output_adjustment)
-    }
-    if (input_adjustment !== undefined && existingReturn.status === "draft") {
-      updateData.input_adjustment = Number(input_adjustment)
-    }
-    if (adjustment_reason !== undefined && existingReturn.status === "draft") {
-      updateData.adjustment_reason = adjustment_reason?.trim() || null
-    }
     if (submission_date !== undefined) updateData.submission_date = submission_date || null
     if (notes !== undefined) updateData.notes = notes?.trim() || null
 
-    // Draft tax totals and net VAT are derived from the same shared
-    // regime-aware calculation used by /calculate and /create. Do not trust
-    // client-submitted total/net fields as the accounting authority.
+    // Draft tax figures are always recomputed from the ledger and persisted
+    // transaction evidence. Client-submitted total/net fields are ignored.
+    let calculation: ReturnType<typeof calculateVatReturnTotals> | null = null
+    let bases: ReturnType<typeof parseVatTaxableBases> | null = null
+
     if (existingReturn.status === "draft") {
-      const effective = (key: string): number => {
-        if (updateData[key] !== undefined) return Number(updateData[key] || 0)
-        return Number((existingReturn as Record<string, unknown>)[key] || 0)
+      const requestedOutputAdjustment =
+        output_adjustment !== undefined
+          ? Number(output_adjustment)
+          : Number(existingReturn.output_adjustment || 0)
+      const requestedInputAdjustment =
+        input_adjustment !== undefined
+          ? Number(input_adjustment)
+          : Number(existingReturn.input_adjustment || 0)
+      const requestedReason =
+        adjustment_reason !== undefined
+          ? adjustment_reason?.trim() || null
+          : existingReturn.adjustment_reason
+
+      if (
+        (Math.abs(requestedOutputAdjustment) > 0.009 ||
+          Math.abs(requestedInputAdjustment) > 0.009) &&
+        !requestedReason
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "An adjustment reason is required when output or input adjustments are non-zero.",
+            code: "VAT_ADJUSTMENT_REASON_REQUIRED",
+          },
+          { status: 400 }
+        )
       }
 
-      // Stored total_taxable_sales includes zero-rated supplies. Reconstruct
-      // the standard-rated base for the shared calculation.
-      const standardRatedSales = Math.max(
-        effective("total_taxable_sales") - effective("total_zero_rated_sales"),
-        0
-      )
-      const standardRatedPurchases = Math.max(
-        effective("total_taxable_purchases") - effective("total_zero_rated_purchases"),
-        0
-      )
+      updateData.output_adjustment = requestedOutputAdjustment
+      updateData.input_adjustment = requestedInputAdjustment
+      updateData.adjustment_reason = requestedReason
 
-      const calculation = calculateVatReturnTotals({
-        taxableSales: standardRatedSales,
-        taxablePurchases: standardRatedPurchases,
-        zeroRatedSales: effective("total_zero_rated_sales"),
-        exemptSales: effective("total_exempt_sales"),
-        zeroRatedPurchases: effective("total_zero_rated_purchases"),
-        exemptPurchases: effective("total_exempt_purchases"),
-        rows: [
+      const { data: ledgerData, error: ledgerError } = await supabase.rpc(
+        "extract_tax_return_from_ledger",
+        {
+          p_business_id: existingReturn.business_id,
+          p_start_date: existingReturn.period_start_date,
+          p_end_date: existingReturn.period_end_date,
+        }
+      )
+      if (ledgerError) {
+        console.error("Error recalculating VAT ledger figures:", ledgerError)
+        return NextResponse.json(
+          { error: "Could not recalculate VAT figures from the ledger." },
+          { status: 500 }
+        )
+      }
+
+      const { data: basesData, error: basesError } = await supabase.rpc(
+        "extract_vat_taxable_bases",
+        {
+          p_business_id: existingReturn.business_id,
+          p_start_date: existingReturn.period_start_date,
+          p_end_date: existingReturn.period_end_date,
+        }
+      )
+      if (basesError) {
+        console.error("Error recalculating VAT taxable bases:", basesError)
+        return NextResponse.json(
           {
-            tax_code: "VAT",
-            period_credits: effective("total_output_vat"),
-            period_debits: effective("total_input_vat"),
+            error:
+              "Taxable sales and purchases could not be determined from transaction evidence.",
+            code: "VAT_TAXABLE_BASE_UNAVAILABLE",
           },
-          {
-            tax_code: "NHIL",
-            period_credits: effective("total_output_nhil"),
-            period_debits: effective("total_input_nhil"),
-          },
-          {
-            tax_code: "GETFund",
-            period_credits: effective("total_output_getfund"),
-            period_debits: effective("total_input_getfund"),
-          },
-          {
-            tax_code: "COVID",
-            period_credits: effective("total_output_covid"),
-            period_debits: effective("total_input_covid"),
-          },
-        ],
+          { status: 500 }
+        )
+      }
+
+      bases = parseVatTaxableBases(basesData)
+      calculation = calculateVatReturnTotals({
+        rows: ledgerData || [],
         periodEndDate: String(existingReturn.period_end_date || ""),
-        outputAdjustment: effective("output_adjustment"),
-        inputAdjustment: effective("input_adjustment"),
+        ...taxableBaseInputs(bases),
+        outputAdjustment: requestedOutputAdjustment,
+        inputAdjustment: requestedInputAdjustment,
       })
 
+      updateData.total_taxable_sales = calculation.total_taxable_sales
+      updateData.total_zero_rated_sales = calculation.total_zero_rated_sales
+      updateData.total_exempt_sales = calculation.total_exempt_sales
+      updateData.total_output_nhil = calculation.total_output_nhil
+      updateData.total_output_getfund = calculation.total_output_getfund
+      updateData.total_output_covid = calculation.total_output_covid
+      updateData.total_output_vat = calculation.total_output_vat
       updateData.total_output_tax = calculation.total_output_tax
+      updateData.total_taxable_purchases = calculation.total_taxable_purchases
+      updateData.total_zero_rated_purchases = calculation.total_zero_rated_purchases
+      updateData.total_exempt_purchases = calculation.total_exempt_purchases
+      updateData.total_input_nhil = calculation.total_input_nhil
+      updateData.total_input_getfund = calculation.total_input_getfund
+      updateData.total_input_covid = calculation.total_input_covid
+      updateData.total_input_vat = calculation.total_input_vat
       updateData.total_input_tax = calculation.total_input_tax
       updateData.net_vat_payable = calculation.net_vat_payable
       updateData.net_vat_refund = calculation.net_vat_refund
     }
 
-    if (status === "submitted" && !existingReturn.submission_date) {
-      updateData.submission_date = new Date().toISOString().split("T")[0]
+    if (status === "submitted" && existingReturn.status !== "submitted") {
+      if (!bases || !calculation) {
+        return NextResponse.json(
+          {
+            error: "VAT filing could not be reconciled before submission.",
+            code: "VAT_SUBMISSION_RECONCILIATION_REQUIRED",
+          },
+          { status: 409 }
+        )
+      }
+
+      const exception = vatTaxableBaseException({
+        bases,
+        totalOutputVat: calculation.total_output_vat,
+        totalInputVat: calculation.total_input_vat,
+        standardRatedSales: calculation.total_standard_rated_sales,
+        standardRatedPurchases: calculation.total_standard_rated_purchases,
+        taxableBasesComplete: calculation.taxable_bases_complete,
+      })
+
+      if (exception) {
+        return NextResponse.json(
+          {
+            error: exception.message,
+            code: exception.code,
+            data_quality_exception: exception,
+            warnings: [...calculation.warnings, ...bases.warnings],
+          },
+          { status: 409 }
+        )
+      }
+
+      if (!existingReturn.submission_date) {
+        updateData.submission_date = new Date().toISOString().split("T")[0]
+      }
     }
 
     const { data: vatReturn, error } = await supabase
