@@ -69,6 +69,40 @@ describe("bill tax-line persistence", () => {
     expect(nhil?.ledger_account_code).toBe("1450")
   })
 
+  it("keeps the canonical rounding line on account 7990", () => {
+    const jsonb = toBillTaxLinesJsonb(
+      {
+        base_amount: 100,
+        total_tax: 20.01,
+        total_amount: 120.01,
+        pricing_mode: "inclusive",
+        lines: [
+          {
+            code: "ROUNDING",
+            amount: 0.01,
+            meta: {
+              ledger_account_code: "7990",
+              ledger_side: "debit",
+              is_creditable_input: false,
+              absorbed_to_cost: false,
+            },
+          },
+        ],
+        meta: {
+          jurisdiction: "GH",
+          effective_date_used: "2026-01-01",
+          engine_version: "GH-2026-B",
+        },
+      },
+      "5200"
+    ) as { tax_lines: Array<Record<string, unknown>> }
+
+    const rounding = jsonb.tax_lines[0]
+    expect(rounding.ledger_account_code).toBe("7990")
+    expect(rounding.ledger_side).toBe("debit")
+    expect(rounding.absorbed_to_cost).toBe(false)
+  })
+
   it("records engine metadata even when taxes are off", () => {
     const jsonb = toBillTaxLinesJsonb(
       emptyBillTaxResult({
