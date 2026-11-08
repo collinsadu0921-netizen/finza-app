@@ -3,8 +3,11 @@ import {
   GH_WHT_RATES,
   calculateWHTForRate,
   formatWHTRate,
+  getDefaultWHTRateCodeForDate,
   getWHTRate,
+  getWHTRatesForTransactionDate,
   isResidentContractWhtCode,
+  isWHTRateCodeValidForDate,
   whtContractThresholdMet,
 } from "@/lib/wht"
 
@@ -174,5 +177,43 @@ describe("WHT calculation base and reminder threshold", () => {
     })
     expect(result.thresholdMet).toBe(true)
     expect(result.whtAmount).toBe(200)
+  })
+})
+
+describe("historical WHT category availability", () => {
+  it("offers the 5% historical service category for 2025-12-31", () => {
+    const rates = getWHTRatesForTransactionDate("2025-12-31")
+    expect(rates.some((rate) => rate.code === "GH_SVC_5")).toBe(true)
+    expect(rates.some((rate) => rate.code === "GH_SVC_75")).toBe(false)
+    expect(isWHTRateCodeValidForDate("GH_SVC_5", "2025-12-31")).toBe(true)
+    expect(isWHTRateCodeValidForDate("GH_SVC_75", "2025-12-31")).toBe(false)
+  })
+
+  it("offers current categories from 2026-01-01 and hides legacy codes", () => {
+    const rates = getWHTRatesForTransactionDate("2026-01-01")
+    expect(rates.some((rate) => rate.code === "GH_SVC_75")).toBe(true)
+    expect(rates.some((rate) => rate.code === "GH_SVC_5")).toBe(false)
+    expect(isWHTRateCodeValidForDate("GH_SVC_75", "2026-01-01")).toBe(true)
+    expect(isWHTRateCodeValidForDate("GH_SVC_5", "2026-01-01")).toBe(false)
+  })
+
+  it("defaults to a category valid for the transaction date", () => {
+    expect(
+      isWHTRateCodeValidForDate(
+        getDefaultWHTRateCodeForDate("2025-12-31"),
+        "2025-12-31"
+      )
+    ).toBe(true)
+    expect(
+      isWHTRateCodeValidForDate(
+        getDefaultWHTRateCodeForDate("2026-06-01"),
+        "2026-06-01"
+      )
+    ).toBe(true)
+  })
+
+  it("treats an empty or malformed date as current", () => {
+    expect(getWHTRatesForTransactionDate("")).toEqual(GH_WHT_RATES)
+    expect(getWHTRatesForTransactionDate("not-a-date")).toEqual(GH_WHT_RATES)
   })
 })

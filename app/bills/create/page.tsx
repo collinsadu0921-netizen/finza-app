@@ -9,10 +9,12 @@ import { getCurrencySymbol } from "@/lib/currency"
 import { resolveCurrencyDisplay } from "@/lib/currency/resolveCurrencyDisplay"
 import { normalizeCountry } from "@/lib/payments/eligibility"
 import {
-  GH_WHT_RATES,
   calculateWHTForRate,
   formatWHTRate,
+  getDefaultWHTRateCodeForDate,
+  getWHTRatesForTransactionDate,
   isResidentContractWhtCode,
+  isWHTRateCodeValidForDate,
 } from "@/lib/wht"
 import { readApiJson } from "@/lib/readApiJson"
 import { decideReceiptCurrency } from "@/lib/ocr/receiptCurrencyMode"
@@ -87,6 +89,12 @@ export default function CreateBillPage() {
   const [applyTaxes, setApplyTaxes] = useState(true)
   const [applyWHT, setApplyWHT] = useState(false)
   const [whtRateCode, setWhtRateCode] = useState("GH_SVC_75")
+
+  useEffect(() => {
+    if (!isWHTRateCodeValidForDate(whtRateCode, issueDate)) {
+      setWhtRateCode(getDefaultWHTRateCodeForDate(issueDate))
+    }
+  }, [issueDate, whtRateCode])
   const [status, setStatus] = useState<"draft" | "open">("draft")
   const [businessCountry, setBusinessCountry] = useState<string | null>(null)
   const [currencySymbol, setCurrencySymbol] = useState<string>("")
@@ -624,8 +632,9 @@ export default function CreateBillPage() {
     : (activeTaxResult.grandTotal - (activeTaxResult.totalTax ?? 0))
   const whtBaseGhs =
     fxEnabled && fxRate ? whtBase * (Number(fxRate) || 0) : whtBase
+  const whtRateOptions = getWHTRatesForTransactionDate(issueDate)
   const selectedWHTRate =
-    GH_WHT_RATES.find((r) => r.code === whtRateCode) ?? GH_WHT_RATES[0]
+    whtRateOptions.find((r) => r.code === whtRateCode) ?? whtRateOptions[0]
   const whtCalcResult = applyWHT
     ? calculateWHTForRate({
         baseAmount: whtBase,
@@ -1641,7 +1650,7 @@ export default function CreateBillPage() {
                       onChange={(e) => setWhtRateCode(e.target.value)}
                       className="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-slate-100 focus:border-slate-400 w-full"
                     >
-                      {GH_WHT_RATES.map(r => (
+                      {whtRateOptions.map(r => (
                         <option key={r.code} value={r.code}>{r.name}</option>
                       ))}
                     </select>

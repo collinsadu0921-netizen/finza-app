@@ -179,6 +179,49 @@ export const LEGACY_WHT_RATES: WHTRate[] = [
   },
 ]
 
+/**
+ * WHT categories available for a transaction date.
+ *
+ * Pre-2026 uses only codes that existed before 2026-01-01 in the configured
+ * rate table. Current dates use the current GRA categories. This is a UI
+ * helper; the server resolver remains authoritative.
+ */
+export const HISTORICAL_WHT_RATES: WHTRate[] = [
+  LEGACY_WHT_RATES.find((rate) => rate.code === "GH_SVC_5")!,
+  LEGACY_WHT_RATES.find((rate) => rate.code === "GH_RENT_8")!,
+  LEGACY_WHT_RATES.find((rate) => rate.code === "GH_NR_20")!,
+  GH_WHT_RATES.find((rate) => rate.code === "GH_GOODS_3")!,
+  GH_WHT_RATES.find((rate) => rate.code === "GH_DIV_8")!,
+  GH_WHT_RATES.find((rate) => rate.code === "GH_INT_8")!,
+  GH_WHT_RATES.find((rate) => rate.code === "GH_MGMT_20")!,
+].filter(Boolean)
+
+export function getWHTRatesForTransactionDate(
+  transactionDate: string | null | undefined
+): WHTRate[] {
+  const date = String(transactionDate || "").slice(0, 10)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(date) && date < "2026-01-01") {
+    return HISTORICAL_WHT_RATES
+  }
+  return GH_WHT_RATES
+}
+
+export function getDefaultWHTRateCodeForDate(
+  transactionDate: string | null | undefined
+): string {
+  return getWHTRatesForTransactionDate(transactionDate)[0]?.code ?? "GH_SVC_75"
+}
+
+export function isWHTRateCodeValidForDate(
+  code: string | null | undefined,
+  transactionDate: string | null | undefined
+): boolean {
+  if (!code) return false
+  return getWHTRatesForTransactionDate(transactionDate).some(
+    (rate) => rate.code === code
+  )
+}
+
 export function isResidentContractWhtCode(
   code: string | null | undefined
 ): boolean {

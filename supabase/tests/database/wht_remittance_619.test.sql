@@ -67,13 +67,20 @@ BEGIN
     RAISE EXCEPTION 'TEST_SETUP: chart 5200 missing for new tenant';
   END IF;
 
+  -- Schema-only clones do not seed the WHT rate table. The remittance RPC now
+  -- requires stored rate-code evidence on the source bill.
+  IF NOT EXISTS (SELECT 1 FROM public.wht_rates WHERE code = 'GH_SVC_5') THEN
+    INSERT INTO public.wht_rates (code, name, rate, effective_from, active)
+    VALUES ('GH_SVC_5', 'Professional services (historical)', 0.05, DATE '2000-01-01', TRUE);
+  END IF;
+
   INSERT INTO public.bills (
     business_id, supplier_name, bill_number, issue_date, due_date, status,
-    subtotal, total_tax, total, wht_applicable, wht_rate, wht_amount,
+    subtotal, total_tax, total, wht_applicable, wht_rate, wht_rate_code, wht_amount,
     bill_type, tax_lines
   ) VALUES (
     v_biz, '619 WHT Supplier', 'TEST-WHT-619', CURRENT_DATE, CURRENT_DATE, 'draft',
-    100, 0, 100, TRUE, 0.05, 5,
+    100, 0, 100, TRUE, 0.05, 'GH_SVC_5', 5,
     'standard', '[]'::jsonb
   )
   RETURNING id INTO v_bill;
@@ -98,11 +105,11 @@ BEGIN
   -- A draft bill cannot be remitted.
   INSERT INTO public.bills (
     business_id, supplier_name, bill_number, issue_date, due_date, status,
-    subtotal, total_tax, total, wht_applicable, wht_rate, wht_amount,
+    subtotal, total_tax, total, wht_applicable, wht_rate, wht_rate_code, wht_amount,
     bill_type, tax_lines
   ) VALUES (
     v_biz, '619 Draft WHT Supplier', 'TEST-WHT-619-DRAFT', CURRENT_DATE, CURRENT_DATE, 'draft',
-    100, 0, 100, TRUE, 0.05, 5,
+    100, 0, 100, TRUE, 0.05, 'GH_SVC_5', 5,
     'standard', '[]'::jsonb
   )
   RETURNING id INTO v_draft_bill;
@@ -217,16 +224,47 @@ BEGIN
       END IF;
   END;
 
-  -- Payment WHT bounds are enforced at the database boundary.
-  INSERT INTO public.invoices (business_id) VALUES (v_biz) RETURNING id INTO v_invoice;
+  -- Payment WHT bounds and cumulative entitlement are enforced at the
+  -- database boundary. Ledger posting is unrelated to this guard, so the
+  -- posting/status triggers are disabled for this fixture only.
+  ALTER TABLE public.payments DISABLE TRIGGER trigger_auto_post_payment;
+  ALTER TABLE public.payments DISABLE TRIGGER trigger_partial_payment_alert;
+  ALTER TABLE public.payments DISABLE TRIGGER trigger_update_invoice_status;
+
+  INSERT INTO public.invoices (
+    business_id, wht_receivable_applicable, wht_receivable_amount
+  ) VALUES (
+    v_biz, TRUE, 5
+  ) RETURNING id INTO v_invoice;
+
   BEGIN
     INSERT INTO public.payments (business_id, invoice_id, amount, date, method, wht_amount)
     VALUES (v_biz, v_invoice, 10, CURRENT_DATE, 'cash', 20);
     RAISE EXCEPTION 'TEST_FAILED: payment WHT above amount was accepted';
   EXCEPTION
-    WHEN check_violation THEN
-      NULL;
+    WHEN OTHERS THEN
+      IF SQLERRM NOT LIKE '%WHT_PAYMENT_EXCEEDS_AMOUNT%' THEN
+        RAISE;
+      END IF;
   END;
+
+  INSERT INTO public.payments (business_id, invoice_id, amount, date, method, wht_amount)
+  VALUES (v_biz, v_invoice, 50, CURRENT_DATE, 'cash', 5);
+
+  BEGIN
+    INSERT INTO public.payments (business_id, invoice_id, amount, date, method, wht_amount)
+    VALUES (v_biz, v_invoice, 10, CURRENT_DATE, 'cash', 1);
+    RAISE EXCEPTION 'TEST_FAILED: cumulative payment WHT above invoice entitlement was accepted';
+  EXCEPTION
+    WHEN OTHERS THEN
+      IF SQLERRM NOT LIKE '%WHT_PAYMENT_CUMULATIVE_EXCEEDED%' THEN
+        RAISE;
+      END IF;
+  END;
+
+  ALTER TABLE public.payments ENABLE TRIGGER trigger_auto_post_payment;
+  ALTER TABLE public.payments ENABLE TRIGGER trigger_partial_payment_alert;
+  ALTER TABLE public.payments ENABLE TRIGGER trigger_update_invoice_status;
 
   RAISE NOTICE 'PASS: WHT payment validation and atomic remittance (619)';
 END $$;
