@@ -111,6 +111,13 @@ BEGIN
 
   UPDATE public.vat_returns SET status = 'submitted' WHERE id = v_return;
 
+  -- Exercise the Professional-tier payment path. The setup journal above used
+  -- the Business tier for the direct-call guard; the payment RPC must post for
+  -- a Professional-tier VAT tenant through its internal system authority.
+  UPDATE public.businesses
+  SET service_subscription_tier = 'professional'
+  WHERE id = v_biz;
+
   -- Overlapping active return is rejected without touching the existing row.
   BEGIN
     INSERT INTO public.vat_returns (
