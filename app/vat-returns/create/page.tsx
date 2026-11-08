@@ -51,8 +51,16 @@ function CreateVatReturnContent() {
       const data = await response.json()
 
       if (response.ok) {
-        setCalculation(data.calculation)
-        return data.calculation
+        const merged = {
+          ...data.calculation,
+          warnings: [
+            ...(Array.isArray(data.calculation?.warnings) ? data.calculation.warnings : []),
+            ...(Array.isArray(data.warnings) ? data.warnings : []),
+          ],
+          data_quality_exception: data.data_quality_exception ?? null,
+        }
+        setCalculation(merged)
+        return merged
       } else {
         toast.showToast(data.error || "Error calculating VAT", "error")
         return null
@@ -222,6 +230,12 @@ function CreateVatReturnContent() {
                     <div className="space-y-1 text-sm">
                       {[
                         { label: "Taxable Sales", value: calculation.total_taxable_sales },
+                        ...(Number(calculation.total_zero_rated_sales || 0) > 0
+                          ? [{ label: "of which zero-rated", value: calculation.total_zero_rated_sales }]
+                          : []),
+                        ...(Number(calculation.total_exempt_sales || 0) > 0
+                          ? [{ label: "Exempt Sales", value: calculation.total_exempt_sales }]
+                          : []),
                         { label: "NHIL (2.5%)", value: calculation.total_output_nhil },
                         { label: "GETFund (2.5%)", value: calculation.total_output_getfund },
                         { label: "VAT (15%)", value: calculation.total_output_vat },
@@ -248,6 +262,12 @@ function CreateVatReturnContent() {
                     <div className="space-y-1 text-sm">
                       {[
                         { label: "Taxable Purchases", value: calculation.total_taxable_purchases },
+                        ...(Number(calculation.total_zero_rated_purchases || 0) > 0
+                          ? [{ label: "of which zero-rated", value: calculation.total_zero_rated_purchases }]
+                          : []),
+                        ...(Number(calculation.total_exempt_purchases || 0) > 0
+                          ? [{ label: "Exempt Purchases", value: calculation.total_exempt_purchases }]
+                          : []),
                         { label: "NHIL (2.5%)", value: calculation.total_input_nhil },
                         { label: "GETFund (2.5%)", value: calculation.total_input_getfund },
                         { label: "VAT (15%)", value: calculation.total_input_vat },
@@ -349,6 +369,25 @@ function CreateVatReturnContent() {
                       </div>
                     </div>
                   </div>
+
+                  {(calculation.data_quality_exception ||
+                    (Array.isArray(calculation.warnings) && calculation.warnings.length > 0)) && (
+                    <div className="px-6 py-5 border-b border-amber-100 dark:border-amber-900/40 bg-amber-50 dark:bg-amber-950/20">
+                      <p className="text-xs font-semibold text-amber-800 dark:text-amber-300 uppercase tracking-wider mb-2">
+                        Data quality review
+                      </p>
+                      {calculation.data_quality_exception && (
+                        <p className="text-sm font-medium text-amber-900 dark:text-amber-200 mb-2">
+                          {calculation.data_quality_exception.message}
+                        </p>
+                      )}
+                      <ul className="list-disc pl-5 space-y-1 text-xs text-amber-800 dark:text-amber-300">
+                        {(calculation.warnings || []).map((warning: string, index: number) => (
+                          <li key={index}>{warning}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
 
                   {/* Notes */}
                   <div className="px-6 py-5">

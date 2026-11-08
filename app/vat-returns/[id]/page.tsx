@@ -20,12 +20,16 @@ type VatReturn = {
   period_end_date: string
   status: string
   total_taxable_sales: number
+  total_zero_rated_sales?: number
+  total_exempt_sales?: number
   total_output_nhil: number
   total_output_getfund: number
   total_output_covid: number
   total_output_vat: number
   total_output_tax: number
   total_taxable_purchases: number
+  total_zero_rated_purchases?: number
+  total_exempt_purchases?: number
   total_input_nhil: number
   total_input_getfund: number
   total_input_covid: number
@@ -268,12 +272,16 @@ export default function VatReturnViewPage() {
 
       const updateData = {
         total_taxable_sales: calculation.total_taxable_sales,
+        total_zero_rated_sales: calculation.total_zero_rated_sales,
+        total_exempt_sales: calculation.total_exempt_sales,
         total_output_nhil: calculation.total_output_nhil,
         total_output_getfund: calculation.total_output_getfund,
         total_output_covid: calculation.total_output_covid,
         total_output_vat: calculation.total_output_vat,
         total_output_tax: calculation.total_output_tax,
         total_taxable_purchases: calculation.total_taxable_purchases,
+        total_zero_rated_purchases: calculation.total_zero_rated_purchases,
+        total_exempt_purchases: calculation.total_exempt_purchases,
         total_input_nhil: calculation.total_input_nhil,
         total_input_getfund: calculation.total_input_getfund,
         total_input_covid: calculation.total_input_covid,
@@ -601,11 +609,23 @@ export default function VatReturnViewPage() {
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between text-gray-500">
                   <span className="flex items-center gap-1.5">
-                    Taxable Sales (derived)
+                    Taxable Sales (classified)
                     <span className="text-xs font-mono text-gray-400">[Box {GRA_VAT3_BOXES.box2.boxNumber}]</span>
                   </span>
                   <span className="font-medium text-gray-700">₵{Number(vatReturn.total_taxable_sales).toFixed(2)}</span>
                 </div>
+                {Number(vatReturn.total_zero_rated_sales || 0) > 0 && (
+                  <div className="flex justify-between text-gray-500">
+                    <span>of which zero-rated</span>
+                    <span>{formatCedi(Number(vatReturn.total_zero_rated_sales || 0))}</span>
+                  </div>
+                )}
+                {Number(vatReturn.total_exempt_sales || 0) > 0 && (
+                  <div className="flex justify-between text-gray-500">
+                    <span>Exempt Sales</span>
+                    <span>{formatCedi(Number(vatReturn.total_exempt_sales || 0))}</span>
+                  </div>
+                )}
                 <div className="flex justify-between text-gray-500">
                   <span className="flex items-center gap-1.5">
                     NHIL (2.5%)
@@ -654,11 +674,23 @@ export default function VatReturnViewPage() {
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between text-gray-500">
                   <span className="flex items-center gap-1.5">
-                    Taxable Purchases (derived)
+                    Taxable Purchases (classified)
                     <span className="text-xs font-mono text-gray-400">[Box {GRA_VAT3_BOXES.box9.boxNumber}]</span>
                   </span>
                   <span className="font-medium text-gray-700">₵{Number(vatReturn.total_taxable_purchases).toFixed(2)}</span>
                 </div>
+                {Number(vatReturn.total_zero_rated_purchases || 0) > 0 && (
+                  <div className="flex justify-between text-gray-500">
+                    <span>of which zero-rated</span>
+                    <span>{formatCedi(Number(vatReturn.total_zero_rated_purchases || 0))}</span>
+                  </div>
+                )}
+                {Number(vatReturn.total_exempt_purchases || 0) > 0 && (
+                  <div className="flex justify-between text-gray-500">
+                    <span>Exempt Purchases</span>
+                    <span>{formatCedi(Number(vatReturn.total_exempt_purchases || 0))}</span>
+                  </div>
+                )}
                 <div className="flex justify-between text-gray-500">
                   <span className="flex items-center gap-1.5">
                     NHIL (2.5%)

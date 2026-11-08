@@ -80,26 +80,62 @@ describe("calculateVatReturnTotals", () => {
       exemptPurchases: 2,
     })
 
-    expect(result.total_taxable_sales).toBe(100)
+    // Box 2/9 include zero-rated taxable supplies but exclude exempt supplies.
+    expect(result.total_taxable_sales).toBe(150)
+    expect(result.total_standard_rated_sales).toBe(100)
     expect(result.total_zero_rated_sales).toBe(50)
     expect(result.total_exempt_sales).toBe(25)
-    expect(result.total_taxable_purchases).toBe(40)
+    expect(result.total_taxable_purchases).toBe(45)
+    expect(result.total_standard_rated_purchases).toBe(40)
     expect(result.total_zero_rated_purchases).toBe(5)
     expect(result.total_exempt_purchases).toBe(2)
     expect(result.taxable_bases_source).toBe("provided")
+    expect(result.taxable_bases_complete).toBe(true)
     expect(result.warnings).toEqual([])
   })
 
-  it("warns when taxable bases fall back to VAT / 15%", () => {
+  it("does not derive taxable bases from VAT / 15%", () => {
     const result = calculateVatReturnTotals({
       rows: rows({ VAT: { credits: 15, debits: 0 } }),
       periodEndDate: "2026-03-31",
     })
 
+    expect(result.total_taxable_sales).toBe(0)
+    expect(result.total_taxable_purchases).toBe(0)
+    expect(result.taxable_bases_source).toBe("unavailable")
+    expect(result.taxable_bases_complete).toBe(false)
+    expect(result.warnings).toHaveLength(2)
+    expect(result.warnings.join(" ")).toContain("transaction evidence")
+  })
+
+  it("supports a zero-rated-only return with no output VAT", () => {
+    const result = calculateVatReturnTotals({
+      rows: rows({}),
+      periodEndDate: "2026-03-31",
+      taxableSales: 0,
+      zeroRatedSales: 100,
+      taxablePurchases: 0,
+    })
+
+    expect(result.total_output_vat).toBe(0)
     expect(result.total_taxable_sales).toBe(100)
-    expect(result.taxable_bases_source).toBe("derived_from_vat")
-    expect(result.warnings).toHaveLength(1)
-    expect(result.warnings[0]).toContain("Zero-rated and exempt")
+    expect(result.total_zero_rated_sales).toBe(100)
+    expect(result.taxable_bases_source).toBe("provided")
+    expect(result.taxable_bases_complete).toBe(true)
+    expect(result.warnings).toEqual([])
+  })
+
+  it("keeps exempt supplies outside taxable sales", () => {
+    const result = calculateVatReturnTotals({
+      rows: rows({ VAT: { credits: 15, debits: 0 } }),
+      periodEndDate: "2026-03-31",
+      taxableSales: 100,
+      exemptSales: 25,
+      taxablePurchases: 0,
+    })
+
+    expect(result.total_taxable_sales).toBe(100)
+    expect(result.total_exempt_sales).toBe(25)
   })
 
   it("does not treat COVID as part of the post-2026 net", () => {

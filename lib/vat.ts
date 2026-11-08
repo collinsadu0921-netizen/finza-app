@@ -70,6 +70,7 @@ export function extractTaxFromInclusivePrice(
   // Use shared versioning logic - default to current date for backward compatibility
   const dateToUse = effectiveDate || new Date().toISOString().split('T')[0]
   const rates = getGhanaTaxRatesForDate(dateToUse)
+  const simplified = isSimplifiedRegime(dateToUse)
   
   // Use shared multiplier calculation (dynamic, not hardcoded)
   // For pre-2026: multiplier = 1.219 (compound regime)
@@ -83,7 +84,11 @@ export function extractTaxFromInclusivePrice(
   const nhil = basePrice * rates.nhil
   const getfund = basePrice * rates.getfund
   const covid = basePrice * rates.covid
-  const vat_base = basePrice + nhil + getfund + covid
+  // Pre-2026 VAT is compounded on the levies. Post-2026 (Act 1151) VAT,
+  // NHIL and GETFund all apply to the same base.
+  const vat_base = simplified
+    ? basePrice
+    : basePrice + nhil + getfund + covid
   const vat = vat_base * rates.vat
 
   const total_tax = nhil + getfund + covid + vat
@@ -345,9 +350,12 @@ export function calculateCartTaxes(
     const getfund = taxableSubtotal * rates.getfund
     const covid = 0 // RETAIL: COVID Levy removed
     
-    // VAT calculation for retail (always simplified - excludes COVID):
-    // RETAIL: VAT on (base + NHIL + GETFund) - COVID excluded
-    const vat_base = taxableSubtotal + nhil + getfund
+    // Pre-2026 retail VAT is compounded on the levies (COVID is excluded
+    // from retail pricing). Post-2026 Act 1151 applies VAT, NHIL and GETFund
+    // to the same base.
+    const vat_base = simplified
+      ? taxableSubtotal
+      : taxableSubtotal + nhil + getfund
     const vat = vat_base * rates.vat
 
   const total_tax = nhil + getfund + covid + vat
