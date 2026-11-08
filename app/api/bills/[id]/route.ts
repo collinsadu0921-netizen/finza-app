@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { calculateGhanaTaxesFromLineItems, calculateBaseFromTotalIncludingTaxes } from "@/lib/ghanaTaxEngine"
 import { calculateWHTForRate } from "@/lib/wht"
+import { ghanaTaxEngineCanonical } from "@/lib/taxEngine/jurisdictions/ghana"
+import { deriveLegacyTaxColumnsFromTaxLines } from "@/lib/taxEngine/helpers"
+import { toBillTaxLinesJsonb, emptyBillTaxResult } from "@/lib/bills/billTaxLines"
 import { resolveWhtRateForDate, WhtRateResolutionError } from "@/lib/wht/rateResolver"
 import { createAuditLog } from "@/lib/auditLog"
 import { billSupplierBalanceRemaining } from "@/lib/billBalance"
@@ -159,7 +161,7 @@ export async function PUT(
 
     const { data: existingBill, error: billLookupError } = await supabase
       .from("bills")
-      .select("id, status, total, subtotal, issue_date, wht_applicable, wht_rate_code, wht_rate, wht_amount, currency_code, fx_rate, business_id")
+      .select("id, status, total, subtotal, issue_date, material_id, wht_applicable, wht_rate_code, wht_rate, wht_amount, currency_code, fx_rate, business_id")
       .eq("id", billId)
       .is("deleted_at", null)
       .maybeSingle()
@@ -246,6 +248,19 @@ export async function PUT(
     }
 
     const isImportBill = bill_type === "import"
+    const effectiveIssueDate =
+      issue_date !== undefined ? issue_date : existingBill.issue_date
+    const effectiveImportMaterialId =
+      body_material_id !== undefined ? body_material_id : existingBill.material_id
+    const hasMaterialLines =
+      (items ?? []).some(
+        (item: any) =>
+          item.material_id != null && String(item.material_id).trim() !== ""
+      ) ||
+      (isImportBill &&
+        effectiveImportMaterialId != null &&
+        String(effectiveImportMaterialId).trim() !== "")
+    const absorptionAccountCode = hasMaterialLines ? "1450" : "5200"
 
     if (isImportBill) {
       // ── Import bill: forward-calculate taxes on the VAT base ──────────────
@@ -261,16 +276,29 @@ export async function PUT(
 
       const applyGhanaTax = apply_taxes !== undefined ? apply_taxes : true
       let nhil = 0, getfund = 0, covid = 0, vat = 0, totalTax = 0
+      let billTaxLines: Record<string, unknown>
 
       if (applyGhanaTax) {
-        const taxResult = calculateGhanaTaxesFromLineItems([
-          { quantity: 1, unit_price: vatBase, discount_amount: 0 },
-        ])
-        nhil     = taxResult.nhil     ?? 0
-        getfund  = taxResult.getfund  ?? 0
-        covid    = taxResult.covid    ?? 0
-        vat      = taxResult.vat      ?? 0
-        totalTax = taxResult.totalTax ?? 0
+        const canonical = ghanaTaxEngineCanonical.calculateFromAmount(vatBase, {
+          jurisdiction: "GH",
+          effectiveDate: effectiveIssueDate,
+          taxInclusive: false,
+          transactionType: "purchase",
+        })
+        const legacy = deriveLegacyTaxColumnsFromTaxLines(canonical.lines)
+        nhil = legacy.nhil
+        getfund = legacy.getfund
+        covid = legacy.covid
+        vat = legacy.vat
+        totalTax = canonical.total_tax
+        billTaxLines = toBillTaxLinesJsonb(canonical, absorptionAccountCode)
+      } else {
+        const canonical = emptyBillTaxResult({
+          baseAmount: vatBase,
+          effectiveDate: effectiveIssueDate,
+          pricingMode: "exclusive",
+        })
+        billTaxLines = toBillTaxLinesJsonb(canonical, absorptionAccountCode)
       }
 
       const grandTotal = vatBase + totalTax + clearingAmt
@@ -294,6 +322,10 @@ export async function PUT(
       updateData.vat                      = vat
       updateData.total_tax                = totalTax
       updateData.total                    = grandTotal
+      updateData.tax_lines                = billTaxLines
+      updateData.tax_engine_code          = "ghana"
+      updateData.tax_engine_effective_from = effectiveIssueDate
+      updateData.tax_jurisdiction         = "GH"
 
     } else if (items && items.length > 0) {
       // ── Standard bill: reverse-calculate taxes from tax-inclusive total ───
@@ -305,22 +337,41 @@ export async function PUT(
         return sum + lineTotal - discount
       }, 0)
 
-      let taxResult
+      let taxResult: {
+        subtotalBeforeTax: number
+        nhil: number
+        getfund: number
+        covid: number
+        vat: number
+        totalTax: number
+        grandTotal: number
+      }
+      let billTaxLines: Record<string, unknown>
+
       if (apply_taxes !== undefined ? apply_taxes : true) {
-        const { baseAmount, taxBreakdown } = calculateBaseFromTotalIncludingTaxes(
+        const canonical = ghanaTaxEngineCanonical.reverseCalculate(
           subtotalIncludingTaxes,
-          true
+          {
+            jurisdiction: "GH",
+            effectiveDate: effectiveIssueDate,
+            taxInclusive: true,
+            transactionType: "purchase",
+          }
         )
+        const legacy = deriveLegacyTaxColumnsFromTaxLines(canonical.lines)
         taxResult = {
-          subtotalBeforeTax: baseAmount,
-          nhil: taxBreakdown.nhil,
-          getfund: taxBreakdown.getfund,
-          covid: taxBreakdown.covid,
-          vat: taxBreakdown.vat,
-          totalTax: taxBreakdown.totalTax,
+          subtotalBeforeTax: canonical.base_amount,
+          ...legacy,
+          totalTax: canonical.total_tax,
           grandTotal: subtotalIncludingTaxes,
         }
+        billTaxLines = toBillTaxLinesJsonb(canonical, absorptionAccountCode)
       } else {
+        const canonical = emptyBillTaxResult({
+          baseAmount: subtotalIncludingTaxes,
+          effectiveDate: effectiveIssueDate,
+          pricingMode: "inclusive",
+        })
         taxResult = {
           subtotalBeforeTax: subtotalIncludingTaxes,
           nhil: 0,
@@ -330,6 +381,7 @@ export async function PUT(
           totalTax: 0,
           grandTotal: subtotalIncludingTaxes,
         }
+        billTaxLines = toBillTaxLinesJsonb(canonical, absorptionAccountCode)
       }
 
       updateData.subtotal   = taxResult.subtotalBeforeTax
@@ -339,6 +391,10 @@ export async function PUT(
       updateData.vat        = taxResult.vat
       updateData.total_tax  = taxResult.totalTax
       updateData.total      = taxResult.grandTotal
+      updateData.tax_lines  = billTaxLines
+      updateData.tax_engine_code = "ghana"
+      updateData.tax_engine_effective_from = effectiveIssueDate
+      updateData.tax_jurisdiction = "GH"
       updateData.material_id = null
       updateData.quantity = null
     }

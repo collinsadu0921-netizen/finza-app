@@ -396,29 +396,30 @@ export const ghanaTaxEngine: TaxEngine = {
     //
     // Approach:
     //   1. Drop any ROUNDING lines from the forward result.
-    //   2. Sum only the credit-side tax amounts (NHIL, GETFund, VAT).
-    //   3. anchoredSubtotal = totalInclusive − creditTaxSum.
+    //   2. Sum every non-rounding tax line. Sales lines are credits; purchase
+    //      lines are debits or, for pre-2026 non-creditable levies, absorbed
+    //      into cost with no ledger side.
+    //   3. anchoredSubtotal = totalInclusive − taxSum.
     //      In PostgreSQL NUMERIC (exact decimal) this makes:
-    //        Cr Revenue + Cr NHIL + Cr GETFund + Cr VAT = totalInclusive  ✓
-    //   4. tax_total = creditTaxSum (the real charges, not roundedTotalTax).
+    //        Sales:    Cr Revenue + Cr taxes = totalInclusive
+    //        Purchase: Dr Expense/asset + Dr taxes = totalInclusive
+    //   4. tax_total = taxSum (the real charges, not roundedTotalTax).
 
     const nonRoundingLines = result.taxLines.filter(l => l.code !== 'ROUNDING')
 
-    const creditTaxSum = roundGhanaTax(
-      nonRoundingLines
-        .filter(l => l.ledger_side === 'credit')
-        .reduce((sum, l) => sum + l.amount, 0)
+    const taxSum = roundGhanaTax(
+      nonRoundingLines.reduce((sum, l) => sum + l.amount, 0)
     )
 
-    // Revenue = invoice total − tax credits.  Stored as invoice.subtotal.
-    // PostgreSQL NUMERIC ensures anchoredSubtotal + creditTaxSum = totalInclusive exactly.
-    const anchoredSubtotal = roundGhanaTax(totalInclusive - creditTaxSum)
+    // Base = total − tax charges. Stored as invoice.subtotal or bill.subtotal.
+    // PostgreSQL NUMERIC ensures anchoredSubtotal + taxSum = totalInclusive exactly.
+    const anchoredSubtotal = roundGhanaTax(totalInclusive - taxSum)
 
     return {
       ...result,
       taxLines: nonRoundingLines,         // no 7990 ROUNDING line for reverse calc
-      subtotal_excl_tax: anchoredSubtotal, // revenue credit — anchored to user's total
-      tax_total: creditTaxSum,             // actual sum charged (may differ from roundedTotalTax by 0.01)
+      subtotal_excl_tax: anchoredSubtotal, // base — anchored to user's total
+      tax_total: taxSum,                   // actual sum charged (may differ from roundedTotalTax by 0.01)
       total_incl_tax: totalInclusive,      // exact user input — never re-derived from components
     }
   },
