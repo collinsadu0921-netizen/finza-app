@@ -22,6 +22,8 @@ const unavailableClient = {
   }),
 } as any
 
+const missingRowClient = clientReturning({ data: null, error: null })
+
 const dbRow = (overrides: Record<string, unknown> = {}) => ({
   code: "GH_SVC_75",
   name: "Resident services - 7.5%",
@@ -43,9 +45,15 @@ describe("resolveWhtRateForDate", () => {
     expect(result.effectiveFrom).toBe("2026-01-01")
   })
 
-  it("falls back to the current static rate only for current dates", async () => {
+  it("fails closed when the rate table cannot be read", async () => {
+    await expect(
+      resolveWhtRateForDate(unavailableClient, "GH_SVC_75", "2026-01-01")
+    ).rejects.toMatchObject({ code: "WHT_RATE_UNAVAILABLE" })
+  })
+
+  it("falls back to the current static rate only when no row exists", async () => {
     const result = await resolveWhtRateForDate(
-      unavailableClient,
+      missingRowClient,
       "GH_SVC_75",
       "2026-01-01"
     )
@@ -56,7 +64,7 @@ describe("resolveWhtRateForDate", () => {
 
   it("falls back to the historical static rate for historical dates", async () => {
     const result = await resolveWhtRateForDate(
-      unavailableClient,
+      missingRowClient,
       "GH_SVC_5",
       "2025-12-31"
     )
@@ -67,8 +75,19 @@ describe("resolveWhtRateForDate", () => {
 
   it("does not substitute the current rate for a historical transaction", async () => {
     await expect(
-      resolveWhtRateForDate(unavailableClient, "GH_SVC_75", "2025-12-31")
+      resolveWhtRateForDate(missingRowClient, "GH_SVC_75", "2025-12-31")
     ).rejects.toMatchObject({ code: "WHT_CATEGORY_INVALID" })
+  })
+
+  it("rejects a malformed configured rate", async () => {
+    const supabase = clientReturning({
+      data: dbRow({ rate: "not-a-number" }),
+      error: null,
+    })
+
+    await expect(
+      resolveWhtRateForDate(supabase, "GH_SVC_75", "2026-02-15")
+    ).rejects.toMatchObject({ code: "WHT_RATE_INVALID" })
   })
 
   it("does not allow an inactive current rate", async () => {

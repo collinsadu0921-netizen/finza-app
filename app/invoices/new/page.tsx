@@ -13,10 +13,12 @@ import Toast from "@/components/Toast"
 import { getCurrencySymbol } from "@/lib/currency"
 import { normalizeCountry } from "@/lib/payments/eligibility"
 import {
-  GH_WHT_RATES,
   calculateWHTForRate,
   formatWHTRate,
+  getDefaultWHTRateCodeForDate,
+  getWHTRatesForTransactionDate,
   isResidentContractWhtCode,
+  isWHTRateCodeValidForDate,
 } from "@/lib/wht"
 
 // FINZA Design System Components (Phase 2 Refactor)
@@ -319,6 +321,12 @@ function NewInvoicePageContent() {
   // WHT suffered — when a corporate customer withholds tax from payment
   const [applyWHTReceivable, setApplyWHTReceivable] = useState(false)
   const [whtReceivableRateCode, setWhtReceivableRateCode] = useState("GH_SVC_75")
+
+  useEffect(() => {
+    if (!isWHTRateCodeValidForDate(whtReceivableRateCode, issueDate)) {
+      setWhtReceivableRateCode(getDefaultWHTRateCodeForDate(issueDate))
+    }
+  }, [issueDate, whtReceivableRateCode])
 
   // Symbol used for all amount displays — switches to FX symbol when FX is enabled
   const displaySymbol = fxEnabled && fxCurrencyCode
@@ -794,8 +802,9 @@ function NewInvoicePageContent() {
   // WHT receivable — applied on pre-tax base, NOT the VAT-inclusive total.
   // GRA: you do not withhold tax on tax (NHIL/GETFund/VAT are excluded from the WHT base).
   // baseSubtotal = subtotal_excl_tax when Ghana tax is on; equals subtotal when tax is off.
+  const whtRateOptions = getWHTRatesForTransactionDate(issueDate)
   const selectedWHTRecvRate =
-    GH_WHT_RATES.find((r) => r.code === whtReceivableRateCode) ?? GH_WHT_RATES[0]
+    whtRateOptions.find((r) => r.code === whtReceivableRateCode) ?? whtRateOptions[0]
   const whtBaseGhs =
     fxEnabled && fxRate
       ? baseSubtotal * (Number(fxRate) || 0)
@@ -1480,7 +1489,7 @@ function NewInvoicePageContent() {
                         className="border-amber-300 bg-white focus:border-amber-400 focus:ring-amber-400/40 dark:bg-slate-800"
                         size="sm"
                       >
-                        {GH_WHT_RATES.map(r => (
+                        {whtRateOptions.map(r => (
                           <option key={r.code} value={r.code}>{r.name}</option>
                         ))}
                       </NativeSelect>

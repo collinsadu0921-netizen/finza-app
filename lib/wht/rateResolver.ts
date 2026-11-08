@@ -16,6 +16,7 @@ export type ResolvedWhtRate = WHTRate & {
 export type WhtRateResolutionErrorCode =
   | "WHT_CATEGORY_INVALID"
   | "WHT_RATE_UNAVAILABLE"
+  | "WHT_RATE_INVALID"
   | "WHT_TRANSACTION_DATE_INVALID"
 
 export class WhtRateResolutionError extends Error {
@@ -123,8 +124,22 @@ export async function resolveWhtRateForDate(
       .limit(1)
       .maybeSingle()
 
-    if (!error && data) {
+    if (error) {
+      throw new WhtRateResolutionError(
+        "WHT_RATE_UNAVAILABLE",
+        "The WHT rate configuration could not be read. Try again or contact support."
+      )
+    }
+
+    if (data) {
       const row = data as WhtRateRow
+      const rate = Number(row.rate)
+      if (!Number.isFinite(rate) || rate <= 0 || rate > 1) {
+        throw new WhtRateResolutionError(
+          "WHT_RATE_INVALID",
+          "The configured WHT rate is invalid. Correct the rate configuration before using this category."
+        )
+      }
       if (row.active === false && date >= CURRENT_RATE_EFFECTIVE_DATE) {
         throw new WhtRateResolutionError(
           "WHT_CATEGORY_INVALID",
@@ -135,7 +150,10 @@ export async function resolveWhtRateForDate(
     }
   } catch (error) {
     if (error instanceof WhtRateResolutionError) throw error
-    // Fall through to the static fallback below.
+    throw new WhtRateResolutionError(
+      "WHT_RATE_UNAVAILABLE",
+      "The WHT rate configuration could not be read. Try again or contact support."
+    )
   }
 
   const fallback = staticRateForDate(normalizedCode, date)
