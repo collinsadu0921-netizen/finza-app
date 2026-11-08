@@ -67,7 +67,7 @@ export async function getTaxControlAccountCodes(
   if (accountCodes.length > 0) {
     const { data: accounts, error: accountsError } = await supabase
       .from("chart_of_accounts")
-      .select("account_code, is_active")
+      .select("account_code, is_active, account_type")
       .eq("business_id", businessId)
       .in("account_code", accountCodes)
 
@@ -77,7 +77,13 @@ export async function getTaxControlAccountCodes(
     }
 
     const activeAccountCodes = new Set(
-      accounts?.filter((acc) => acc.is_active).map((acc) => acc.account_code) || []
+      accounts
+        ?.filter(
+          (acc) =>
+            acc.is_active &&
+            String(acc.account_type || "").toLowerCase() === "liability"
+        )
+        .map((acc) => acc.account_code) || []
     )
 
     Object.keys(resolvedMap).forEach((key) => {
