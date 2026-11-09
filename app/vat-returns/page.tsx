@@ -239,7 +239,7 @@ export default function VatReturnsPage() {
                   <div>
                     <h3 className="text-base font-semibold text-gray-900">Total VAT Liability</h3>
                     <p className="text-xs text-gray-500 mt-1">
-                      Sum of all months' net VAT (Output credits − Input debits on account 2100)
+                      Sum of monthly net VAT: stored filed returns, ledger preview for unfiled months
                     </p>
                   </div>
                   <span className={`text-2xl font-bold ${grandTotalNetVat >= 0 ? "text-red-600" : "text-green-600"}`}>
