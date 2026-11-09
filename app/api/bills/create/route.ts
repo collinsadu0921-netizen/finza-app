@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { waitUntil } from "@vercel/functions"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { getUserRole } from "@/lib/userRoles"
+import { requireAccountingWriteRole } from "@/lib/accounting/requireAccountingWriteRole"
 import { fireAfterAccountingPost } from "@/lib/server/fireAfterAccountingPost"
 import { calculateWHTForRate } from "@/lib/wht"
 import {
@@ -205,11 +205,15 @@ export async function POST(request: NextRequest) {
     // resolve a different owned business and must not be used as an equality
     // gate. Membership/role on the submitted business preserves tenant
     // isolation; the tier/write guard below remains authoritative.
-    const role = await getUserRole(supabase, user.id, business_id)
-    if (!role) {
+    const roleDenied = await requireAccountingWriteRole(
+      supabase,
+      user.id,
+      business_id
+    )
+    if (roleDenied) {
       return NextResponse.json(
-        { error: "Forbidden: no access to this business" },
-        { status: 403 }
+        { success: false, error: roleDenied.error, code: roleDenied.code },
+        { status: roleDenied.status }
       )
     }
 

@@ -5,6 +5,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { createAuditLog } from "@/lib/auditLog"
+import { requireAccountingWriteRole } from "@/lib/accounting/requireAccountingWriteRole"
 import {
   enforceServiceWorkspaceAccess,
   enforceServiceWorkspaceWriteAccess,
@@ -57,6 +58,9 @@ export async function POST(request: NextRequest) {
   try {
     const supabase = await createSupabaseServerClient()
     const { data: { user } } = await supabase.auth.getUser()
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
 
     const body = await request.json()
     const { business_id, bill_ids, remittance_date, reference, notes, payment_account = "1010" } = body
@@ -65,9 +69,21 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "business_id, bill_ids, and remittance_date are required" }, { status: 400 })
     }
 
+    const roleDenied = await requireAccountingWriteRole(
+      supabase,
+      user.id,
+      business_id
+    )
+    if (roleDenied) {
+      return NextResponse.json(
+        { success: false, error: roleDenied.error, code: roleDenied.code },
+        { status: roleDenied.status }
+      )
+    }
+
     const deniedPost = await enforceServiceWorkspaceWriteAccess({
       supabase,
-      userId: user?.id,
+      userId: user.id,
       businessId: business_id,
       minTier: "professional",
     })

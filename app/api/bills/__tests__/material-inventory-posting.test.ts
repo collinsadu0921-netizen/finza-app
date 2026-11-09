@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Bill create: material lines resolve CoA 1450 into bill_items.account_id
  * and fail closed when inventory account is missing.
  */
@@ -19,6 +19,15 @@ jest.mock("@/lib/business", () => ({
 jest.mock("@/lib/userRoles", () => ({
   getUserRole: jest.fn(),
 }))
+jest.mock("@/lib/accounting/requireAccountingWriteRole", () => {
+  const actual = jest.requireActual(
+    "@/lib/accounting/requireAccountingWriteRole"
+  )
+  return {
+    ...actual,
+    requireAccountingWriteRole: jest.fn(),
+  }
+})
 jest.mock("@/lib/auditLog", () => ({
   createAuditLog: jest.fn(() => Promise.resolve()),
 }))
@@ -36,6 +45,7 @@ jest.mock("@/lib/serviceWorkspace/enforceServiceIndustryMinTier", () => ({
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { getUserRole } from "@/lib/userRoles"
+import { requireAccountingWriteRole } from "@/lib/accounting/requireAccountingWriteRole"
 
 const BUSINESS_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 const MATERIAL_ID = "m1111111-1111-4111-8111-111111111111"
@@ -43,7 +53,7 @@ const BILL_ID = "bill1111-1111-4111-8111-111111111111"
 const COA_1450 = "coa14500-1450-4450-8450-145014501450"
 const ACCT_1450 = "acct1450-1450-4450-8450-145014501450"
 
-describe("POST /api/bills/create — material inventory posting intent", () => {
+describe("POST /api/bills/create ÔÇö material inventory posting intent", () => {
   let billItemsInsert: jest.Mock
   let accountsMaybeSingle: jest.Mock
   let coaMaybeSingle: jest.Mock
@@ -56,6 +66,7 @@ describe("POST /api/bills/create — material inventory posting intent", () => {
       industry: "service",
     })
     ;(getUserRole as jest.Mock).mockResolvedValue("owner")
+    ;(requireAccountingWriteRole as jest.Mock).mockResolvedValue(null)
 
     billItemsInsert = jest.fn(() => Promise.resolve({ data: null, error: null }))
     accountsMaybeSingle = jest.fn(() =>

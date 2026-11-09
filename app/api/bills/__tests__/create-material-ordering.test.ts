@@ -1,5 +1,5 @@
-/**
- * Create-as-open: insert draft → insert lines → update status open.
+﻿/**
+ * Create-as-open: insert draft ÔåÆ insert lines ÔåÆ update status open.
  * Item-insert failure never opens/posts; cleanup path covered.
  */
 
@@ -19,6 +19,15 @@ jest.mock("@/lib/business", () => ({
 jest.mock("@/lib/userRoles", () => ({
   getUserRole: jest.fn(),
 }))
+jest.mock("@/lib/accounting/requireAccountingWriteRole", () => {
+  const actual = jest.requireActual(
+    "@/lib/accounting/requireAccountingWriteRole"
+  )
+  return {
+    ...actual,
+    requireAccountingWriteRole: jest.fn(),
+  }
+})
 jest.mock("@/lib/auditLog", () => ({
   createAuditLog: jest.fn(() => Promise.resolve()),
 }))
@@ -36,13 +45,14 @@ jest.mock("@/lib/serviceWorkspace/enforceServiceIndustryMinTier", () => ({
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { getUserRole } from "@/lib/userRoles"
+import { requireAccountingWriteRole } from "@/lib/accounting/requireAccountingWriteRole"
 import { fireAfterAccountingPost } from "@/lib/server/fireAfterAccountingPost"
 
 const BUSINESS_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 const BILL_ID = "bill2222-2222-4222-8222-222222222222"
 const MATERIAL_ID = "m2222222-2222-4222-8222-222222222222"
 
-describe("POST /api/bills/create — draft→lines→open ordering", () => {
+describe("POST /api/bills/create ÔÇö draftÔåÆlinesÔåÆopen ordering", () => {
   let billsInsert: jest.Mock
   let billsUpdate: jest.Mock
   let billsDelete: jest.Mock
@@ -57,6 +67,7 @@ describe("POST /api/bills/create — draft→lines→open ordering", () => {
       industry: "service",
     })
     ;(getUserRole as jest.Mock).mockResolvedValue("owner")
+    ;(requireAccountingWriteRole as jest.Mock).mockResolvedValue(null)
 
     billsInsert = jest.fn((row: { status?: string }) => {
       callOrder.push(`bills.insert:${row.status}`)

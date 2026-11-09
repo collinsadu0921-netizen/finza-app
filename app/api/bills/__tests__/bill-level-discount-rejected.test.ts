@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Non-zero / malformed bill-level header discount is rejected (fail closed).
  * Valid line-level discounts still accepted.
  */
@@ -20,6 +20,15 @@ jest.mock("@/lib/business", () => ({
 jest.mock("@/lib/userRoles", () => ({
   getUserRole: jest.fn(),
 }))
+jest.mock("@/lib/accounting/requireAccountingWriteRole", () => {
+  const actual = jest.requireActual(
+    "@/lib/accounting/requireAccountingWriteRole"
+  )
+  return {
+    ...actual,
+    requireAccountingWriteRole: jest.fn(),
+  }
+})
 jest.mock("@/lib/auditLog", () => ({
   createAuditLog: jest.fn(() => Promise.resolve()),
 }))
@@ -41,6 +50,7 @@ jest.mock("@/lib/serviceWorkspace/enforceServiceWorkspaceAccess", () => ({
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { getUserRole } from "@/lib/userRoles"
+import { requireAccountingWriteRole } from "@/lib/accounting/requireAccountingWriteRole"
 
 const BUSINESS_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 const BILL_ID = "bill4444-4444-4444-8444-444444444444"
@@ -160,6 +170,7 @@ describe("Bill-level discount rejection", () => {
       industry: "service",
     })
     ;(getUserRole as jest.Mock).mockResolvedValue("owner")
+    ;(requireAccountingWriteRole as jest.Mock).mockResolvedValue(null)
     mockCreateClient()
   })
 

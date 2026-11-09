@@ -1,6 +1,7 @@
-import { describe, expect, it, jest, beforeEach } from "@jest/globals"
+﻿import { describe, expect, it, jest, beforeEach } from "@jest/globals"
 import { POST } from "../route"
 import { NextRequest } from "next/server"
+import { requireAccountingWriteRole } from "@/lib/accounting/requireAccountingWriteRole"
 
 jest.mock("@/lib/supabaseServer", () => ({
   createSupabaseServerClient: jest.fn(),
@@ -12,6 +13,15 @@ jest.mock("@/lib/serviceWorkspace/enforceServiceWorkspaceAccess", () => ({
   enforceServiceWorkspaceAccess: jest.fn(() => Promise.resolve(null)),
   enforceServiceWorkspaceWriteAccess: jest.fn(() => Promise.resolve(null)),
 }))
+jest.mock("@/lib/accounting/requireAccountingWriteRole", () => {
+  const actual = jest.requireActual(
+    "@/lib/accounting/requireAccountingWriteRole"
+  )
+  return {
+    ...actual,
+    requireAccountingWriteRole: jest.fn(),
+  }
+})
 
 function setupSupabase(rpcResult: { data?: unknown; error?: unknown }) {
   const rpc = jest.fn(() => Promise.resolve(rpcResult))
@@ -47,6 +57,7 @@ function request(body: Record<string, unknown> = {}) {
 describe("POST /api/wht - atomic remittance", () => {
   beforeEach(() => {
     jest.clearAllMocks()
+    ;(requireAccountingWriteRole as jest.Mock).mockResolvedValue(null)
   })
 
   it("calls the atomic remittance RPC with the selected bills", async () => {
@@ -159,5 +170,39 @@ describe("POST /api/wht - atomic remittance", () => {
 
     const response = await POST(request({ bill_ids: [] }))
     expect(response.status).toBe(400)
+  })
+
+  it("rejects read-only replay before calling the remittance RPC", async () => {
+    const { rpc } = setupSupabase({
+      data: {
+        reused: true,
+        remittance_id: "rem-1",
+        journal_entry_id: "je-1",
+        amount: 125.5,
+      },
+      error: null,
+    })
+    ;(requireAccountingWriteRole as jest.Mock).mockResolvedValue({ status: 403, error: "Forbidden", code: "ACCOUNTING_WRITE_READ_ONLY" })
+
+    const response = await POST(request())
+    expect(response.status).toBe(403)
+    expect(rpc).not.toHaveBeenCalled()
+  })
+
+  it("rejects unauthorized staff replay before calling the remittance RPC", async () => {
+    const { rpc } = setupSupabase({
+      data: {
+        reused: true,
+        remittance_id: "rem-1",
+        journal_entry_id: "je-1",
+        amount: 125.5,
+      },
+      error: null,
+    })
+    ;(requireAccountingWriteRole as jest.Mock).mockResolvedValue({ status: 403, error: "Forbidden", code: "ACCOUNTING_WRITE_READ_ONLY" })
+
+    const response = await POST(request())
+    expect(response.status).toBe(403)
+    expect(rpc).not.toHaveBeenCalled()
   })
 })
