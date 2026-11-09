@@ -1,5 +1,12 @@
 import type { PricingPayload } from "./schema"
 import type { ProposalSectionBlock } from "./schema"
+import {
+  defaultTypographyForTemplate,
+  normalizeAccentColor,
+  normalizeTypography,
+  type ProposalTypography,
+} from "./design"
+import { normalizeTemplateId, type ProposalTemplateId } from "./templates"
 
 export type ProposalRenderBusiness = {
   name: string
@@ -20,12 +27,12 @@ export type ProposalRenderCustomer = {
 }
 
 export type ProposalRenderSection =
-  | { type: "heading"; level: number; text: string; id?: string }
-  | { type: "paragraph"; text: string; id?: string }
-  | { type: "bullet_list"; items: string[]; id?: string }
-  | { type: "image"; src: string; caption?: string; assetId: string; id?: string }
-  | { type: "gallery"; images: { src: string; assetId: string }[]; caption?: string; id?: string }
-  | { type: "divider"; id?: string }
+  | { type: "heading"; level: number; text: string; id?: string; hidden?: boolean }
+  | { type: "paragraph"; text: string; id?: string; hidden?: boolean }
+  | { type: "bullet_list"; items: string[]; id?: string; hidden?: boolean }
+  | { type: "image"; src: string; caption?: string; assetId: string; id?: string; hidden?: boolean }
+  | { type: "gallery"; images: { src: string; assetId: string }[]; caption?: string; id?: string; hidden?: boolean }
+  | { type: "divider"; id?: string; hidden?: boolean }
 
 export type ProposalRenderAttachment = {
   id: string
@@ -36,11 +43,20 @@ export type ProposalRenderAttachment = {
   url: string
 }
 
+export type ProposalPresentation = {
+  templateId: ProposalTemplateId
+  accentColor: string | null
+  typography: ProposalTypography
+  coverAssetId: string | null
+  coverImageUrl: string | null
+}
+
 export type ProposalRenderModel = {
   title: string
   proposal_number: string | null
   status: string
   template_id: string
+  presentation: ProposalPresentation
   /** Resolved for display (proposal override or business default). */
   currency_code: string
   business: ProposalRenderBusiness
@@ -48,6 +64,8 @@ export type ProposalRenderModel = {
   sections: ProposalRenderSection[]
   pricing: PricingPayload
   attachments: ProposalRenderAttachment[]
+  created_at: string | null
+  expires_at: string | null
   /** Proposal public token — for “copy link” in staff preview only */
   public_token?: string | null
 }
@@ -87,11 +105,16 @@ export function normalizeProposalForRender(input: {
   proposal_number?: string | null
   status: string
   template_id: string
+  brand_accent_color?: string | null
+  cover_asset_id?: string | null
+  typography?: string | null
   currency_code?: string | null
   business: ProposalRenderBusiness
   customer: ProposalRenderCustomer | null
   sections: ProposalSectionBlock[]
   pricing: PricingPayload
+  created_at?: string | null
+  expires_at?: string | null
   assets: Array<{
     id: string
     kind: string
@@ -126,16 +149,16 @@ export function normalizeProposalForRender(input: {
   for (const b of input.sections) {
     switch (b.type) {
       case "heading":
-        sections.push({ type: "heading", level: b.level, text: b.text, id: blockId(b) })
+        sections.push({ type: "heading", level: b.level, text: b.text, id: blockId(b), hidden: b.hidden })
         break
       case "paragraph":
-        sections.push({ type: "paragraph", text: b.text, id: blockId(b) })
+        sections.push({ type: "paragraph", text: b.text, id: blockId(b), hidden: b.hidden })
         break
       case "bullet_list":
-        sections.push({ type: "bullet_list", items: b.items, id: blockId(b) })
+        sections.push({ type: "bullet_list", items: b.items, id: blockId(b), hidden: b.hidden })
         break
       case "divider":
-        sections.push({ type: "divider", id: blockId(b) })
+        sections.push({ type: "divider", id: blockId(b), hidden: b.hidden })
         break
       case "image": {
         const src = resolveUrl(b.asset_id)
@@ -146,6 +169,7 @@ export function normalizeProposalForRender(input: {
             caption: b.caption,
             assetId: b.asset_id,
             id: blockId(b),
+            hidden: b.hidden,
           })
         }
         break
@@ -157,7 +181,7 @@ export function normalizeProposalForRender(input: {
           if (src) images.push({ src, assetId: aid })
         }
         if (images.length > 0) {
-          sections.push({ type: "gallery", images, caption: b.caption, id: blockId(b) })
+          sections.push({ type: "gallery", images, caption: b.caption, id: blockId(b), hidden: b.hidden })
         }
         break
       }
@@ -184,17 +208,34 @@ export function normalizeProposalForRender(input: {
     })
   }
 
+  const templateId = normalizeTemplateId(input.template_id)
+  const coverAssetId = input.cover_asset_id?.trim() || null
+  const coverImageUrl = coverAssetId ? resolveUrl(coverAssetId) : null
+
   return {
     title: input.title,
     proposal_number: input.proposal_number ?? null,
     status: input.status,
-    template_id: input.template_id,
+    template_id: templateId,
+    presentation: {
+      templateId,
+      accentColor: input.brand_accent_color
+        ? normalizeAccentColor(input.brand_accent_color, "")
+        : null,
+      typography: input.typography
+        ? normalizeTypography(input.typography)
+        : defaultTypographyForTemplate(templateId),
+      coverAssetId,
+      coverImageUrl,
+    },
     currency_code: resolveProposalDisplayCurrency(input.currency_code, input.business),
     business: input.business,
     customer: input.customer,
     sections,
     pricing: input.pricing,
     attachments,
+    created_at: input.created_at ?? null,
+    expires_at: input.expires_at ?? null,
     public_token: input.public_token,
   }
 }

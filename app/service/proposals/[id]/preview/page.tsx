@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
-import { ProposalDocumentView } from "@/components/proposals/ProposalDocumentView"
+import { ProposalReader } from "@/components/proposals/ProposalReader"
 import type { ProposalRenderModel } from "@/lib/proposals/renderModel"
 import type { PricingMode } from "@/lib/proposals/schema"
 import {
@@ -335,9 +335,25 @@ export default function ProposalPreviewPage() {
         {error ? <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</div> : null}
       </div>
 
-      <div className="mx-auto mt-6 max-w-5xl print:mt-0 print:max-w-none">
+      <div className="mx-auto mt-6 max-w-6xl print:mt-0 print:max-w-none">
         {model ? (
-          <ProposalDocumentView model={model} variant="screen" previewLayout />
+          <ProposalReader
+            model={model}
+            mode="preview"
+            pdfHref={pdfHref}
+            acceptanceSlot={
+              <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+                <p className="font-semibold text-slate-900">{workflowStatus ? PROPOSAL_STATUS_LABEL[st] : "Draft"}</p>
+                <p className="mt-1">
+                  {st === "accepted"
+                    ? "The client accepted this proposal online."
+                    : st === "rejected"
+                      ? "The client declined this proposal online."
+                      : "Client acceptance and rejection are recorded through the public proposal link."}
+                </p>
+              </div>
+            }
+          />
         ) : !error ? (
           <div className="py-16 text-center text-slate-500 print:hidden">Loading…</div>
         ) : null}

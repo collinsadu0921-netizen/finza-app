@@ -1,159 +1,431 @@
-import type { ProposalRenderModel } from "./renderModel"
-import type { ProposalRenderSection } from "./renderModel"
-import type { PricingPayload } from "./schema"
-import { escapeHtml } from "./htmlEscape"
-import { splitForInvestmentPlacement } from "./investmentPlacement"
-import {
-  PROPOSAL_PRICING_SECTION_HEADING,
-  PROPOSAL_PRICING_SECTION_INTRO,
-} from "./pricingSectionCopy"
+import type {
+  ProposalRenderAttachment,
+  ProposalRenderModel,
+  ProposalRenderSection,
+} from "./renderModel"
+import { composeProposalBook, type ProposalBook, type ProposalChapter } from "./composition"
+import type { ProposalTheme } from "./design"
 import { customPricingNotesToHtml } from "./parseCustomPricing"
-
-/** Allow only http(s) URLs for PDF embedding; strip characters that break attributes. */
-function safeAttrUrl(url: string): string {
-  const u = url.trim()
-  if (!/^https?:\/\//i.test(u)) return ""
-  return u.replace(/["']/g, "")
-}
+import { escapeHtml } from "./htmlEscape"
 
 function formatMoney(amount: number, currency: string | null): string {
-  const code = (currency || "").trim() || "GHS"
-  try {
-    return new Intl.NumberFormat("en-GH", { style: "currency", currency: code, maximumFractionDigits: 2 }).format(amount)
-  } catch {
-    return `${code} ${amount.toFixed(2)}`
-  }
+  const code = (currency || "GHS").trim().toUpperCase() || "GHS"
+  const value = Number.isFinite(Number(amount)) ? Number(amount) : 0
+  return `${code} ${new Intl.NumberFormat("en-GH", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value)}`
 }
 
-function pricingHtml(pricing: PricingPayload, currency: string | null): string {
-  if (pricing.mode === "none") {
-    return `<p class="muted doc-p">Pricing to be confirmed.</p>`
+/** Allow absolute HTTP(S), protocol-relative and same-origin paths for PDF assets. */
+function safeAttrUrl(url: string | null | undefined): string {
+  const value = String(url ?? "").trim()
+  if (!value) return ""
+  if (/^(https?:)?\/\//i.test(value) || value.startsWith("/")) {
+    return value.replace(/["']/g, "")
   }
+  return ""
+}
+
+function lineItemAmount(item: {
+  quantity?: number
+  unit_price?: number
+  line_total?: number
+  discount_amount?: number
+}): number {
+  if (item.line_total != null && Number.isFinite(Number(item.line_total))) {
+    return Number(item.line_total)
+  }
+  const quantity = Number(item.quantity ?? 0)
+  const unit = Number(item.unit_price ?? 0)
+  const discount = Number(item.discount_amount ?? 0)
+  return quantity * unit - discount
+}
+
+function pricingSummary(pricing: ProposalRenderModel["pricing"]): {
+  total: number | null
+  label: string
+} {
   if (pricing.mode === "fixed") {
-    const label = pricing.label ? escapeHtml(pricing.label) : "Total"
-    return `<div class="pricing-fixed"><div class="pricing-label">${label}</div><div class="pricing-amount">${formatMoney(pricing.amount, currency)}</div></div>`
+    return { total: Number(pricing.amount) || 0, label: pricing.label?.trim() || "Total investment" }
   }
   if (pricing.mode === "line_items") {
-    const showDisc = pricing.items.some((it) => {
-      const d = (it as { discount_amount?: number }).discount_amount
-      return d != null && d > 0
-    })
-    const discTh = showDisc ? `<th class="num">Discount</th>` : ""
-    const rows = pricing.items
-      .map((it) => {
-        const qty = it.quantity != null ? escapeHtml(String(it.quantity)) : "—"
-        const desc = escapeHtml(it.description)
-        const disc = (it as { discount_amount?: number }).discount_amount ?? 0
-        const line =
-          it.line_total != null
-            ? it.line_total
-            : it.unit_price != null && it.quantity != null
-              ? it.unit_price * it.quantity - (showDisc ? disc : 0)
-              : it.unit_price ?? 0
-        const discCell = showDisc
-          ? `<td class="num">${disc > 0 ? formatMoney(disc, currency) : "—"}</td>`
-          : ""
-        return `<tr><td class="td-desc">${desc}</td><td class="num">${qty}</td>${discCell}<td class="num strong">${formatMoney(Number(line), currency)}</td></tr>`
-      })
-      .join("")
-    return `<div class="pricing-table-wrap"><table class="lines"><thead><tr><th>Description</th><th class="num">Qty</th>${discTh}<th class="num">Amount</th></tr></thead><tbody>${rows}</tbody></table></div>`
-  }
-  return `<div class="pricing-custom">${customPricingNotesToHtml(pricing.notes)}</div>`
-}
-
-function sectionsHtml(sections: ProposalRenderSection[]): string {
-  return sections
-    .map((s) => {
-      switch (s.type) {
-        case "heading": {
-          const L = Math.min(6, Math.max(1, s.level))
-          return `<h${L}>${escapeHtml(s.text)}</h${L}>`
-        }
-        case "paragraph":
-          return `<p class="doc-p">${escapeHtml(s.text).replace(/\n/g, "<br/>")}</p>`
-        case "bullet_list":
-          return `<ul class="doc-ul">${s.items.map((i) => `<li>${escapeHtml(i)}</li>`).join("")}</ul>`
-        case "image": {
-          const u = safeAttrUrl(s.src)
-          if (!u) return ""
-          return `<figure class="fig"><img class="inline-img" src="${u}" alt="" />${
-            s.caption ? `<figcaption>${escapeHtml(s.caption)}</figcaption>` : ""
-          }</figure>`
-        }
-        case "gallery":
-          return `<div class="gallery">${s.images
-            .map((im) => {
-              const u = safeAttrUrl(im.src)
-              if (!u) return ""
-              return `<figure class="fig g"><img class="inline-img" src="${u}" alt="" /></figure>`
-            })
-            .filter(Boolean)
-            .join("")}${s.caption ? `<p class="caption">${escapeHtml(s.caption)}</p>` : ""}</div>`
-        case "divider":
-          return `<hr class="sep" />`
-        default:
-          return ""
-      }
-    })
-    .join("\n")
-}
-
-/**
- * Full HTML document for Chromium PDF — print-safe, no app chrome.
- * Caller must supply absolute `https` image URLs where inline images are required.
- * Layout matches ProposalDocumentView (single column, fee schedule + figures in body).
- */
-export function buildProposalHtmlForPdf(model: ProposalRenderModel): string {
-  const bizName = escapeHtml(model.business.trading_name || model.business.legal_name || model.business.name)
-  const title = escapeHtml(model.title || "Proposal")
-  const c = model.customer
-  const customerMetaHtml = c
-    ? `<div class="meta-block"><div class="meta-label">Prepared for</div><div class="meta-value">${escapeHtml(
-        c.name
-      )}</div>${c.email ? `<div class="meta-sub">${escapeHtml(c.email)}</div>` : ""}</div>`
-    : `<div class="meta-block meta-block--empty" aria-hidden="true"></div>`
-
-  const logoUrl = model.business.logo_url ? safeAttrUrl(model.business.logo_url) : ""
-  const logo = logoUrl ? `<img class="logo" src="${logoUrl}" alt="" />` : ""
-
-  const refLine = model.proposal_number
-    ? `<p class="doc-ref">Ref ${escapeHtml(model.proposal_number)}</p>`
-    : ""
-
-  const brandBlock = `<div class="doc-brand">${logo ? `<div class="doc-brand-logo">${logo}</div>` : ""}<div class="doc-brand-text"><div class="meta-label">Prepared by</div><div class="biz-name">${bizName}</div></div></div>`
-  const titleBlock = `<div class="doc-title-block"><h1 class="doc-title-h1">${title}</h1>${refLine}</div>`
-
-  const { lead, investment, tail } = splitForInvestmentPlacement(model.sections)
-  const showPricingInBody = model.pricing.mode !== "none"
-  const showInvestmentShell = investment.length > 0 || showPricingInBody
-
-  let investmentSection = ""
-  if (showInvestmentShell) {
-    const narrative = investment.length > 0 ? `<div class="inv-narrative">${sectionsHtml(investment)}</div>` : ""
-    let figuresBlock = ""
-    if (showPricingInBody) {
-      const builtInIntro =
-        investment.length === 0
-          ? `<div class="figures-intro"><h2 class="inv-h2">${escapeHtml(
-              PROPOSAL_PRICING_SECTION_HEADING
-            )}</h2><p class="muted doc-p">${escapeHtml(PROPOSAL_PRICING_SECTION_INTRO)}</p></div>`
-          : ""
-      const borderClass = investment.length > 0 ? " figures-bordered" : ""
-      figuresBlock = `<div class="figures-wrap${borderClass}">${builtInIntro}${pricingHtml(model.pricing, model.currency_code)}</div>`
+    return {
+      total: pricing.items.reduce((sum, item) => sum + lineItemAmount(item), 0),
+      label: "Total investment",
     }
-    investmentSection = `<section class="investment-shell" aria-label="${escapeHtml(
-      PROPOSAL_PRICING_SECTION_HEADING
-    )}">${narrative}${figuresBlock}</section>`
+  }
+  return { total: null, label: "Investment" }
+}
+
+function coverMetaRow(label: string, value: string | null | undefined): string {
+  if (!value) return ""
+  return `<div class="pdf-cover-meta-row"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`
+}
+
+function coverHtml(book: ProposalBook): string {
+  const cover = book.cover
+  const coverImage = safeAttrUrl(cover.coverImageUrl)
+  const logo = safeAttrUrl(cover.businessLogoUrl)
+  const dateLabel = cover.createdAt
+    ? new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "long", year: "numeric" }).format(
+        new Date(cover.createdAt)
+      )
+    : null
+  const expiresLabel = cover.expiresAt
+    ? new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "long", year: "numeric" }).format(
+        new Date(cover.expiresAt)
+      )
+    : null
+
+  return `<section class="pdf-cover pdf-cover--${book.theme.coverStyle}"${
+    coverImage ? ` style="--pdf-cover-image:url('${coverImage}')"` : ""
+  }>
+    <div class="pdf-cover-art" aria-hidden="true"></div>
+    <div class="pdf-cover-inner">
+      <div class="pdf-cover-brand">
+        ${logo ? `<img class="pdf-cover-logo" src="${logo}" alt="" />` : ""}
+        <div class="pdf-cover-business">${escapeHtml(cover.businessName)}</div>
+      </div>
+      <div class="pdf-cover-copy">
+        <p class="pdf-eyebrow">Proposal${cover.proposalNumber ? ` · ${escapeHtml(cover.proposalNumber)}` : ""}</p>
+        <h1>${escapeHtml(cover.title)}</h1>
+        ${
+          cover.customerName
+            ? `<div class="pdf-cover-client"><span>Prepared for</span><strong>${escapeHtml(
+                cover.customerName
+              )}</strong>${cover.customerEmail ? `<em>${escapeHtml(cover.customerEmail)}</em>` : ""}</div>`
+            : ""
+        }
+      </div>
+      <div class="pdf-cover-meta">
+        ${coverMetaRow("Issued", dateLabel)}
+        ${coverMetaRow("Valid until", expiresLabel)}
+        ${coverMetaRow("Prepared by", cover.businessTradingName || cover.businessLegalName || cover.businessName)}
+      </div>
+    </div>
+  </section>`
+}
+
+function sectionHtml(section: ProposalRenderSection): string {
+  if (section.hidden) return ""
+  switch (section.type) {
+    case "heading": {
+      const level = Math.min(6, Math.max(2, section.level))
+      return `<h${level} class="pdf-section-heading">${escapeHtml(section.text)}</h${level}>`
+    }
+    case "paragraph":
+      return `<p class="pdf-paragraph">${escapeHtml(section.text).replace(/\n/g, "<br/>")}</p>`
+    case "bullet_list":
+      return `<ul class="pdf-list">${section.items
+        .map((item) => `<li>${escapeHtml(item)}</li>`)
+        .join("")}</ul>`
+    case "image": {
+      const src = safeAttrUrl(section.src)
+      if (!src) return ""
+      return `<figure class="pdf-figure"><img src="${src}" alt="" />${
+        section.caption ? `<figcaption>${escapeHtml(section.caption)}</figcaption>` : ""
+      }</figure>`
+    }
+    case "gallery": {
+      const images = section.images
+        .map((image) => safeAttrUrl(image.src))
+        .filter(Boolean)
+        .map((src) => `<figure class="pdf-figure pdf-gallery-item"><img src="${src}" alt="" /></figure>`)
+        .join("")
+      if (!images) return ""
+      return `<div class="pdf-gallery">${images}</div>${
+        section.caption ? `<p class="pdf-caption">${escapeHtml(section.caption)}</p>` : ""
+      }`
+    }
+    case "divider":
+      return `<hr class="pdf-divider" />`
+    default:
+      return ""
+  }
+}
+
+function pricingHtml(book: ProposalBook, model: ProposalRenderModel): string {
+  const pricing = model.pricing
+  const theme = book.theme
+  if (pricing.mode === "none") return ""
+
+  const summary = pricingSummary(pricing)
+  const currency = model.currency_code
+  let body = ""
+
+  if (pricing.mode === "fixed") {
+    body = `<div class="pdf-price-fixed">
+      <span>${escapeHtml(pricing.label?.trim() || "Total investment")}</span>
+      <strong>${formatMoney(Number(pricing.amount) || 0, currency)}</strong>
+    </div>`
+  } else if (pricing.mode === "line_items") {
+    const showDiscount = pricing.items.some((item) => Number(item.discount_amount ?? 0) > 0)
+    body = `<table class="pdf-price-table">
+      <thead><tr><th>Description</th><th class="num">Qty</th>${
+        showDiscount ? `<th class="num">Discount</th>` : ""
+      }<th class="num">Amount</th></tr></thead>
+      <tbody>${pricing.items
+        .map((item) => {
+          const discount = Number(item.discount_amount ?? 0)
+          return `<tr>
+            <td class="desc">${escapeHtml(item.description)}</td>
+            <td class="num">${item.quantity != null ? escapeHtml(String(item.quantity)) : "—"}</td>
+            ${showDiscount ? `<td class="num">${discount > 0 ? formatMoney(discount, currency) : "—"}</td>` : ""}
+            <td class="num strong">${formatMoney(lineItemAmount(item), currency)}</td>
+          </tr>`
+        })
+        .join("")}</tbody>
+      <tfoot><tr class="pdf-price-total"><td colspan="${showDiscount ? 3 : 2}">${
+        summary.label
+      }</td><td class="num strong">${formatMoney(summary.total ?? 0, currency)}</td></tr></tfoot>
+    </table>`
+  } else {
+    body = `<div class="pdf-custom-pricing">${customPricingNotesToHtml(pricing.notes)}</div>`
   }
 
-  const attachBlock =
-    model.attachments.length > 0
-      ? `<section class="attachments"><h2>Supporting documents</h2><ul>${model.attachments
-          .map((a) => `<li><span>${escapeHtml(a.file_name)}</span> <span class="muted">(${escapeHtml(a.mime_type)})</span></li>`)
-          .join("")}</ul><p class="muted small">Download links are available in the online proposal.</p></section>`
-      : ""
+  return `<section class="pdf-pricing pdf-pricing--${theme.id}">
+    <div class="pdf-pricing-heading"><span class="pdf-eyebrow">Investment</span><h3>${escapeHtml(
+      summary.label
+    )}</h3></div>
+    ${body}
+    <p class="pdf-pricing-note">Pricing is a proposal summary. Applicable taxes are applied by Finza when the proposal is converted to an estimate or invoice.</p>
+  </section>`
+}
 
-  const bodyMain = `${sectionsHtml(lead)}${investmentSection}${sectionsHtml(tail)}${attachBlock}`
+function attachmentsHtml(attachments: ProposalRenderAttachment[]): string {
+  if (attachments.length === 0) return ""
+  return `<section class="pdf-attachments"><h3>Supporting documents</h3><ul>${attachments
+    .map((attachment) => {
+      const href = safeAttrUrl(attachment.url)
+      return `<li><span>${escapeHtml(attachment.file_name)}</span> <span class="muted">(${escapeHtml(
+        attachment.mime_type
+      )})</span>${href ? `<br/><a href="${href}">${escapeHtml(href)}</a>` : ""}</li>`
+    })
+    .join("")}</ul></section>`
+}
+
+function acceptanceHtml(): string {
+  return `<section class="pdf-acceptance">
+    <span class="pdf-eyebrow">Client decision</span>
+    <h3>Acceptance</h3>
+    <p class="pdf-paragraph">By accepting this proposal, the client confirms the scope, timeline and investment described in this document.</p>
+    <div class="pdf-signature-grid">
+      <div><span>Name</span><i></i></div>
+      <div><span>Signature</span><i></i></div>
+      <div><span>Date</span><i></i></div>
+    </div>
+    <p class="pdf-acceptance-note">Online acceptance through the proposal link records the client's decision. This PDF signature block is optional and is not a qualified electronic signature.</p>
+  </section>`
+}
+
+function chapterHtml(chapter: ProposalChapter, book: ProposalBook, model: ProposalRenderModel): string {
+  const body = chapter.blocks.map(sectionHtml).join("\n")
+  const pricing = chapter.kind === "pricing" ? pricingHtml(book, model) : ""
+  const attachments = attachmentsHtml(chapter.attachments)
+  const acceptance = chapter.kind === "acceptance" ? acceptanceHtml() : ""
+  return `<section class="pdf-chapter" id="${escapeHtml(chapter.key)}">
+    <header class="pdf-chapter-head">
+      <span class="pdf-chapter-number">${String(chapter.number).padStart(2, "0")}</span>
+      <div>
+        <span class="pdf-eyebrow">${escapeHtml(chapter.eyebrow)}</span>
+        <h2>${escapeHtml(chapter.title)}</h2>
+      </div>
+    </header>
+    <div class="pdf-chapter-body">
+      ${body}
+      ${pricing}
+      ${attachments}
+      ${acceptance}
+    </div>
+  </section>`
+}
+
+function themeCss(theme: ProposalTheme): string {
+  return `
+    :root {
+      --pdf-accent: ${theme.accent};
+      --pdf-accent-soft: ${theme.accentSoft};
+      --pdf-accent-contrast: ${theme.accentContrast};
+      --pdf-paper: ${theme.paper};
+      --pdf-paper-alt: ${theme.paperAlt};
+      --pdf-ink: ${theme.ink};
+      --pdf-muted: ${theme.muted};
+      --pdf-rule: ${theme.rule};
+      --pdf-card: ${theme.card};
+      --pdf-cover-bg: ${theme.coverBg};
+      --pdf-cover-ink: ${theme.coverInk};
+      --pdf-cover-muted: ${theme.coverMuted};
+      --pdf-heading-font: ${theme.headingFont};
+      --pdf-body-font: ${theme.bodyFont};
+      --pdf-eyebrow-font: ${theme.eyebrowFont};
+      --pdf-radius: ${theme.radius};
+    }
+  `
+}
+
+const BASE_CSS = `
+  * { box-sizing: border-box; }
+  @page { size: A4; margin: 14mm 14mm 16mm; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: var(--pdf-body-font);
+    color: var(--pdf-ink);
+    background: var(--pdf-paper);
+    font-size: 10.5pt;
+    line-height: 1.58;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .pdf-cover {
+    position: relative;
+    min-height: 258mm;
+    padding: 18mm;
+    margin: 0 0 14mm;
+    background: var(--pdf-cover-bg);
+    color: var(--pdf-cover-ink);
+    overflow: hidden;
+    page-break-after: always;
+    break-after: page;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+  .pdf-cover-art {
+    position: absolute;
+    inset: 0;
+    background-image: var(--pdf-cover-image, none);
+    background-size: cover;
+    background-position: center;
+    opacity: ${themeCoverImageOpacity()};
+  }
+  .pdf-cover--minimal .pdf-cover-art {
+    opacity: 0;
+    border: 1px solid var(--pdf-rule);
+    inset: 12mm;
+  }
+  .pdf-cover--modern .pdf-cover-art::after,
+  .pdf-cover--premium .pdf-cover-art::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(90deg, var(--pdf-cover-bg) 0%, var(--pdf-cover-bg) 58%, rgba(0,0,0,0.28) 82%, rgba(0,0,0,0.58) 100%),
+      linear-gradient(180deg, rgba(0,0,0,0.12), rgba(0,0,0,0.52));
+  }
+  .pdf-cover--minimal .pdf-cover-art::after { content: none; }
+  .pdf-cover--modern .pdf-cover-art {
+    background-image: var(--pdf-cover-image, none), radial-gradient(circle at 80% 20%, var(--pdf-accent) 0, transparent 34%), linear-gradient(135deg, #0b1220, #111c33);
+    opacity: 1;
+  }
+  .pdf-cover--premium .pdf-cover-art {
+    background-image: var(--pdf-cover-image, none), radial-gradient(circle at 85% 18%, rgba(166,119,63,0.5) 0, transparent 30%), linear-gradient(160deg, #1c1917, #292524);
+    opacity: 1;
+  }
+  .pdf-cover--premium .pdf-cover-art::before {
+    content: "";
+    position: absolute;
+    left: 14mm;
+    top: 36mm;
+    bottom: 36mm;
+    width: 1px;
+    background: rgba(250,247,242,0.24);
+  }
+  .pdf-cover--classic .pdf-cover-art { opacity: 0; }
+  .pdf-cover-inner { position: relative; z-index: 1; display: flex; flex-direction: column; min-height: 222mm; }
+  .pdf-cover-brand { display: flex; align-items: center; gap: 10mm; }
+  .pdf-cover-logo { max-height: 22mm; max-width: 58mm; object-fit: contain; background: #fff; padding: 2mm; }
+  .pdf-cover-business { font-size: 11pt; font-weight: 600; letter-spacing: 0.04em; }
+  .pdf-cover-copy { margin-top: auto; padding: 18mm 0; max-width: 150mm; }
+  .pdf-eyebrow { font-family: var(--pdf-eyebrow-font); font-size: 7.5pt; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; color: var(--pdf-accent); }
+  .pdf-cover .pdf-eyebrow { color: var(--pdf-accent-contrast); opacity: 0.82; }
+  .pdf-cover h1 { margin: 5mm 0 8mm; font-family: var(--pdf-heading-font); font-size: 40pt; line-height: 1.02; font-weight: 600; letter-spacing: -0.035em; }
+  .pdf-cover--modern h1 { font-size: 43pt; font-weight: 800; text-transform: none; }
+  .pdf-cover--premium h1 { font-size: 42pt; font-weight: 400; }
+  .pdf-cover-client { display: flex; flex-direction: column; gap: 1.5mm; border-left: 2px solid var(--pdf-accent); padding-left: 6mm; }
+  .pdf-cover-client span, .pdf-cover-meta-row span { font-family: var(--pdf-eyebrow-font); font-size: 7pt; text-transform: uppercase; letter-spacing: 0.14em; color: var(--pdf-cover-muted); }
+  .pdf-cover-client strong { font-size: 14pt; font-weight: 600; }
+  .pdf-cover-client em { font-style: normal; font-size: 9pt; color: var(--pdf-cover-muted); }
+  .pdf-cover-meta { display: flex; flex-wrap: wrap; gap: 6mm 16mm; border-top: 1px solid rgba(255,255,255,0.18); padding-top: 6mm; }
+  .pdf-cover--minimal .pdf-cover-meta { border-color: var(--pdf-rule); }
+  .pdf-cover-meta-row { display: flex; flex-direction: column; gap: 1mm; }
+  .pdf-cover-meta-row strong { font-size: 9pt; font-weight: 600; }
+  .pdf-chapter {
+    padding: 4mm 2mm 10mm;
+    background: var(--pdf-paper);
+    page-break-before: always;
+    break-before: page;
+  }
+  .pdf-chapter-head { display: flex; gap: 8mm; align-items: flex-start; border-bottom: 1px solid var(--pdf-rule); padding-bottom: 6mm; margin-bottom: 8mm; page-break-after: avoid; }
+  .pdf-chapter-number { font-family: var(--pdf-heading-font); font-size: 34pt; line-height: 0.9; color: var(--pdf-accent); opacity: 0.35; min-width: 18mm; }
+  .pdf-chapter-head h2 { margin: 1mm 0 0; font-family: var(--pdf-heading-font); font-size: 25pt; line-height: 1.08; font-weight: 600; letter-spacing: -0.025em; color: var(--pdf-ink); }
+  .pdf-chapter--modern .pdf-chapter-head h2 { text-transform: none; font-weight: 800; }
+  .pdf-chapter-body { max-width: 100%; }
+  .pdf-section-heading { font-family: var(--pdf-heading-font); margin: 7mm 0 2mm; font-size: 14pt; line-height: 1.2; font-weight: 600; color: var(--pdf-ink); page-break-after: avoid; }
+  .pdf-paragraph { margin: 0 0 3.5mm; font-size: 10.5pt; color: var(--pdf-ink); }
+  .pdf-list { margin: 2mm 0 4mm 5mm; padding: 0; }
+  .pdf-list li { margin: 0 0 1.4mm; padding-left: 1mm; }
+  .pdf-figure { margin: 5mm 0; page-break-inside: avoid; }
+  .pdf-figure img { max-width: 100%; height: auto; border-radius: var(--pdf-radius); }
+  .pdf-figure figcaption, .pdf-caption { margin-top: 1.5mm; font-size: 8pt; color: var(--pdf-muted); }
+  .pdf-gallery { display: grid; grid-template-columns: 1fr 1fr; gap: 3mm; margin: 4mm 0; }
+  .pdf-gallery-item { margin: 0; }
+  .pdf-gallery-item img { width: 100%; height: 55mm; object-fit: cover; border-radius: var(--pdf-radius); }
+  .pdf-divider { border: 0; border-top: 1px solid var(--pdf-rule); margin: 7mm 0; }
+  .pdf-pricing { margin: 8mm 0 4mm; padding: 7mm; background: var(--pdf-card); border: 1px solid var(--pdf-rule); border-radius: var(--pdf-radius); page-break-inside: auto; }
+  .pdf-pricing-heading h3 { margin: 1mm 0 5mm; font-family: var(--pdf-heading-font); font-size: 17pt; font-weight: 600; }
+  .pdf-price-fixed { display: flex; align-items: baseline; justify-content: space-between; gap: 8mm; border-top: 1px solid var(--pdf-rule); border-bottom: 1px solid var(--pdf-rule); padding: 6mm 0; }
+  .pdf-price-fixed span { font-size: 9pt; color: var(--pdf-muted); }
+  .pdf-price-fixed strong { font-family: var(--pdf-heading-font); font-size: 24pt; font-weight: 600; }
+  .pdf-price-table { width: 100%; border-collapse: collapse; font-size: 9.5pt; }
+  .pdf-price-table th, .pdf-price-table td { border-bottom: 1px solid var(--pdf-rule); padding: 2.6mm 2mm; text-align: left; vertical-align: top; }
+  .pdf-price-table thead th { font-family: var(--pdf-eyebrow-font); font-size: 7.5pt; text-transform: uppercase; letter-spacing: 0.08em; color: var(--pdf-muted); }
+  .pdf-price-table .num { text-align: right; white-space: nowrap; }
+  .pdf-price-table .strong { font-weight: 600; color: var(--pdf-ink); }
+  .pdf-price-table tr { page-break-inside: avoid; break-inside: avoid; }
+  .pdf-price-total td { border-top: 1px solid var(--pdf-ink); border-bottom: 0; padding-top: 4mm; font-size: 11pt; }
+  .pdf-pricing-note { margin: 4mm 0 0; font-size: 8pt; color: var(--pdf-muted); }
+  .pdf-custom-pricing { border: 1px solid var(--pdf-rule); border-radius: var(--pdf-radius); padding: 4mm; }
+  .pdf-custom-pricing .cp-rate-group { border: 1px solid var(--pdf-rule); border-radius: var(--pdf-radius); overflow: hidden; margin: 2mm 0; }
+  .pdf-custom-pricing .cp-rate-row { display: grid; grid-template-columns: 1fr minmax(32mm, 36%); gap: 4mm; padding: 2.2mm 3mm; border-bottom: 1px solid var(--pdf-rule); font-size: 9.5pt; }
+  .pdf-custom-pricing .cp-rate-row:last-child { border-bottom: 0; }
+  .pdf-custom-pricing .cp-label { color: var(--pdf-ink); }
+  .pdf-custom-pricing .cp-value { text-align: right; font-weight: 600; }
+  .pdf-custom-pricing .cp-h { margin: 3mm 0 1.5mm; font-family: var(--pdf-eyebrow-font); font-size: 7.5pt; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--pdf-muted); }
+  .pdf-custom-pricing .cp-p, .pdf-custom-pricing .cp-li { font-size: 9.5pt; color: var(--pdf-ink); }
+  .pdf-custom-pricing .cp-ul { margin: 2mm 0 2mm 4mm; padding: 0; }
+  .pdf-custom-pricing .cp-spacer { height: 4mm; }
+  .pdf-attachments { margin-top: 7mm; padding-top: 5mm; border-top: 1px solid var(--pdf-rule); page-break-inside: avoid; }
+  .pdf-attachments h3 { margin: 0 0 3mm; font-family: var(--pdf-heading-font); font-size: 13pt; }
+  .pdf-attachments ul { margin: 0 0 0 4mm; padding: 0; }
+  .pdf-attachments li { margin-bottom: 2mm; font-size: 9pt; }
+  .pdf-attachments a { color: var(--pdf-accent); word-break: break-all; }
+  .pdf-acceptance { margin-top: 9mm; padding: 7mm; border: 1px solid var(--pdf-rule); background: var(--pdf-card); border-radius: var(--pdf-radius); page-break-inside: avoid; }
+  .pdf-acceptance h3 { margin: 1mm 0 4mm; font-family: var(--pdf-heading-font); font-size: 20pt; }
+  .pdf-signature-grid { display: grid; grid-template-columns: 1.3fr 1.3fr 0.7fr; gap: 8mm; margin: 12mm 0 6mm; }
+  .pdf-signature-grid span { font-family: var(--pdf-eyebrow-font); font-size: 7pt; text-transform: uppercase; letter-spacing: 0.12em; color: var(--pdf-muted); }
+  .pdf-signature-grid i { display: block; height: 10mm; border-bottom: 1px solid var(--pdf-ink); }
+  .pdf-acceptance-note { font-size: 8pt; color: var(--pdf-muted); margin: 0; }
+  .muted { color: var(--pdf-muted); }
+  .small { font-size: 8pt; }
+  @media print {
+    .pdf-cover { break-after: page; }
+    .pdf-chapter { break-before: page; }
+  }
+`
+
+function themeCoverImageOpacity(): string {
+  // CSS in BASE_CSS uses the variable for real cover images; this value is
+  // overridden by the theme-specific rules below.
+  return "0.35"
+}
+
+export function buildProposalHtmlForPdf(model: ProposalRenderModel): string {
+  const book = composeProposalBook(model)
+  const title = escapeHtml(model.title || "Proposal")
+  const chapters = book.chapters
+    .map((chapter) => chapterHtml(chapter, book, model))
+    .join("\n")
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -161,160 +433,11 @@ export function buildProposalHtmlForPdf(model: ProposalRenderModel): string {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>${title}</title>
-  <style>
-    * { box-sizing: border-box; }
-    @page { size: A4; margin: 12mm; }
-    body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
-      color: #0f172a; font-size: 11pt; line-height: 1.5; margin: 0; padding: 0; }
-    .page { padding: 8mm 10mm; max-width: 190mm; margin: 0 auto; }
-    .doc-header {
-      display: grid;
-      grid-template-columns: minmax(0, 0.93fr) minmax(0, 2.07fr) minmax(0, 0.82fr);
-      gap: 10px 16px;
-      align-items: center;
-      margin-bottom: 14px;
-      padding-bottom: 12px;
-      border-bottom: 1px solid #e2e8f0;
-      page-break-inside: avoid;
-    }
-    .doc-brand { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-    /* finza-regression:pdf-logo-white-backing — same Chromium transparent-PNG issue as financial documents */
-    .doc-brand-logo {
-      display: inline-block;
-      line-height: 0;
-      background-color: #ffffff;
-    }
-    .doc-brand-logo .logo { display: block; background-color: #ffffff; }
-    .logo { max-height: 114px; max-width: 320px; object-fit: contain; }
-    .biz-name { font-size: 11.5pt; font-weight: 600; color: #0f172a; line-height: 1.28; margin-top: 3px; }
-    .doc-title-block { text-align: center; min-width: 0; padding: 0 6px; }
-    .doc-title-h1 {
-      margin: 0;
-      font-size: 16.75pt;
-      font-weight: 700;
-      line-height: 1.2;
-      letter-spacing: -0.02em;
-      text-wrap: balance;
-    }
-    .doc-ref { margin: 5px 0 0; font-size: 8pt; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; color: #94a3b8; }
-    h1 { font-size: 20pt; margin: 0 0 4px; letter-spacing: -0.02em; }
-    h2 { font-size: 14pt; margin: 16px 0 8px; letter-spacing: -0.02em; }
-    h2.inv-h2 { margin-top: 0; border: none; padding: 0; }
-    h3 { font-size: 11pt; margin: 0 0 4px; text-transform: uppercase; letter-spacing: 0.08em; color: #64748b; font-weight: 600; }
-    .doc-p { margin: 0 0 10px; font-size: 11pt; color: #334155; }
-    .doc-ul { margin: 0 0 12px 20px; padding: 0; }
-    .muted { color: #64748b; }
-    .small { font-size: 9pt; }
-    .meta-block { text-align: right; font-size: 10pt; min-width: 0; }
-    .meta-block--empty { visibility: hidden; pointer-events: none; }
-    .meta-label { text-transform: uppercase; letter-spacing: 0.06em; font-size: 8pt; color: #64748b; font-weight: 600; }
-    .meta-value { font-weight: 600; margin-top: 3px; }
-    .meta-sub { color: #475569; }
-    .main-doc { max-width: 100%; }
-    .investment-shell {
-      margin: 16px 0 20px;
-      padding: 14px 16px;
-      border-radius: 12px;
-      border: 1px solid #e2e8f0;
-      background: linear-gradient(180deg, #f8fafc 0%, #ffffff 55%);
-      page-break-inside: avoid;
-    }
-    .inv-narrative h1, .inv-narrative h2 { margin-top: 0; }
-    .figures-wrap.figures-bordered { margin-top: 14px; padding-top: 14px; border-top: 1px solid #e2e8f0; }
-    .figures-intro { margin-bottom: 10px; }
-    .pricing-fixed {
-      background: #fff;
-      border: 1px solid #e2e8f0;
-      border-radius: 12px;
-      padding: 14px 16px;
-    }
-    .pricing-label { font-size: 9pt; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; }
-    .pricing-amount { font-size: 18pt; font-weight: 700; margin-top: 6px; }
-    .pricing-table-wrap {
-      border: 1px solid #e2e8f0;
-      border-radius: 12px;
-      overflow: hidden;
-      background: #fff;
-    }
-    .pricing-custom {
-      border: 1px solid #e2e8f0;
-      border-radius: 10px;
-      padding: 8px 12px;
-      background: #fff;
-    }
-    .cp-spacer { height: 6px; }
-    .cp-h {
-      margin: 8px 0 5px;
-      font-size: 8.5pt;
-      font-weight: 600;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      color: #64748b;
-    }
-    .cp-h:first-child { margin-top: 2px; }
-    .cp-rate-group {
-      margin: 5px 0 7px;
-      border: 1px solid #e2e8f0;
-      border-radius: 8px;
-      overflow: hidden;
-      background: #f8fafc;
-    }
-    .cp-rate-group .cp-rate-row {
-      display: grid;
-      grid-template-columns: 1fr minmax(9.5rem, 38%);
-      gap: 5px 14px;
-      align-items: start;
-      padding: 7px 11px;
-      font-size: 10.25pt;
-      line-height: 1.42;
-      border-bottom: 1px solid #e2e8f0;
-    }
-    .cp-rate-group .cp-rate-row:last-child { border-bottom: none; }
-    .cp-label {
-      font-weight: 500;
-      color: #334155;
-      overflow-wrap: anywhere;
-      word-break: break-word;
-    }
-    .cp-value {
-      font-weight: 600;
-      color: #0f172a;
-      text-align: right;
-      overflow-wrap: anywhere;
-      word-break: break-word;
-      white-space: normal;
-    }
-    .cp-ul { margin: 5px 0 6px 18px; padding: 0; }
-    .cp-li { margin: 2px 0; color: #334155; font-size: 10.25pt; }
-    .cp-p { margin: 5px 0 6px; font-size: 10.25pt; color: #334155; line-height: 1.45; }
-    table.lines { width: 100%; border-collapse: collapse; font-size: 10.5pt; }
-    table.lines th, table.lines td { border-bottom: 1px solid #e2e8f0; padding: 8px 10px; text-align: left; vertical-align: top; }
-    table.lines thead th { background: #f8fafc; font-size: 8.5pt; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; font-weight: 600; }
-    table.lines .td-desc { color: #1e293b; }
-    table.lines .num { text-align: right; white-space: nowrap; }
-    table.lines .strong { font-weight: 600; color: #0f172a; }
-    .fig { margin: 10px 0; }
-    .inline-img { max-width: 100%; height: auto; border-radius: 6px; display: block; }
-    .gallery { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-    .fig.g { margin: 0; }
-    .caption { font-size: 9pt; color: #64748b; margin-top: 4px; }
-    hr.sep { border: none; border-top: 1px solid #e2e8f0; margin: 18px 0; }
-    .attachments { margin-top: 22px; page-break-inside: avoid; border-top: 1px solid #e2e8f0; padding-top: 14px; }
-    .attachments h2 { margin-top: 0; font-size: 13pt; border: none; padding: 0; }
-    .attachments ul { list-style: disc; }
-  </style>
+  <style>${themeCss(book.theme)}${BASE_CSS}</style>
 </head>
-<body>
-  <div class="page">
-    <header class="doc-header">
-      ${brandBlock}
-      ${titleBlock}
-      ${customerMetaHtml}
-    </header>
-    <div class="main-doc">
-      ${bodyMain}
-    </div>
-  </div>
+<body class="pdf-document pdf-theme-${escapeHtml(book.templateId)}">
+  ${coverHtml(book)}
+  ${chapters}
 </body>
 </html>`
 }
