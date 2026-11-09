@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
 
     const { data: rows, error, count } = await supabase
       .from("proposals")
-      .select("id, title, status, template_id, proposal_number, customer_id, public_token, converted_estimate_id, created_at, updated_at", {
+      .select("id, title, status, template_id, proposal_number, customer_id, public_token, converted_estimate_id, converted_invoice_id, created_at, updated_at", {
         count: "exact",
       })
       .eq("business_id", businessId)

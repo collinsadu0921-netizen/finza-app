@@ -13,6 +13,7 @@ import {
   PROPOSAL_STATUS_LABEL,
   proposalCanBeEditedByStaff,
   proposalConversionBlockReason,
+  proposalInvoiceConversionBlockReason,
   proposalStaffOutboundChannelsAllowed,
 } from "@/lib/proposals/proposalState"
 import { formatMoney } from "@/lib/money"
@@ -29,8 +30,26 @@ import {
   normalizeTypography,
   type ProposalTypography,
 } from "@/lib/proposals/design"
+import { ProposalAiAssistant } from "./ProposalAiAssistant"
+import type { ProposalAiPreview, ProposalAiSnapshot } from "@/lib/proposals/ai/types"
 
 type CustomerOpt = { id: string; name: string; email: string | null; phone: string | null; whatsapp_phone?: string | null }
+
+type CompanyProfile = {
+  id: string
+  name: string
+  legal_name: string | null
+  trading_name: string | null
+  address_street: string | null
+  address_city: string | null
+  address_region: string | null
+  address_country: string | null
+  phone: string | null
+  email: string | null
+  website: string | null
+  tin: string | null
+  logo_url: string | null
+}
 
 type AssetRow = {
   id: string
@@ -243,8 +262,16 @@ export function ProposalEditorForm({
   const [assets, setAssets] = useState<AssetRow[]>([])
   const [convertedEstimateId, setConvertedEstimateId] = useState<string | null>(null)
   const [convertedAt, setConvertedAt] = useState<string | null>(null)
+  const [convertedInvoiceId, setConvertedInvoiceId] = useState<string | null>(null)
+  const [convertedInvoiceAt, setConvertedInvoiceAt] = useState<string | null>(null)
   const [convertBusy, setConvertBusy] = useState(false)
   const [convertSuccess, setConvertSuccess] = useState("")
+  const [invoiceConvertBusy, setInvoiceConvertBusy] = useState(false)
+  const [invoiceConvertSuccess, setInvoiceConvertSuccess] = useState("")
+  const [aiOpen, setAiOpen] = useState(false)
+  const [aiNotice, setAiNotice] = useState("")
+  const [companyProfile, setCompanyProfile] = useState<CompanyProfile | null>(null)
+  const [companyProfileError, setCompanyProfileError] = useState("")
   const [catalogOptions, setCatalogOptions] = useState<CatalogOpt[]>([])
   const [catalogSearch, setCatalogSearch] = useState("")
   const [moreMenuOpen, setMoreMenuOpen] = useState(false)
@@ -375,6 +402,29 @@ export function ProposalEditorForm({
     }
   }, [proposalId, qs])
 
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch(
+          `/api/business/profile?business_id=${encodeURIComponent(businessId)}`,
+          { credentials: "same-origin" }
+        )
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) throw new Error(data.error || "Company profile unavailable")
+        if (!cancelled) {
+          setCompanyProfile(data.business as CompanyProfile)
+          setCompanyProfileError("")
+        }
+      } catch {
+        if (!cancelled) setCompanyProfileError("Company details could not be loaded from Settings.")
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [businessId])
+
   const applyProposalRow = useCallback(
     (p: Record<string, unknown>) => {
       setTitle((p.title as string) || "")
@@ -409,6 +459,8 @@ export function ProposalEditorForm({
       setPublicToken((p.public_token as string) || null)
       setConvertedEstimateId((p.converted_estimate_id as string) || null)
       setConvertedAt((p.converted_at as string) || null)
+      setConvertedInvoiceId((p.converted_invoice_id as string) || null)
+      setConvertedInvoiceAt((p.converted_invoice_at as string) || null)
       const pr = pricingPayloadForRender(String(p.pricing_mode), p.pricing_payload)
       if (pr.mode === "fixed") {
         setFixedAmount(String(pr.amount))
@@ -494,6 +546,63 @@ export function ProposalEditorForm({
 
   const contentSegments = useMemo(() => segmentsFromSections(sections), [sections])
   const contentChapters = useMemo(() => chapterRangesFromSections(sections), [sections])
+  const aiChapterTitles = useMemo(
+    () => contentChapters.map((chapter) => chapter.title),
+    [contentChapters]
+  )
+  const aiSnapshot = useMemo<ProposalAiSnapshot>(() => {
+    let pricing_payload: unknown = {}
+    try {
+      pricing_payload = buildPricingPayload()
+    } catch {
+      pricing_payload = {}
+    }
+    return {
+      title,
+      customer_id: customerId || null,
+      template_id: templateId,
+      currency_code: displayCurrency,
+      sections,
+      pricing_mode: pricingMode,
+      pricing_payload,
+    }
+  }, [
+    title,
+    customerId,
+    templateId,
+    displayCurrency,
+    sections,
+    pricingMode,
+    fixedAmount,
+    fixedLabel,
+    lineRows,
+    customNotes,
+  ])
+
+  function applyAiPreview(preview: ProposalAiPreview) {
+    setTitle(preview.title)
+    setSections(preview.sections)
+    if (preview.customer_id) setCustomerId(preview.customer_id)
+    setPricingMode(preview.pricing_mode)
+    const parsedPricing = pricingPayloadForRender(preview.pricing_mode, preview.pricing_payload)
+    if (parsedPricing.mode === "fixed") {
+      setFixedAmount(String(parsedPricing.amount))
+      setFixedLabel(parsedPricing.label || "")
+      setLineRows([{ description: "", quantity: "1", unitPrice: "0", discount: "0" }])
+    } else if (parsedPricing.mode === "line_items") {
+      setLineRows(parseLineRowsFromPayload("line_items", preview.pricing_payload))
+    } else {
+      setLineRows([{ description: "", quantity: "1", unitPrice: "0", discount: "0" }])
+      if (parsedPricing.mode === "custom") setCustomNotes(parsedPricing.notes || "")
+    }
+    setError("")
+    setAiNotice(
+      preview.customer_hint?.customer_name && !preview.customer_id
+        ? `AI changes applied to the editor. Suggested customer "${preview.customer_hint.customer_name}" was not applied automatically — confirm it in Basics. Review and save when ready.`
+        : "AI changes applied to the editor. Review the affected chapters and pricing, then click Save."
+    )
+    setAiOpen(false)
+  }
 
   const catalogFiltered = useMemo(() => {
     const q = catalogSearch.trim().toLowerCase()
@@ -837,6 +946,76 @@ export function ProposalEditorForm({
     [normalizedStatus, convertedEstimateId, pricingMode]
   )
   const canConvertToEstimate = convertBlockReason === null && normalizedStatus === "accepted"
+  const invoiceConvertBlockReason = proposalInvoiceConversionBlockReason({
+    status: normalizedStatus,
+    converted_estimate_id: convertedEstimateId,
+    converted_invoice_id: convertedInvoiceId,
+    pricing_mode: pricingMode,
+  })
+  const canConvertToInvoice = invoiceConvertBlockReason === null
+
+  async function convertToInvoice() {
+    if (!canConvertToInvoice) return
+    if (
+      !window.confirm(
+        "Create a draft invoice from this accepted proposal? The invoice opens as a draft for review before issuance."
+      )
+    ) {
+      return
+    }
+
+    let fxRate: number | null = null
+    if (displayCurrency && defaultCurrencyUpper && displayCurrency !== defaultCurrencyUpper) {
+      const entered = window.prompt(
+        `Enter the exchange rate for 1 ${displayCurrency} in ${defaultCurrencyUpper}. This is required by the existing invoice FX rules.`
+      )
+      if (entered == null) return
+      fxRate = Number(entered)
+      if (!Number.isFinite(fxRate) || fxRate <= 0) {
+        setError("Enter a positive exchange rate to create a foreign-currency invoice.")
+        return
+      }
+    }
+
+    try {
+      setInvoiceConvertBusy(true)
+      setError("")
+      setInvoiceConvertSuccess("")
+      const res = await fetch(`/api/proposals/${proposalId}/convert-invoice`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          business_id: businessId,
+          ...(fxRate != null ? { fx_rate: fxRate } : {}),
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (res.status === 409 && data.converted_invoice_id) {
+        setConvertedInvoiceId(data.converted_invoice_id as string)
+        setError(data.error || "This proposal already has a linked invoice.")
+        return
+      }
+      if (!res.ok) {
+        throw new Error(data.error || data.message || "Invoice conversion failed")
+      }
+      const invoiceId = data.invoice_id as string | undefined
+      if (invoiceId) {
+        setInvoiceConvertSuccess("Draft invoice created. Opening invoice editor…")
+        setConvertedInvoiceId(invoiceId)
+        setWorkflowStatus("converted")
+        window.setTimeout(() => {
+          router.push(`/service/invoices/${invoiceId}/edit`)
+        }, 400)
+      } else {
+        await reloadProposalFull()
+      }
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Invoice conversion failed")
+    } finally {
+      setInvoiceConvertBusy(false)
+    }
+  }
 
   async function convertToEstimate() {
     if (!canConvertToEstimate) return
@@ -974,6 +1153,16 @@ export function ProposalEditorForm({
                 </a>
               </p>
             ) : null}
+            {convertedInvoiceId ? (
+              <p className="text-xs text-slate-600">
+                Linked invoice:{" "}
+                <a className="font-medium text-blue-700 hover:underline" href={`/service/invoices/${convertedInvoiceId}/edit`}>
+                  Open draft invoice
+                </a>
+                {convertedInvoiceAt ? <span className="text-slate-500"> · created {formatWhen(convertedInvoiceAt)}</span> : null}
+              </p>
+            ) : null}
+            {aiNotice ? <p className="text-xs font-medium text-indigo-800">{aiNotice}</p> : null}
             {sendFeedback ? <p className="text-xs font-medium text-emerald-800">{sendFeedback}</p> : null}
           </div>
           <div className="flex flex-shrink-0 flex-wrap items-center gap-2">
@@ -995,6 +1184,13 @@ export function ProposalEditorForm({
                 {deleteBusy ? "Deleting…" : "Delete"}
               </button>
             ) : null}
+            <button
+              type="button"
+              onClick={() => setAiOpen(true)}
+              className="rounded-lg border border-indigo-200 bg-indigo-50 px-3.5 py-2 text-sm font-semibold text-indigo-900 shadow-sm hover:bg-indigo-100"
+            >
+              AI assistant
+            </button>
             <button
               type="button"
               onClick={() => router.push(`/service/proposals/${proposalId}/preview`)}
@@ -1137,12 +1333,35 @@ export function ProposalEditorForm({
                   >
                     Convert to estimate
                   </button>
+                  <button
+                    type="button"
+                    className="block w-full px-3 py-2 text-left text-sm text-emerald-900 hover:bg-emerald-50 disabled:opacity-40"
+                    disabled={invoiceConvertBusy || !canConvertToInvoice}
+                    onClick={() => {
+                      setMoreMenuOpen(false)
+                      void convertToInvoice()
+                    }}
+                  >
+                    {invoiceConvertBusy ? "Creating draft invoice…" : "Convert to draft invoice"}
+                  </button>
                 </div>
               ) : null}
             </div>
           </div>
         </div>
       </header>
+
+      <ProposalAiAssistant
+        proposalId={proposalId}
+        businessId={businessId}
+        open={aiOpen}
+        onClose={() => setAiOpen(false)}
+        disabled={contentLocked}
+        snapshot={aiSnapshot}
+        chapters={aiChapterTitles}
+        proposalStatus={workflowStatus}
+        onApply={applyAiPreview}
+      />
 
       <div className="w-full space-y-8 pb-10">
           {acceptedAt || rejectedAt || normalizedStatus === "converted" ? (
@@ -1155,11 +1374,15 @@ export function ProposalEditorForm({
                     : "border-slate-200 bg-slate-50 text-slate-800"
               }`}
             >
-              {acceptedAt ? "This proposal was accepted by the client. You can convert it to a quote when ready." : null}
+              {acceptedAt ? "This proposal was accepted by the client. You can convert it to a quote or draft invoice when ready." : null}
               {rejectedAt && !acceptedAt ? "This proposal was rejected by the client." : null}
               {normalizedStatus === "converted" && !acceptedAt && !rejectedAt
-                ? "This proposal has been converted to an estimate."
+                ? convertedInvoiceId
+                  ? "This proposal has been converted to a draft invoice."
+                  : "This proposal has been converted to an estimate."
                 : null}
+              {invoiceConvertSuccess ? <span className="mt-1 block font-medium">{invoiceConvertSuccess}</span> : null}
+              {convertSuccess ? <span className="mt-1 block font-medium">{convertSuccess}</span> : null}
             </div>
           ) : null}
 
@@ -1181,6 +1404,74 @@ export function ProposalEditorForm({
                   ))}
                 </select>
               </label>
+
+              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">Company details used in this proposal</p>
+                    <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                      Loaded from Business Profile. The reader and PDF use these saved values; proposal overrides
+                      below do not change the master record.
+                    </p>
+                  </div>
+                  <a
+                    href="/service/settings/business-profile"
+                    className="rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+                  >
+                    Edit in Settings
+                  </a>
+                </div>
+
+                {companyProfileError ? (
+                  <p className="mt-3 text-xs text-amber-800">{companyProfileError}</p>
+                ) : companyProfile ? (
+                  <div className="mt-3 grid gap-3 text-xs sm:grid-cols-2">
+                    <div className="flex items-start gap-3">
+                      {companyProfile.logo_url ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={companyProfile.logo_url}
+                          alt={`${companyProfile.trading_name || companyProfile.name} logo`}
+                          className="h-10 max-w-[120px] object-contain"
+                        />
+                      ) : null}
+                      <div>
+                        <p className="font-semibold uppercase tracking-wide text-slate-500">Business</p>
+                        <p className="mt-1 font-medium text-slate-900">
+                          {companyProfile.trading_name || companyProfile.legal_name || companyProfile.name}
+                        </p>
+                        {companyProfile.legal_name && companyProfile.trading_name ? (
+                          <p className="text-slate-500">Legal: {companyProfile.legal_name}</p>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="font-semibold uppercase tracking-wide text-slate-500">Address</p>
+                      <p className="mt-1 text-slate-700">
+                        {[companyProfile.address_street, companyProfile.address_city, companyProfile.address_region, companyProfile.address_country]
+                          .filter(Boolean)
+                          .join(", ") || "Not saved in Settings"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="font-semibold uppercase tracking-wide text-slate-500">Contact</p>
+                      <p className="mt-1 text-slate-700">
+                        {[companyProfile.phone, companyProfile.email, companyProfile.website].filter(Boolean).join(" · ") ||
+                          "Not saved in Settings"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="font-semibold uppercase tracking-wide text-slate-500">Tax / registration</p>
+                      <p className="mt-1 text-slate-700">
+                        {companyProfile.tin ? `TIN: ${companyProfile.tin}` : "TIN not saved in Settings"}
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="mt-3 text-xs text-slate-500">Loading company details…</p>
+                )}
+              </div>
+
               <div className="rounded-xl border border-slate-100 bg-slate-50/90 p-4">
                 {!currencyOverride ? (
                   <div className="flex flex-wrap items-center justify-between gap-2">

@@ -82,7 +82,7 @@ export async function GET(
     const { data: proposal, error: pErr } = await supabase
       .from("proposals")
       .select(
-        "id, business_id, customer_id, title, proposal_number, status, template_id, brand_accent_color, cover_asset_id, typography, sections, pricing_mode, pricing_payload, currency_code, public_token, expires_at, sent_at, viewed_at, accepted_at, rejected_at, rejected_reason, converted_estimate_id, converted_at, created_at, updated_at"
+        "id, business_id, customer_id, title, proposal_number, status, template_id, brand_accent_color, cover_asset_id, typography, sections, pricing_mode, pricing_payload, currency_code, public_token, expires_at, sent_at, viewed_at, accepted_at, rejected_at, rejected_reason, converted_estimate_id, converted_invoice_id, converted_at, converted_invoice_at, created_at, updated_at"
       )
       .eq("id", proposalId)
       .eq("business_id", businessId)

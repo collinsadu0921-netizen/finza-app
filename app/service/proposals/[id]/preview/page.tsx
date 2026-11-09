@@ -28,6 +28,7 @@ export default function ProposalPreviewPage() {
   const [copyTip, setCopyTip] = useState(false)
   const [pricingMode, setPricingMode] = useState<PricingMode>("none")
   const [convertedEstimateId, setConvertedEstimateId] = useState<string | null>(null)
+  const [convertedInvoiceId, setConvertedInvoiceId] = useState<string | null>(null)
   const [convertBusy, setConvertBusy] = useState(false)
   const [convertBanner, setConvertBanner] = useState("")
   const [customerId, setCustomerId] = useState("")
@@ -65,6 +66,7 @@ export default function ProposalPreviewPage() {
           public_token?: string
           pricing_mode?: PricingMode
           converted_estimate_id?: string | null
+          converted_invoice_id?: string | null
           customer_id?: string | null
           sent_at?: string | null
         } | undefined
@@ -74,6 +76,7 @@ export default function ProposalPreviewPage() {
         if (p?.status) setWorkflowStatus(p.status)
         if (p?.pricing_mode) setPricingMode(p.pricing_mode)
         setConvertedEstimateId((p?.converted_estimate_id as string) || null)
+        setConvertedInvoiceId((p?.converted_invoice_id as string) || null)
         setCustomerId((p?.customer_id as string) || "")
         setSentAt((p?.sent_at as string) || null)
       } catch (e: unknown) {
@@ -318,6 +321,14 @@ export default function ProposalPreviewPage() {
                 className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-50"
               >
                 Open draft quote
+              </a>
+            ) : null}
+            {convertedInvoiceId ? (
+              <a
+                href={`/service/invoices/${convertedInvoiceId}/edit`}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-50"
+              >
+                Open draft invoice
               </a>
             ) : null}
           </div>
