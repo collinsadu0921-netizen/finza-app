@@ -1,71 +1,94 @@
 import { beforeEach, describe, expect, it, jest } from "@jest/globals"
 
-jest.mock("@/lib/userRoles", () => ({
-  getUserRole: jest.fn(),
-  isUserAccountantReadonly: jest.fn(),
+jest.mock("@/lib/accounting/auth", () => ({
+  checkAccountingAuthority: jest.fn(),
 }))
 
-import {
-  getUserRole,
-  isUserAccountantReadonly,
-} from "@/lib/userRoles"
+import { checkAccountingAuthority } from "@/lib/accounting/auth"
 import { requireAccountingWriteRole } from "../requireAccountingWriteRole"
+
+function authority(
+  authorized: boolean,
+  authority_source?: "owner" | "employee" | "accountant" | "report_viewer"
+) {
+  return {
+    authorized,
+    businessId: "biz-1",
+    ...(authority_source ? { authority_source } : {}),
+  }
+}
 
 describe("requireAccountingWriteRole", () => {
   beforeEach(() => {
     jest.clearAllMocks()
-    ;(isUserAccountantReadonly as jest.Mock).mockResolvedValue(false)
   })
 
   it("allows the owner", async () => {
-    ;(getUserRole as jest.Mock).mockResolvedValue("owner")
+    ;(checkAccountingAuthority as jest.Mock).mockResolvedValue(
+      authority(true, "owner")
+    )
     await expect(
       requireAccountingWriteRole({} as never, "user-1", "biz-1")
     ).resolves.toBeNull()
+    expect(checkAccountingAuthority).toHaveBeenCalledWith(
+      {},
+      "user-1",
+      "biz-1",
+      "write"
+    )
   })
 
-  it("allows an admin", async () => {
-    ;(getUserRole as jest.Mock).mockResolvedValue("admin")
+  it("allows an admin/employee", async () => {
+    ;(checkAccountingAuthority as jest.Mock).mockResolvedValue(
+      authority(true, "employee")
+    )
     await expect(
       requireAccountingWriteRole({} as never, "user-1", "biz-1")
     ).resolves.toBeNull()
   })
 
   it("allows an authorized accountant", async () => {
-    ;(getUserRole as jest.Mock).mockResolvedValue("accountant")
+    ;(checkAccountingAuthority as jest.Mock).mockResolvedValue(
+      authority(true, "accountant")
+    )
     await expect(
       requireAccountingWriteRole({} as never, "user-1", "biz-1")
     ).resolves.toBeNull()
   })
 
   it("denies a read-only accountant", async () => {
-    ;(getUserRole as jest.Mock).mockResolvedValue("accountant")
-    ;(isUserAccountantReadonly as jest.Mock).mockResolvedValue(true)
+    ;(checkAccountingAuthority as jest.Mock).mockResolvedValue(
+      authority(false)
+    )
     await expect(
       requireAccountingWriteRole({} as never, "user-1", "biz-1")
     ).resolves.toMatchObject({
       status: 403,
-      code: "ACCOUNTING_WRITE_READ_ONLY",
+      code: "INSUFFICIENT_AUTHORITY",
     })
   })
 
-  it("denies staff", async () => {
-    ;(getUserRole as jest.Mock).mockResolvedValue("staff")
+  it("denies staff without accounting authority", async () => {
+    ;(checkAccountingAuthority as jest.Mock).mockResolvedValue(
+      authority(false)
+    )
     await expect(
       requireAccountingWriteRole({} as never, "user-1", "biz-1")
     ).resolves.toMatchObject({
       status: 403,
-      code: "ACCOUNTING_WRITE_PERMISSION_DENIED",
+      code: "INSUFFICIENT_AUTHORITY",
     })
   })
 
   it("denies a non-member/cross-tenant user", async () => {
-    ;(getUserRole as jest.Mock).mockResolvedValue(null)
+    ;(checkAccountingAuthority as jest.Mock).mockResolvedValue(
+      authority(false)
+    )
     await expect(
       requireAccountingWriteRole({} as never, "user-1", "biz-1")
     ).resolves.toMatchObject({
       status: 403,
-      code: "ACCOUNTING_WRITE_FORBIDDEN",
+      code: "INSUFFICIENT_AUTHORITY",
     })
   })
 })
