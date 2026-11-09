@@ -415,9 +415,31 @@ export const ghanaTaxEngine: TaxEngine = {
     // PostgreSQL NUMERIC ensures anchoredSubtotal + taxSum = totalInclusive exactly.
     const anchoredSubtotal = roundGhanaTax(totalInclusive - taxSum)
 
+    // Keep persisted tax-line bases aligned with the anchored subtotal. The
+    // forward calculation used a rounded division base (e.g. 83.33), while the
+    // invoice/bill subtotal is anchored to the user's tax-inclusive total
+    // (e.g. 83.34). extract_tax_line_base() reads the minimum persisted base,
+    // so leaving the forward base makes the VAT return/PDF disagree with the
+    // ledger by one pesewa.
+    const simplifiedRegime = isSimplifiedRegime(config.effectiveDate)
+    const levySum = roundGhanaTax(
+      nonRoundingLines
+        .filter((line) => line.code !== 'VAT')
+        .reduce((sum, line) => sum + line.amount, 0)
+    )
+    const anchoredLines = nonRoundingLines.map((line) => ({
+      ...line,
+      base:
+        line.code === 'VAT'
+          ? roundGhanaTax(
+              simplifiedRegime ? anchoredSubtotal : anchoredSubtotal + levySum
+            )
+          : anchoredSubtotal,
+    }))
+
     return {
       ...result,
-      taxLines: nonRoundingLines,         // no 7990 ROUNDING line for reverse calc
+      taxLines: anchoredLines,         // no 7990 ROUNDING line for reverse calc
       subtotal_excl_tax: anchoredSubtotal, // base — anchored to user's total
       tax_total: taxSum,                   // actual sum charged (may differ from roundedTotalTax by 0.01)
       total_incl_tax: totalInclusive,      // exact user input — never re-derived from components
