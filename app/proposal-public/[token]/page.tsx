@@ -96,8 +96,11 @@ export default function PublicProposalPage() {
 
   const st = meta ? normalizeProposalStatus(meta.status) : "draft"
   const label = PROPOSAL_STATUS_LABEL[st]
+  const terminalDecision = st === "accepted" || st === "converted" || st === "rejected"
 
-  const acceptanceSlot = meta ? (
+  // Terminal decisions are already explained by the reader's acceptance status
+  // block. Avoid exposing internal workflow language such as "Converted".
+  const acceptanceSlot = meta && !terminalDecision ? (
     <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
       {meta.actionable ? (
         <div className="space-y-3">
