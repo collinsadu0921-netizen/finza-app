@@ -426,6 +426,8 @@ const BASE_CSS = `
     border-bottom: 1px solid var(--pdf-rule);
     padding-bottom: 4mm;
     margin-bottom: 6mm;
+    break-inside: avoid;
+    page-break-inside: avoid;
     break-after: avoid;
     page-break-after: avoid;
   }

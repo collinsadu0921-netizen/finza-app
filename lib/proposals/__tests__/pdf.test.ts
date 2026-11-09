@@ -75,6 +75,7 @@ describe("buildProposalHtmlForPdf", () => {
     expect(html).toContain("page-break-before: always")
     expect(html).toContain("page-break-after: avoid")
     expect(html).toContain("page-break-inside: avoid")
+    expect(html).toMatch(/\.pdf-chapter-head\s*\{[^}]*break-inside:\s*avoid/)
     expect(html).toContain("print-color-adjust: exact")
   })
 
