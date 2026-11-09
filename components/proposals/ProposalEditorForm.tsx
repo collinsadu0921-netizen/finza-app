@@ -17,6 +17,18 @@ import {
 } from "@/lib/proposals/proposalState"
 import { formatMoney } from "@/lib/money"
 import { ExportLink } from "@/components/ui/ExportButton"
+import {
+  PROPOSAL_TEMPLATE_META,
+  normalizeTemplateId,
+  type ProposalTemplateId,
+} from "@/lib/proposals/templates"
+import {
+  PROPOSAL_TYPOGRAPHY_OPTIONS,
+  defaultTypographyForTemplate,
+  normalizeAccentColor,
+  normalizeTypography,
+  type ProposalTypography,
+} from "@/lib/proposals/design"
 
 type CustomerOpt = { id: string; name: string; email: string | null; phone: string | null; whatsapp_phone?: string | null }
 
@@ -116,11 +128,16 @@ const BLOCK_LABEL: Record<ProposalSectionBlock["type"], string> = {
 
 /** Preset section titles → stored as H2 + paragraph (existing schema). */
 const PROPOSAL_SECTION_PRESETS = [
-  "Executive summary",
+  "Introduction",
+  "About the company",
+  "Client needs and project overview",
+  "Proposed solution",
   "Scope of work",
   "Deliverables",
-  "Timeline",
-  "Terms",
+  "Timeline and milestones",
+  "Portfolio",
+  "Investment and pricing",
+  "Terms and conditions",
   "Acceptance",
   "Custom text",
 ] as const
@@ -144,6 +161,35 @@ function segmentsFromSections(sections: ProposalSectionBlock[]): EditorSegment[]
     }
   }
   return out
+}
+
+type EditorChapterRange = {
+  start: number
+  end: number
+  title: string
+  hidden: boolean
+}
+
+/** H2 heading plus every following block until the next H2. */
+function chapterRangesFromSections(sections: ProposalSectionBlock[]): EditorChapterRange[] {
+  const ranges: EditorChapterRange[] = []
+  let i = 0
+  while (i < sections.length) {
+    const section = sections[i]
+    if (section.type !== "heading" || section.level !== 2) {
+      i += 1
+      continue
+    }
+    let end = i + 1
+    while (end < sections.length) {
+      const next = sections[end]
+      if (next.type === "heading" && next.level === 2) break
+      end += 1
+    }
+    ranges.push({ start: i, end, title: section.text.trim() || "Untitled chapter", hidden: section.hidden === true })
+    i = end
+  }
+  return ranges
 }
 
 export function ProposalEditorForm({
@@ -177,6 +223,10 @@ export function ProposalEditorForm({
   const [customNotes, setCustomNotes] = useState("")
   const [currencyCode, setCurrencyCode] = useState("")
   const [currencyOverride, setCurrencyOverride] = useState(false)
+  const [templateId, setTemplateId] = useState<ProposalTemplateId>("premium_v1")
+  const [accentColor, setAccentColor] = useState("")
+  const [typography, setTypography] = useState<ProposalTypography>("sans")
+  const [coverAssetId, setCoverAssetId] = useState("")
   const [workflowStatus, setWorkflowStatus] = useState("draft")
   const [viewedAt, setViewedAt] = useState<string | null>(null)
   const [sentAt, setSentAt] = useState<string | null>(null)
@@ -341,6 +391,15 @@ export function ProposalEditorForm({
         setCurrencyOverride(true)
         setCurrencyCode(rowCur)
       }
+      const rowTemplateId = normalizeTemplateId((p.template_id as string) || null)
+      setTemplateId(rowTemplateId)
+      setAccentColor(normalizeAccentColor((p.brand_accent_color as string) || "", ""))
+      setTypography(
+        p.typography
+          ? normalizeTypography(p.typography)
+          : defaultTypographyForTemplate(rowTemplateId)
+      )
+      setCoverAssetId((p.cover_asset_id as string) || "")
       setWorkflowStatus((p.status as string) || "draft")
       setViewedAt((p.viewed_at as string) || null)
       setSentAt((p.sent_at as string) || null)
@@ -434,6 +493,7 @@ export function ProposalEditorForm({
   const imageAssets = assets.filter((a) => a.kind === "image")
 
   const contentSegments = useMemo(() => segmentsFromSections(sections), [sections])
+  const contentChapters = useMemo(() => chapterRangesFromSections(sections), [sections])
 
   const catalogFiltered = useMemo(() => {
     const q = catalogSearch.trim().toLowerCase()
@@ -454,6 +514,70 @@ export function ProposalEditorForm({
       const copy = [...prev]
       copy.splice(hi, 1)
       copy.splice(lo, 1)
+      return copy
+    })
+  }
+
+  function segmentRange(segment: ReturnType<typeof segmentsFromSections>[number]): { start: number; length: number } {
+    if (segment.kind === "pair") {
+      return { start: Math.min(segment.headIdx, segment.paraIdx), length: 2 }
+    }
+    return { start: segment.idx, length: 1 }
+  }
+
+  function moveSegment(segmentIndex: number, delta: number) {
+    setSections((prev) => {
+      const segments = segmentsFromSections(prev)
+      const targetIndex = segmentIndex + delta
+      if (targetIndex < 0 || targetIndex >= segments.length) return prev
+      const ranges = segments.map(segmentRange)
+      const blocks = ranges.map((range) => prev.slice(range.start, range.start + range.length))
+      const moved = blocks[segmentIndex]
+      blocks[segmentIndex] = blocks[targetIndex]
+      blocks[targetIndex] = moved
+      return blocks.flat()
+    })
+  }
+
+  function setSegmentHidden(segmentIndex: number, hidden: boolean) {
+    setSections((prev) => {
+      const segment = segmentsFromSections(prev)[segmentIndex]
+      if (!segment) return prev
+      const copy = [...prev]
+      if (segment.kind === "pair") {
+        for (const index of [segment.headIdx, segment.paraIdx]) {
+          const block = copy[index]
+          if (block) copy[index] = { ...block, hidden }
+        }
+      } else {
+        const block = copy[segment.idx]
+        if (block) copy[segment.idx] = { ...block, hidden }
+      }
+      return copy
+    })
+  }
+
+  function moveChapter(chapterIndex: number, delta: number) {
+    setSections((prev) => {
+      const ranges = chapterRangesFromSections(prev)
+      const targetIndex = chapterIndex + delta
+      if (targetIndex < 0 || targetIndex >= ranges.length) return prev
+      const prefix = prev.slice(0, ranges[0].start)
+      const chunks = ranges.map((range) => prev.slice(range.start, range.end))
+      const moved = chunks[chapterIndex]
+      chunks[chapterIndex] = chunks[targetIndex]
+      chunks[targetIndex] = moved
+      return [...prefix, ...chunks.flat()]
+    })
+  }
+
+  function setChapterHidden(chapterIndex: number, hidden: boolean) {
+    setSections((prev) => {
+      const range = chapterRangesFromSections(prev)[chapterIndex]
+      if (!range) return prev
+      const copy = [...prev]
+      const heading = copy[range.start]
+      if (heading?.type === "heading") copy[range.start] = { ...heading, hidden }
       return copy
     })
   }
@@ -558,6 +682,10 @@ export function ProposalEditorForm({
           business_id: businessId,
           title,
           customer_id: customerId || null,
+          template_id: templateId,
+          brand_accent_color: accentColor.trim() || null,
+          typography,
+          cover_asset_id: coverAssetId || null,
           sections: cleanedSections,
           pricing_mode: pricingMode,
           pricing_payload: pricingPayload,
@@ -1101,10 +1229,167 @@ export function ProposalEditorForm({
           </SectionCard>
 
           <SectionCard
+            title="Design"
+            subtitle="Choose the document system, accent colour, typography and optional cover image. The reader and PDF use the same settings."
+          >
+            <div className={`space-y-6 ${contentLocked ? "pointer-events-none opacity-60" : ""}`}>
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Template</p>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  {PROPOSAL_TEMPLATE_META.map((template) => {
+                    const active = templateId === template.id
+                    return (
+                      <button
+                        key={template.id}
+                        type="button"
+                        onClick={() => setTemplateId(template.id)}
+                        className={`rounded-2xl border p-4 text-left transition ${
+                          active
+                            ? "border-slate-900 bg-slate-900 text-white shadow-sm"
+                            : "border-slate-200 bg-white text-slate-800 shadow-sm hover:border-slate-300"
+                        }`}
+                        aria-pressed={active}
+                      >
+                        <span
+                          className="mb-3 block h-2 w-12 rounded-full"
+                          style={{ backgroundColor: accentColor || template.accent }}
+                        />
+                        <span className="block text-sm font-semibold">{template.label}</span>
+                        <span className={`mt-1 block text-xs leading-relaxed ${active ? "text-slate-300" : "text-slate-500"}`}>
+                          {template.description}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              <div className="grid gap-5 sm:grid-cols-2">
+                <label className="block text-sm">
+                  <span className="font-medium text-slate-700">Accent colour</span>
+                  <div className="mt-2 flex items-center gap-3">
+                    <input
+                      type="color"
+                      value={accentColor || "#0f766e"}
+                      onChange={(event) => setAccentColor(event.target.value)}
+                      className="h-10 w-14 cursor-pointer rounded-lg border border-slate-300 bg-white p-1"
+                      aria-label="Proposal accent colour"
+                    />
+                    <input
+                      className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm uppercase shadow-sm"
+                      value={accentColor}
+                      onChange={(event) => setAccentColor(event.target.value)}
+                      placeholder="Template default"
+                      maxLength={7}
+                    />
+                    <button
+                      type="button"
+                      className="text-xs font-semibold text-slate-600 hover:text-slate-900"
+                      onClick={() => setAccentColor("")}
+                    >
+                      Reset
+                    </button>
+                  </div>
+                </label>
+
+                <label className="block text-sm">
+                  <span className="font-medium text-slate-700">Typography</span>
+                  <select
+                    className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm shadow-sm"
+                    value={typography}
+                    onChange={(event) => setTypography(event.target.value as ProposalTypography)}
+                  >
+                    {PROPOSAL_TYPOGRAPHY_OPTIONS.map((option) => (
+                      <option key={option} value={option}>
+                        {option === "sans" ? "Sans-serif · contemporary" : option === "serif" ? "Serif headings · editorial" : "Editorial serif · book"}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <label className="block text-sm">
+                <span className="font-medium text-slate-700">Cover image</span>
+                <select
+                  className="mt-2 w-full max-w-xl rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm shadow-sm"
+                  value={coverAssetId}
+                  onChange={(event) => setCoverAssetId(event.target.value)}
+                >
+                  <option value="">Use the template cover</option>
+                  {imageAssets.map((asset) => (
+                    <option key={asset.id} value={asset.id}>
+                      {asset.file_name}
+                    </option>
+                  ))}
+                </select>
+                <span className="mt-1 block text-xs text-slate-500">
+                  Upload images in Media first. The cover image is only shown when it is client-visible.
+                </span>
+              </label>
+
+              <div className="rounded-xl border border-slate-100 bg-slate-50/80 px-4 py-3 text-xs leading-relaxed text-slate-600">
+                <span className="font-semibold text-slate-800">Live document:</span> use Preview to open the digital book.
+                Existing proposals remain on Classic (legacy) unless you choose a new template.
+              </div>
+            </div>
+          </SectionCard>
+
+          <SectionCard
             title="Content"
             subtitle="Executive summary, scope, timeline, terms, and other narrative blocks — each section is a heading plus body copy."
           >
             <div className={`space-y-6 ${contentLocked ? "pointer-events-none opacity-60" : ""}`}>
+              {contentChapters.length > 0 ? (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Chapter order</p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Move whole chapters or hide them from the reader and PDF. The acceptance chapter is always placed last.
+                  </p>
+                  <ol className="mt-3 space-y-2">
+                    {contentChapters.map((chapter, chapterIndex) => {
+                      const required = /^(acceptance|sign[ -]?off|approval|client acceptance)$/i.test(chapter.title)
+                      return (
+                        <li
+                          key={`chapter-${chapter.start}-${chapterIndex}`}
+                          className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                        >
+                          <span className="min-w-0 flex-1 truncate font-medium text-slate-800">
+                            {chapterIndex + 1}. {chapter.title}
+                          </span>
+                          <button
+                            type="button"
+                            className="rounded-md px-2 py-1 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-900 disabled:opacity-30"
+                            onClick={() => moveChapter(chapterIndex, -1)}
+                            disabled={chapterIndex === 0 || required}
+                            aria-label={`Move ${chapter.title} chapter up`}
+                          >
+                            ↑
+                          </button>
+                          <button
+                            type="button"
+                            className="rounded-md px-2 py-1 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-900 disabled:opacity-30"
+                            onClick={() => moveChapter(chapterIndex, 1)}
+                            disabled={chapterIndex === contentChapters.length - 1 || required}
+                            aria-label={`Move ${chapter.title} chapter down`}
+                          >
+                            ↓
+                          </button>
+                          <label className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-slate-500">
+                            <input
+                              type="checkbox"
+                              checked={chapter.hidden}
+                              onChange={(event) => setChapterHidden(chapterIndex, event.target.checked)}
+                              disabled={required}
+                            />
+                            {required ? "Final chapter" : "Hidden"}
+                          </label>
+                        </li>
+                      )
+                    })}
+                  </ol>
+                </div>
+              ) : null}
+
               <div className="space-y-4">
                 {contentSegments.length === 0 ? (
                   <p className="rounded-xl border border-dashed border-slate-200 bg-slate-50/80 px-5 py-8 text-center text-sm text-slate-600">
@@ -1130,13 +1415,41 @@ export function ProposalEditorForm({
                               onChange={(e) => updatePairHeading(seg.headIdx, e.target.value)}
                             />
                           </label>
-                          <button
-                            type="button"
-                            className="shrink-0 rounded-md px-2 py-1 text-xs font-medium text-slate-400 hover:bg-red-50 hover:text-red-700 sm:mt-7"
-                            onClick={() => removePair(seg.headIdx, seg.paraIdx)}
-                          >
-                            Remove
-                          </button>
+                          <div className="flex shrink-0 flex-wrap items-center gap-2 sm:mt-7">
+                            <button
+                              type="button"
+                              className="rounded-md px-2 py-1 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-900 disabled:opacity-30"
+                              onClick={() => moveSegment(si, -1)}
+                              disabled={si === 0}
+                              aria-label="Move section up"
+                            >
+                              ↑
+                            </button>
+                            <button
+                              type="button"
+                              className="rounded-md px-2 py-1 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-900 disabled:opacity-30"
+                              onClick={() => moveSegment(si, 1)}
+                              disabled={si === contentSegments.length - 1}
+                              aria-label="Move section down"
+                            >
+                              ↓
+                            </button>
+                            <label className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-slate-500">
+                              <input
+                                type="checkbox"
+                                checked={head.hidden === true}
+                                onChange={(event) => setSegmentHidden(si, event.target.checked)}
+                              />
+                              Hidden
+                            </label>
+                            <button
+                              type="button"
+                              className="rounded-md px-2 py-1 text-xs font-medium text-slate-400 hover:bg-red-50 hover:text-red-700"
+                              onClick={() => removePair(seg.headIdx, seg.paraIdx)}
+                            >
+                              Remove
+                            </button>
+                          </div>
                         </div>
                         <label className="block text-sm">
                           <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Content</span>
@@ -1158,15 +1471,43 @@ export function ProposalEditorForm({
                       key={`aux-${idx}-${block.type}-${si}`}
                       className="rounded-xl border border-slate-200/90 bg-slate-50/40 p-5"
                     >
-                      <div className="mb-4 flex items-center justify-between gap-2">
+                      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
                         <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{BLOCK_LABEL[block.type]}</p>
-                        <button
-                          type="button"
-                          className="rounded-md px-2 py-1 text-xs font-medium text-slate-400 hover:bg-red-50 hover:text-red-700"
-                          onClick={() => removeBlock(idx)}
-                        >
-                          Remove
-                        </button>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            className="rounded-md px-2 py-1 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-900 disabled:opacity-30"
+                            onClick={() => moveSegment(si, -1)}
+                            disabled={si === 0}
+                            aria-label="Move block up"
+                          >
+                            ↑
+                          </button>
+                          <button
+                            type="button"
+                            className="rounded-md px-2 py-1 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-900 disabled:opacity-30"
+                            onClick={() => moveSegment(si, 1)}
+                            disabled={si === contentSegments.length - 1}
+                            aria-label="Move block down"
+                          >
+                            ↓
+                          </button>
+                          <label className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-slate-500">
+                            <input
+                              type="checkbox"
+                              checked={block.hidden === true}
+                              onChange={(event) => setSegmentHidden(si, event.target.checked)}
+                            />
+                            Hidden
+                          </label>
+                          <button
+                            type="button"
+                            className="rounded-md px-2 py-1 text-xs font-medium text-slate-400 hover:bg-red-50 hover:text-red-700"
+                            onClick={() => removeBlock(idx)}
+                          >
+                            Remove
+                          </button>
+                        </div>
                       </div>
                       <div className="space-y-3">
                         {block.type === "heading" ? (

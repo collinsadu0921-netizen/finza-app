@@ -23,8 +23,8 @@ type ProposalDbRow = ProposalRow & {
 const PUBLIC_PROPOSAL_PDF_STATUSES = new Set(["sent", "viewed", "accepted", "rejected", "converted"])
 
 export async function GET(
-  _request: NextRequest,
-  { params }: { params: Promise<{ token: string }> }
+  request: NextRequest,
+  { params }: { params: Promise<{ token: string }> | { token: string } }
 ) {
   try {
     const { token: raw } = await Promise.resolve(params)
@@ -41,7 +41,7 @@ export async function GET(
     const { data: proposal, error: pErr } = await admin
       .from("proposals")
       .select(
-        "id, business_id, customer_id, title, proposal_number, status, template_id, sections, pricing_mode, pricing_payload, currency_code, public_token, expires_at"
+        "id, business_id, customer_id, title, proposal_number, status, template_id, brand_accent_color, cover_asset_id, typography, sections, pricing_mode, pricing_payload, currency_code, public_token, expires_at, created_at"
       )
       .eq("public_token", token)
       .is("deleted_at", null)
@@ -99,6 +99,7 @@ export async function GET(
 
     const assets = (assetsRaw || []) as ProposalAssetRow[]
     const tokenSeg = encodeURIComponent(token)
+    const assetOrigin = new URL(request.url).origin
     const { model } = await assembleProposalRenderModel(admin, {
       proposal: p as ProposalRow,
       business: b,
@@ -108,7 +109,7 @@ export async function GET(
       signTtlSec: 7200,
       includePublicToken: false,
       publicAssetUrlForId: (assetId) =>
-        `/api/proposals/public/${tokenSeg}/assets/${encodeURIComponent(assetId)}`,
+        `${assetOrigin}/api/proposals/public/${tokenSeg}/assets/${encodeURIComponent(assetId)}`,
     })
 
     const html = buildProposalHtmlForPdf(model)

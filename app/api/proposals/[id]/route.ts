@@ -8,7 +8,8 @@ import { assertProposalSections, type PricingMode } from "@/lib/proposals/schema
 import { validateAndNormalizePricingForDb } from "@/lib/proposals/pricingForDb"
 import { assembleProposalRenderModel, type ProposalAssetRow, type ProposalRow } from "@/lib/proposals/assembleRenderModel"
 import type { ProposalRenderBusiness, ProposalRenderCustomer } from "@/lib/proposals/renderModel"
-import { isKnownTemplateId, DEFAULT_PROPOSAL_TEMPLATE_ID } from "@/lib/proposals/templates"
+import { normalizeTemplateId } from "@/lib/proposals/templates"
+import { normalizeAccentColor, normalizeTypography } from "@/lib/proposals/design"
 import { normalizeProposalStatus, proposalCanBeEditedByStaff } from "@/lib/proposals/proposalState"
 
 export const dynamic = "force-dynamic"
@@ -81,7 +82,7 @@ export async function GET(
     const { data: proposal, error: pErr } = await supabase
       .from("proposals")
       .select(
-        "id, business_id, customer_id, title, proposal_number, status, template_id, sections, pricing_mode, pricing_payload, currency_code, public_token, expires_at, sent_at, viewed_at, accepted_at, rejected_at, rejected_reason, converted_estimate_id, converted_at, created_at, updated_at"
+        "id, business_id, customer_id, title, proposal_number, status, template_id, brand_accent_color, cover_asset_id, typography, sections, pricing_mode, pricing_payload, currency_code, public_token, expires_at, sent_at, viewed_at, accepted_at, rejected_at, rejected_reason, converted_estimate_id, converted_at, created_at, updated_at"
       )
       .eq("id", proposalId)
       .eq("business_id", businessId)
@@ -142,6 +143,9 @@ const putSchema = z
     customer_id: z.string().uuid().nullable().optional(),
     sections: z.array(z.unknown()).optional(),
     template_id: z.string().max(120).optional(),
+    brand_accent_color: z.string().max(7).nullable().optional(),
+    cover_asset_id: z.string().uuid().nullable().optional(),
+    typography: z.enum(["sans", "serif", "editorial"]).optional(),
     pricing_mode: z.enum(["none", "fixed", "line_items", "custom"]).optional(),
     pricing_payload: z.unknown().optional(),
     currency_code: z.string().max(8).nullable().optional(),
@@ -244,6 +248,22 @@ export async function PUT(
       }
     }
 
+    if (body.data.cover_asset_id) {
+      const { data: coverAsset } = await supabase
+        .from("proposal_assets")
+        .select("id, kind")
+        .eq("id", body.data.cover_asset_id)
+        .eq("proposal_id", proposalId)
+        .eq("business_id", businessId)
+        .maybeSingle()
+      if (!coverAsset || coverAsset.kind !== "image") {
+        return NextResponse.json(
+          { error: "Cover image must be an image uploaded to this proposal." },
+          { status: 400 }
+        )
+      }
+    }
+
     const patch: Record<string, unknown> = {
       updated_by_user_id: user.id,
     }
@@ -254,7 +274,18 @@ export async function PUT(
       patch.sections = assertProposalSections(body.data.sections)
     }
     if (body.data.template_id !== undefined) {
-      patch.template_id = isKnownTemplateId(body.data.template_id) ? body.data.template_id : DEFAULT_PROPOSAL_TEMPLATE_ID
+      patch.template_id = normalizeTemplateId(body.data.template_id)
+    }
+    if (body.data.brand_accent_color !== undefined) {
+      patch.brand_accent_color = body.data.brand_accent_color
+        ? normalizeAccentColor(body.data.brand_accent_color, "") || null
+        : null
+    }
+    if (body.data.cover_asset_id !== undefined) {
+      patch.cover_asset_id = body.data.cover_asset_id
+    }
+    if (body.data.typography !== undefined) {
+      patch.typography = normalizeTypography(body.data.typography)
     }
     if (body.data.currency_code !== undefined) {
       patch.currency_code = body.data.currency_code?.trim() || null
@@ -278,7 +309,7 @@ export async function PUT(
       .update(patch)
       .eq("id", proposalId)
       .eq("business_id", businessId)
-      .select("id, title, status, template_id, customer_id, sections, pricing_mode, pricing_payload, currency_code, updated_at")
+      .select("id, title, status, template_id, brand_accent_color, cover_asset_id, typography, customer_id, sections, pricing_mode, pricing_payload, currency_code, updated_at")
       .single()
 
     if (error || !row) {

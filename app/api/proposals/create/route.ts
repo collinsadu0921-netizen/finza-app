@@ -3,7 +3,8 @@ import { z } from "zod"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { requireBusinessScopeForUser } from "@/lib/business"
 import { createAuditLog } from "@/lib/auditLog"
-import { defaultSectionsForTemplate, DEFAULT_PROPOSAL_TEMPLATE_ID, isKnownTemplateId } from "@/lib/proposals/templates"
+import { defaultSectionsForTemplate, normalizeTemplateId } from "@/lib/proposals/templates"
+import { defaultTypographyForTemplate, normalizeAccentColor, normalizeTypography } from "@/lib/proposals/design"
 import { validateAndNormalizePricingForDb } from "@/lib/proposals/pricingForDb"
 
 const bodySchema = z.object({
@@ -11,6 +12,8 @@ const bodySchema = z.object({
   title: z.string().max(500).optional(),
   customer_id: z.string().uuid().nullable().optional(),
   template_id: z.string().max(120).optional(),
+  brand_accent_color: z.string().max(7).nullable().optional(),
+  typography: z.enum(["sans", "serif", "editorial"]).optional(),
   pricing_mode: z.enum(["none", "fixed", "line_items", "custom"]).optional(),
   pricing_payload: z.unknown().optional(),
   currency_code: z.string().max(8).nullable().optional(),
@@ -40,8 +43,13 @@ export async function POST(request: NextRequest) {
     }
     const businessId = scope.businessId
 
-    const templateId =
-      body.data.template_id && isKnownTemplateId(body.data.template_id) ? body.data.template_id : DEFAULT_PROPOSAL_TEMPLATE_ID
+    const templateId = normalizeTemplateId(body.data.template_id)
+    const accentColor = body.data.brand_accent_color
+      ? normalizeAccentColor(body.data.brand_accent_color, "")
+      : null
+    const typography = body.data.typography
+      ? normalizeTypography(body.data.typography)
+      : defaultTypographyForTemplate(templateId)
 
     if (body.data.customer_id) {
       const { data: cust } = await supabase
@@ -68,6 +76,8 @@ export async function POST(request: NextRequest) {
         customer_id: body.data.customer_id ?? null,
         title: (body.data.title || "Untitled proposal").trim(),
         template_id: templateId,
+        brand_accent_color: accentColor || null,
+        typography,
         sections,
         pricing_mode,
         pricing_payload,

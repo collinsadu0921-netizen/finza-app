@@ -12,11 +12,16 @@ export type ProposalRow = {
   proposal_number: string | null
   status: string
   template_id: string
+  brand_accent_color?: string | null
+  cover_asset_id?: string | null
+  typography?: string | null
   sections: unknown
   pricing_mode: string
   pricing_payload: unknown
   currency_code: string | null
   public_token: string | null
+  created_at?: string | null
+  expires_at?: string | null
 }
 
 export type ProposalAssetRow = {
@@ -68,11 +73,16 @@ export async function assembleProposalRenderModel(
     proposal_number: input.proposal.proposal_number,
     status: input.proposal.status,
     template_id: input.proposal.template_id,
+    brand_accent_color: input.proposal.brand_accent_color ?? null,
+    cover_asset_id: input.proposal.cover_asset_id ?? null,
+    typography: input.proposal.typography ?? null,
     currency_code: input.proposal.currency_code,
     business: input.business,
     customer: input.customer,
     sections,
     pricing,
+    created_at: input.proposal.created_at ?? null,
+    expires_at: input.proposal.expires_at ?? null,
     assets: input.assets.map((a) => ({
       id: a.id,
       kind: a.kind,

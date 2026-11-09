@@ -7,32 +7,38 @@ export const proposalSectionBlockSchema = z.discriminatedUnion("type", [
     id: z.string().min(1).optional(),
     level: z.number().int().min(1).max(6),
     text: z.string(),
+    hidden: z.boolean().optional(),
   }),
   z.object({
     type: z.literal("paragraph"),
     id: z.string().min(1).optional(),
     text: z.string(),
+    hidden: z.boolean().optional(),
   }),
   z.object({
     type: z.literal("bullet_list"),
     id: z.string().min(1).optional(),
     items: z.array(z.string()),
+    hidden: z.boolean().optional(),
   }),
   z.object({
     type: z.literal("image"),
     id: z.string().min(1).optional(),
     asset_id: z.string().uuid(),
     caption: z.string().optional(),
+    hidden: z.boolean().optional(),
   }),
   z.object({
     type: z.literal("gallery"),
     id: z.string().min(1).optional(),
     asset_ids: z.array(z.string().uuid()).min(1),
     caption: z.string().optional(),
+    hidden: z.boolean().optional(),
   }),
   z.object({
     type: z.literal("divider"),
     id: z.string().min(1).optional(),
+    hidden: z.boolean().optional(),
   }),
 ])
 

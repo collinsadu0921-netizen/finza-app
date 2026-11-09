@@ -233,7 +233,8 @@ function ProposalDocumentBody({
   /** Premium single-column proposal typography (preview, public, print) */
   docTypography: boolean
 }) {
-  const { lead, investment, tail } = splitForInvestmentPlacement(model.sections)
+  const visibleSections = model.sections.filter((section) => !section.hidden)
+  const { lead, investment, tail } = splitForInvestmentPlacement(visibleSections)
   const mapBlocks = (blocks: ProposalRenderSection[], keyPrefix: string) =>
     blocks.map((s, idx) => renderSectionBlock(s, `${keyPrefix}-${s.type}-${idx}`, docTypography))
 
