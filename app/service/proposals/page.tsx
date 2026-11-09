@@ -183,6 +183,15 @@ export default function ServiceProposalsPage() {
                               Quote
                             </button>
                           ) : null}
+                          {r.converted_invoice_id ? (
+                            <button
+                              type="button"
+                              className="text-sm font-medium text-emerald-800 hover:underline"
+                              onClick={() => router.push(`/service/invoices/${r.converted_invoice_id}/edit`)}
+                            >
+                              Invoice
+                            </button>
+                          ) : null}
                           <button
                             type="button"
                             className="text-sm font-medium text-blue-700 hover:underline"

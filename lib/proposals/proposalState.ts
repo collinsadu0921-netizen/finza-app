@@ -68,6 +68,35 @@ export function proposalIsLinkedToEstimate(convertedEstimateId: string | null | 
   return typeof convertedEstimateId === "string" && convertedEstimateId.length > 0
 }
 
+/** Proposal already linked to a draft invoice from conversion (idempotent guard). */
+export function proposalIsLinkedToInvoice(convertedInvoiceId: string | null | undefined): boolean {
+  return typeof convertedInvoiceId === "string" && convertedInvoiceId.length > 0
+}
+
+/**
+ * Accepted proposals may be converted directly to a draft invoice when they
+ * have not already been converted to an estimate or invoice.
+ */
+export function proposalInvoiceConversionBlockReason(params: {
+  status: ProposalStatus
+  converted_estimate_id: string | null | undefined
+  converted_invoice_id: string | null | undefined
+  pricing_mode: string | null | undefined
+}):
+  | "already_invoiced"
+  | "already_linked_estimate"
+  | "wrong_status"
+  | "pricing"
+  | null {
+  if (proposalIsLinkedToInvoice(params.converted_invoice_id)) return "already_invoiced"
+  if (proposalIsLinkedToEstimate(params.converted_estimate_id) || params.status === "converted") {
+    return "already_linked_estimate"
+  }
+  if (params.status !== "accepted") return "wrong_status"
+  if (!proposalConversionPricingModeAllowed(params.pricing_mode)) return "pricing"
+  return null
+}
+
 /** Only accepted proposals may become estimates in v1 (staff conversion). */
 export function proposalStaffConvertToEstimateStatusAllowed(status: ProposalStatus): boolean {
   return status === "accepted"

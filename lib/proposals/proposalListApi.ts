@@ -7,6 +7,7 @@ export type ProposalListRow = {
   customer_id: string | null
   public_token: string
   converted_estimate_id?: string | null
+  converted_invoice_id?: string | null
   created_at: string
   updated_at: string
 }

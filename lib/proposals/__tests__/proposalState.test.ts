@@ -1,6 +1,7 @@
 import {
   normalizeProposalStatus,
   proposalCanBeEditedByStaff,
+  proposalInvoiceConversionBlockReason,
   proposalPublicAcceptAllowed,
   proposalStaffSendInitialAllowed,
   proposalStatusIsTerminal,
@@ -41,5 +42,48 @@ describe("proposalState", () => {
     expect(proposalTransitionPublicAcceptIsValid("sent")).toBe(true)
     expect(proposalTransitionPublicAcceptIsValid("viewed")).toBe(true)
     expect(proposalTransitionPublicAcceptIsValid("draft")).toBe(false)
+  })
+
+  it("blocks invoice conversion unless the proposal is accepted and unconverted", () => {
+    expect(
+      proposalInvoiceConversionBlockReason({
+        status: "accepted",
+        converted_estimate_id: null,
+        converted_invoice_id: null,
+        pricing_mode: "line_items",
+      })
+    ).toBeNull()
+    expect(
+      proposalInvoiceConversionBlockReason({
+        status: "accepted",
+        converted_estimate_id: null,
+        converted_invoice_id: "inv-1",
+        pricing_mode: "line_items",
+      })
+    ).toBe("already_invoiced")
+    expect(
+      proposalInvoiceConversionBlockReason({
+        status: "accepted",
+        converted_estimate_id: "est-1",
+        converted_invoice_id: null,
+        pricing_mode: "fixed",
+      })
+    ).toBe("already_linked_estimate")
+    expect(
+      proposalInvoiceConversionBlockReason({
+        status: "sent",
+        converted_estimate_id: null,
+        converted_invoice_id: null,
+        pricing_mode: "fixed",
+      })
+    ).toBe("wrong_status")
+    expect(
+      proposalInvoiceConversionBlockReason({
+        status: "accepted",
+        converted_estimate_id: null,
+        converted_invoice_id: null,
+        pricing_mode: "custom",
+      })
+    ).toBe("pricing")
   })
 })
