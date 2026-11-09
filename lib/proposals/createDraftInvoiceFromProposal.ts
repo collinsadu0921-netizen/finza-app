@@ -286,7 +286,7 @@ export async function createDraftInvoiceFromProposal(args: {
 
   const invoiceItems = mapInvoiceItemsForInsert(
     String(invoice.id),
-    items,
+    items.map((item) => ({ ...item, qty: item.quantity })),
     new Set<string>(),
     new Set<string>()
   )
