@@ -20,6 +20,15 @@ jest.mock("@/lib/business", () => ({
 jest.mock("@/lib/userRoles", () => ({
   getUserRole: jest.fn(),
 }))
+jest.mock("@/lib/accounting/resolveAccountingRequestAuthority", () => {
+  const actual = jest.requireActual(
+    "@/lib/accounting/resolveAccountingRequestAuthority"
+  )
+  return {
+    ...actual,
+    resolveAccountingRequestAuthority: jest.fn(),
+  }
+})
 jest.mock("@/lib/auditLog", () => ({
   createAuditLog: jest.fn(() => Promise.resolve()),
 }))
@@ -41,6 +50,7 @@ jest.mock("@/lib/serviceWorkspace/enforceServiceWorkspaceAccess", () => ({
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { getUserRole } from "@/lib/userRoles"
+import { resolveAccountingRequestAuthority } from "@/lib/accounting/resolveAccountingRequestAuthority"
 
 const BUSINESS_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 const BILL_ID = "bill4444-4444-4444-8444-444444444444"
@@ -160,6 +170,9 @@ describe("Bill-level discount rejection", () => {
       industry: "service",
     })
     ;(getUserRole as jest.Mock).mockResolvedValue("owner")
+    ;(resolveAccountingRequestAuthority as jest.Mock).mockResolvedValue({
+      ok: true,
+    })
     mockCreateClient()
   })
 

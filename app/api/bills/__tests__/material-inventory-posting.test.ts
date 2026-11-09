@@ -19,6 +19,15 @@ jest.mock("@/lib/business", () => ({
 jest.mock("@/lib/userRoles", () => ({
   getUserRole: jest.fn(),
 }))
+jest.mock("@/lib/accounting/resolveAccountingRequestAuthority", () => {
+  const actual = jest.requireActual(
+    "@/lib/accounting/resolveAccountingRequestAuthority"
+  )
+  return {
+    ...actual,
+    resolveAccountingRequestAuthority: jest.fn(),
+  }
+})
 jest.mock("@/lib/auditLog", () => ({
   createAuditLog: jest.fn(() => Promise.resolve()),
 }))
@@ -36,6 +45,7 @@ jest.mock("@/lib/serviceWorkspace/enforceServiceIndustryMinTier", () => ({
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { getUserRole } from "@/lib/userRoles"
+import { resolveAccountingRequestAuthority } from "@/lib/accounting/resolveAccountingRequestAuthority"
 
 const BUSINESS_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 const MATERIAL_ID = "m1111111-1111-4111-8111-111111111111"
@@ -56,6 +66,9 @@ describe("POST /api/bills/create — material inventory posting intent", () => {
       industry: "service",
     })
     ;(getUserRole as jest.Mock).mockResolvedValue("owner")
+    ;(resolveAccountingRequestAuthority as jest.Mock).mockResolvedValue({
+      ok: true,
+    })
 
     billItemsInsert = jest.fn(() => Promise.resolve({ data: null, error: null }))
     accountsMaybeSingle = jest.fn(() =>

@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { waitUntil } from "@vercel/functions"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
-import { getUserRole } from "@/lib/userRoles"
+import {
+  deniedMutationResponse,
+  resolveAccountingRequestAuthority,
+} from "@/lib/accounting/resolveAccountingRequestAuthority"
 import { fireAfterAccountingPost } from "@/lib/server/fireAfterAccountingPost"
 import { calculateWHTForRate } from "@/lib/wht"
 import {
@@ -205,13 +208,23 @@ export async function POST(request: NextRequest) {
     // Authorize the submitted business directly. The server cannot read the
     // client's selected-workspace preference, so getCurrentBusiness() may
     // resolve a different owned business and must not be used as an equality
-    // gate. Membership/role on the submitted business preserves tenant
-    // isolation; the tier/write guard below remains authoritative.
-    const role = await getUserRole(supabase, user.id, business_id)
-    if (!role) {
+    // gate. Membership, role and accountant_readonly on the submitted
+    // business are checked before any bill or ledger side effect.
+    const authority = await resolveAccountingRequestAuthority({
+      supabase,
+      userId: user.id,
+      businessId: business_id,
+      requiredLevel: "write",
+    })
+    if (!authority.ok) {
+      const denied = deniedMutationResponse(
+        authority,
+        "write",
+        "create this supplier bill"
+      )
       return NextResponse.json(
-        { error: "Forbidden: no access to this business" },
-        { status: 403 }
+        { success: false, ...denied.body },
+        { status: denied.status }
       )
     }
 

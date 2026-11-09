@@ -19,6 +19,15 @@ jest.mock("@/lib/business", () => ({
 jest.mock("@/lib/userRoles", () => ({
   getUserRole: jest.fn(),
 }))
+jest.mock("@/lib/accounting/resolveAccountingRequestAuthority", () => {
+  const actual = jest.requireActual(
+    "@/lib/accounting/resolveAccountingRequestAuthority"
+  )
+  return {
+    ...actual,
+    resolveAccountingRequestAuthority: jest.fn(),
+  }
+})
 jest.mock("@/lib/auditLog", () => ({
   createAuditLog: jest.fn(() => Promise.resolve()),
 }))
@@ -40,6 +49,7 @@ jest.mock("@/lib/serviceWorkspace/enforceServiceWorkspaceAccess", () => ({
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { getUserRole } from "@/lib/userRoles"
+import { resolveAccountingRequestAuthority } from "@/lib/accounting/resolveAccountingRequestAuthority"
 
 const BUSINESS_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 const OTHER_BIZ = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
@@ -97,6 +107,9 @@ describe("bill supplier persistence", () => {
       industry: "service",
     })
     ;(getUserRole as jest.Mock).mockResolvedValue("owner")
+    ;(resolveAccountingRequestAuthority as jest.Mock).mockResolvedValue({
+      ok: true,
+    })
 
     ;(createSupabaseServerClient as jest.Mock).mockResolvedValue({
       auth: {
@@ -648,5 +661,59 @@ describe("bill supplier persistence", () => {
     expect(res.status).toBe(400)
     expect(lastUpdate).toBeNull()
     expect(storedBill.supplier_id).toBe(SUPPLIER_A)
+  })
+
+  it("rejects a read-only accountant before any bill insert or posting", async () => {
+    ;(resolveAccountingRequestAuthority as jest.Mock).mockResolvedValue({
+      ok: false,
+      status: 403,
+      error: "Forbidden",
+      reasonCode: "INSUFFICIENT_AUTHORITY",
+    })
+    const req = new NextRequest("http://localhost/api/bills/create", {
+      method: "POST",
+      body: JSON.stringify({
+        business_id: BUSINESS_ID,
+        supplier_id: SUPPLIER_A,
+        supplier_name: "Supplier A",
+        bill_number: "B-RO-1",
+        issue_date: "2026-08-01",
+        apply_taxes: false,
+        items: [{ description: "Item", qty: 1, unit_price: 10, discount_amount: 0 }],
+        status: "open",
+      }),
+    })
+    const res = await POST(req)
+    expect(res.status).toBe(403)
+    expect(lastInsert).toBeNull()
+    const { fireAfterAccountingPost } = require("@/lib/server/fireAfterAccountingPost")
+    expect(fireAfterAccountingPost).not.toHaveBeenCalled()
+  })
+
+  it("rejects unauthorized staff before any bill insert or posting", async () => {
+    ;(resolveAccountingRequestAuthority as jest.Mock).mockResolvedValue({
+      ok: false,
+      status: 403,
+      error: "Forbidden",
+      reasonCode: "INSUFFICIENT_AUTHORITY",
+    })
+    const req = new NextRequest("http://localhost/api/bills/create", {
+      method: "POST",
+      body: JSON.stringify({
+        business_id: BUSINESS_ID,
+        supplier_id: SUPPLIER_A,
+        supplier_name: "Supplier A",
+        bill_number: "B-STAFF-1",
+        issue_date: "2026-08-01",
+        apply_taxes: false,
+        items: [{ description: "Item", qty: 1, unit_price: 10, discount_amount: 0 }],
+        status: "open",
+      }),
+    })
+    const res = await POST(req)
+    expect(res.status).toBe(403)
+    expect(lastInsert).toBeNull()
+    const { fireAfterAccountingPost } = require("@/lib/server/fireAfterAccountingPost")
+    expect(fireAfterAccountingPost).not.toHaveBeenCalled()
   })
 })

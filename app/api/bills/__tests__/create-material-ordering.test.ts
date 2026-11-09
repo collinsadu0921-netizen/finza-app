@@ -19,6 +19,15 @@ jest.mock("@/lib/business", () => ({
 jest.mock("@/lib/userRoles", () => ({
   getUserRole: jest.fn(),
 }))
+jest.mock("@/lib/accounting/resolveAccountingRequestAuthority", () => {
+  const actual = jest.requireActual(
+    "@/lib/accounting/resolveAccountingRequestAuthority"
+  )
+  return {
+    ...actual,
+    resolveAccountingRequestAuthority: jest.fn(),
+  }
+})
 jest.mock("@/lib/auditLog", () => ({
   createAuditLog: jest.fn(() => Promise.resolve()),
 }))
@@ -36,6 +45,7 @@ jest.mock("@/lib/serviceWorkspace/enforceServiceIndustryMinTier", () => ({
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { getCurrentBusiness } from "@/lib/business"
 import { getUserRole } from "@/lib/userRoles"
+import { resolveAccountingRequestAuthority } from "@/lib/accounting/resolveAccountingRequestAuthority"
 import { fireAfterAccountingPost } from "@/lib/server/fireAfterAccountingPost"
 
 const BUSINESS_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
@@ -57,6 +67,9 @@ describe("POST /api/bills/create — draft→lines→open ordering", () => {
       industry: "service",
     })
     ;(getUserRole as jest.Mock).mockResolvedValue("owner")
+    ;(resolveAccountingRequestAuthority as jest.Mock).mockResolvedValue({
+      ok: true,
+    })
 
     billsInsert = jest.fn((row: { status?: string }) => {
       callOrder.push(`bills.insert:${row.status}`)
