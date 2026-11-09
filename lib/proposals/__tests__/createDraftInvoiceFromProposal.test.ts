@@ -148,6 +148,12 @@ describe("createDraftInvoiceFromProposal", () => {
     expect(Number(insertedInvoice?.total)).toBeGreaterThan(0)
     expect(Number(insertedInvoice?.total_tax)).toBeGreaterThan(0)
     expect(insertedItems).toHaveLength(1)
+    expect(insertedItems?.[0]).toMatchObject({
+      description: "Monthly cleaning",
+      qty: 6,
+      unit_price: 4500,
+      line_subtotal: 27000,
+    })
     expect(updatedProposal).toMatchObject({
       status: "converted",
       converted_invoice_id: INVOICE_ID,
