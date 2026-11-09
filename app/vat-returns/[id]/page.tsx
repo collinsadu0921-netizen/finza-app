@@ -12,6 +12,11 @@ import { useToast } from "@/components/ui/ToastProvider"
 import { useConfirm } from "@/components/ui/ConfirmProvider"
 import type { LedgerLine } from "@/app/api/vat-returns/monthly/route"
 import { GRA_VAT3_BOXES, isPost2026Period } from "@/lib/gra/vatForm"
+import { formatMoney } from "@/lib/money"
+
+function formatCedi(value: number | null | undefined): string {
+  return formatMoney(Number(value ?? 0), "GHS")
+}
 
 type VatReturn = {
   id: string
