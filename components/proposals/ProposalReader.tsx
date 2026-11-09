@@ -19,6 +19,7 @@ import {
   type ProposalChapter,
 } from "@/lib/proposals/composition"
 import { proposalThemeCssVariables } from "@/lib/proposals/design"
+import { getChapterLayout } from "@/lib/proposals/layout"
 import { chunkCustomPricingForDisplay, parseCustomPricingNotes } from "@/lib/proposals/parseCustomPricing"
 import type { ProposalRenderModel, ProposalRenderSection } from "@/lib/proposals/renderModel"
 
@@ -289,8 +290,25 @@ function ChapterPage({
   pageNumber: number
   acceptanceSlot?: ReactNode
 }) {
+  const layout = getChapterLayout(chapter, chapter.number - 1)
+  const chapterClass = [
+    "proposal-page",
+    "proposal-chapter",
+    layout.lead ? "proposal-chapter--lead" : "",
+    layout.twoColumn ? "proposal-chapter--two-col" : "",
+    layout.timeline ? "proposal-chapter--timeline" : "",
+    layout.scope ? "proposal-chapter--scope" : "",
+    layout.hasImages ? "proposal-chapter--has-images" : "",
+    layout.major ? "proposal-chapter--major" : "",
+  ]
+    .filter(Boolean)
+    .join(" ")
+  const status = String(model.status || "draft").toLowerCase()
+  const accepted = status === "accepted" || status === "converted"
+  const rejected = status === "rejected"
+  const decisionDate = asDateLabel(accepted ? model.accepted_at : rejected ? model.rejected_at : null)
   return (
-    <article className="proposal-page proposal-chapter" id={`proposal-page-${pageNumber}`}>
+    <article className={chapterClass} id={`proposal-page-${pageNumber}`}>
       <header className="proposal-chapter-head">
         <span className="proposal-chapter-number">{String(chapter.number).padStart(2, "0")}</span>
         <div>
@@ -321,13 +339,22 @@ function ChapterPage({
         {chapter.kind === "acceptance" ? (
           <section className="proposal-acceptance">
             {acceptanceSlot ? <div className="proposal-acceptance-slot">{acceptanceSlot}</div> : null}
-            <div className="proposal-signature-grid" aria-hidden>
-              <div><span>Name</span><i /></div>
-              <div><span>Signature</span><i /></div>
-              <div><span>Date</span><i /></div>
+            <div className={`proposal-acceptance-status ${accepted ? "is-accepted" : rejected ? "is-rejected" : ""}`}>
+              <p className="proposal-acceptance-status-title">
+                {accepted ? "Accepted online" : rejected ? "Declined online" : status === "sent" || status === "viewed" ? "Awaiting client decision" : "Draft proposal"}
+              </p>
+              <p>
+                {accepted
+                  ? `This proposal was accepted online${decisionDate ? ` on ${decisionDate}` : ""}.`
+                  : rejected
+                    ? `This proposal was declined online${decisionDate ? ` on ${decisionDate}` : ""}.${model.rejected_reason ? ` Client note: ${model.rejected_reason}` : ""}`
+                    : status === "sent" || status === "viewed"
+                      ? "The client can accept or decline this proposal through the public proposal link. The decision is recorded electronically; no handwritten signature is captured."
+                      : "This proposal has not yet been sent to the client."}
+              </p>
             </div>
             <p className="proposal-acceptance-note">
-              Online acceptance records the client&apos;s decision. The signature block is optional and is not a qualified electronic signature.
+              Online acceptance is an electronic decision record. It is not a qualified electronic signature and this document does not capture a handwritten signature.
             </p>
           </section>
         ) : null}
@@ -367,28 +394,44 @@ const READER_CSS = `
   }
   .proposal-reader-button:hover { border-color: var(--pp-accent); color: var(--pp-accent); }
   .proposal-reader-button[aria-pressed="true"] { background: var(--pp-accent); border-color: var(--pp-accent); color: var(--pp-accent-contrast); }
-  .proposal-reader-button:focus-visible, .proposal-chapter-nav button:focus-visible, .proposal-page-controls button:focus-visible {
+  .proposal-reader-button:focus-visible, .proposal-toc-panel button:focus-visible, .proposal-page-controls button:focus-visible {
     outline: 2px solid var(--pp-accent); outline-offset: 3px;
   }
-  .proposal-chapter-nav { display: flex; gap: 6px; overflow-x: auto; padding: 12px 0 4px; scrollbar-width: thin; }
-  .proposal-chapter-nav button {
-    flex: 0 0 auto; border: 1px solid transparent; background: transparent; color: var(--pp-muted);
-    border-radius: 999px; padding: 7px 11px; font: inherit; font-size: 11px; font-weight: 600; cursor: pointer;
+  .proposal-toc-layer { position: fixed; inset: 0; z-index: 70; }
+  .proposal-toc-backdrop { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: rgba(15,23,42,0.22); backdrop-filter: blur(2px); cursor: default; }
+  .proposal-toc-panel {
+    position: absolute; right: clamp(16px, 4vw, 48px); top: clamp(70px, 10vh, 110px);
+    width: min(360px, calc(100vw - 32px)); max-height: min(72vh, 680px); overflow: hidden;
+    background: var(--pp-paper); border: 1px solid var(--pp-rule); border-radius: 16px;
+    box-shadow: 0 28px 70px -30px rgba(15,23,42,.55); display: flex; flex-direction: column;
   }
-  .proposal-chapter-nav button[aria-current="page"] { color: var(--pp-accent); background: var(--pp-accent-soft); }
+  .proposal-toc-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 18px 18px 14px; border-bottom: 1px solid var(--pp-rule); }
+  .proposal-toc-title { margin: 3px 0 0; font-family: var(--pp-heading-font); font-size: 18px; font-weight: 600; }
+  .proposal-toc-close { border: 1px solid var(--pp-rule); background: var(--pp-paper); color: var(--pp-ink); border-radius: 999px; padding: 6px 10px; font: inherit; font-size: 11px; font-weight: 600; cursor: pointer; }
+  .proposal-toc-list { overflow-y: auto; padding: 8px; }
+  .proposal-toc-list button {
+    display: flex; align-items: center; justify-content: space-between; gap: 14px; width: 100%;
+    border: 0; background: transparent; color: var(--pp-ink); text-align: left; border-radius: 9px;
+    padding: 10px 10px; font: inherit; font-size: 12.5px; line-height: 1.35; cursor: pointer;
+  }
+  .proposal-toc-list button:hover { background: var(--pp-paper-alt); }
+  .proposal-toc-list button.is-active { background: var(--pp-accent-soft); color: var(--pp-accent); font-weight: 600; }
+  .proposal-toc-number { display: inline-block; min-width: 26px; font-family: var(--pp-eyebrow-font); font-size: 9px; letter-spacing: .08em; color: var(--pp-muted); }
+  .proposal-toc-page { font-family: var(--pp-eyebrow-font); font-size: 9px; color: var(--pp-muted); white-space: nowrap; }
   .proposal-reader-stage { padding: 22px 0 8px; }
   .proposal-spread { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; align-items: stretch; max-width: 1320px; margin: 0 auto; }
   @media (min-width: 1024px) { .proposal-spread { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 22px; } }
+  .proposal-spread--cover { grid-template-columns: minmax(0, min(720px, 100%)); justify-content: center; }
   .proposal-page {
     position: relative; min-width: 0; background: var(--pp-paper); border: 1px solid var(--pp-rule);
     border-radius: var(--pp-radius); box-shadow: var(--pp-page-shadow); padding: clamp(22px, 4vw, 48px);
-    min-height: 68vh; display: flex; flex-direction: column; overflow: visible;
+    min-height: clamp(560px, 72vh, 920px); display: flex; flex-direction: column; overflow: visible;
   }
   .proposal-page--empty { display: block; visibility: hidden; }
-  .proposal-spread.is-next .proposal-page { animation: ppPageNext 320ms ease both; }
-  .proposal-spread.is-prev .proposal-page { animation: ppPagePrev 320ms ease both; }
-  @keyframes ppPageNext { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: translateX(0); } }
-  @keyframes ppPagePrev { from { opacity: 0; transform: translateX(-16px); } to { opacity: 1; transform: translateX(0); } }
+  .proposal-spread.is-next .proposal-page { animation: ppPageNext 280ms ease both; }
+  .proposal-spread.is-prev .proposal-page { animation: ppPagePrev 280ms ease both; }
+  @keyframes ppPageNext { from { transform: translateX(14px); } to { transform: translateX(0); } }
+  @keyframes ppPagePrev { from { transform: translateX(-14px); } to { transform: translateX(0); } }
   @media (prefers-reduced-motion: reduce) {
     .proposal-spread.is-next .proposal-page, .proposal-spread.is-prev .proposal-page { animation: none !important; }
     .proposal-reader * { scroll-behavior: auto !important; }
@@ -407,10 +450,10 @@ const READER_CSS = `
   .proposal-cover-pattern.pattern-grid { background-image: linear-gradient(rgba(255,255,255,0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.08) 1px, transparent 1px); background-size: 32px 32px; }
   .proposal-cover-pattern.pattern-orbs { background: radial-gradient(circle at 82% 18%, var(--pp-accent) 0, transparent 34%), radial-gradient(circle at 14% 86%, rgba(255,255,255,0.08) 0, transparent 36%); }
   .proposal-cover-pattern.pattern-rules { background: repeating-linear-gradient(180deg, transparent 0 37px, rgba(0,0,0,0.06) 37px 38px); }
-  .proposal-cover-inner { position: relative; z-index: 1; display: flex; flex-direction: column; min-height: 68vh; padding: clamp(24px, 5vw, 56px); }
+  .proposal-cover-inner { position: relative; z-index: 1; display: flex; flex-direction: column; min-height: 72vh; padding: clamp(24px, 5vw, 56px); }
   .proposal-cover-brand { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; font-size: 12px; font-weight: 600; }
-  .proposal-cover-brand .proposal-brand-mark { background: #fff; padding: 7px; border-radius: 8px; }
-  .proposal-cover-copy { margin-top: auto; padding: 48px 0 32px; }
+  .proposal-cover-brand .proposal-brand-mark { background: #fff; padding: 6px; border-radius: 8px; max-height: 46px; max-width: 160px; overflow: hidden; }
+  .proposal-cover-copy { margin-top: auto; padding: 42px 0 30px; }
   .proposal-eyebrow { margin: 0; font-family: var(--pp-eyebrow-font); font-size: 10px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; color: var(--pp-accent); }
   .proposal-cover .proposal-eyebrow { color: var(--pp-cover-muted); }
   .proposal-cover h1 { margin: 12px 0 22px; max-width: 13ch; font-family: var(--pp-heading-font); font-size: clamp(34px, 6vw, 66px); line-height: 0.98; font-weight: 600; letter-spacing: -0.04em; }
@@ -422,15 +465,21 @@ const READER_CSS = `
   .proposal-cover-meta div { display: flex; flex-direction: column; gap: 3px; }
   .proposal-cover-meta strong { font-size: 11px; font-weight: 600; }
   .proposal-cover-footer { position: absolute; z-index: 1; left: clamp(24px, 5vw, 56px); right: clamp(24px, 5vw, 56px); bottom: 18px; display: flex; justify-content: space-between; font-family: var(--pp-eyebrow-font); font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--pp-cover-muted); }
-  .proposal-chapter { gap: 20px; }
-  .proposal-chapter-head { display: flex; gap: 16px; align-items: flex-start; border-bottom: 1px solid var(--pp-rule); padding-bottom: 18px; }
-  .proposal-chapter-number { min-width: 44px; font-family: var(--pp-heading-font); font-size: clamp(30px, 4vw, 50px); line-height: 0.86; color: var(--pp-accent); opacity: 0.38; }
-  .proposal-chapter-head h2 { margin: 4px 0 0; font-family: var(--pp-heading-font); font-size: clamp(24px, 3.4vw, 38px); line-height: 1.05; font-weight: 600; letter-spacing: -0.025em; }
-  .proposal-chapter-body { display: flex; flex-direction: column; gap: 14px; }
-  .proposal-section-heading { margin: 10px 0 0; font-family: var(--pp-heading-font); font-size: 18px; line-height: 1.2; font-weight: 600; }
-  .proposal-body-text { margin: 0; white-space: pre-wrap; font-size: 14.5px; line-height: 1.72; }
+  .proposal-chapter { gap: 18px; }
+  .proposal-chapter-head { display: flex; gap: 16px; align-items: flex-start; border-bottom: 1px solid var(--pp-rule); padding-bottom: 16px; }
+  .proposal-chapter-number { min-width: 40px; font-family: var(--pp-heading-font); font-size: clamp(26px, 3.2vw, 40px); line-height: 0.88; color: var(--pp-accent); opacity: 0.28; }
+  .proposal-chapter-head h2 { margin: 4px 0 0; font-family: var(--pp-heading-font); font-size: clamp(23px, 3vw, 34px); line-height: 1.06; font-weight: 600; letter-spacing: -0.02em; }
+  .proposal-chapter-body { display: flex; flex-direction: column; gap: 13px; }
+  .proposal-chapter--lead .proposal-body-text:first-of-type { font-size: 17px; line-height: 1.75; }
+  .proposal-section-heading { margin: 9px 0 0; font-family: var(--pp-heading-font); font-size: 17px; line-height: 1.2; font-weight: 600; }
+  .proposal-body-text { margin: 0; white-space: pre-wrap; font-size: 14.5px; line-height: 1.72; orphans: 3; widows: 3; }
   .proposal-bullet-list { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 7px; font-size: 14.5px; line-height: 1.6; }
   .proposal-bullet-list li::marker { color: var(--pp-accent); }
+  .proposal-chapter--two-col .proposal-bullet-list { display: block; columns: 2; column-gap: 22px; }
+  .proposal-chapter--two-col .proposal-bullet-list li { break-inside: avoid; margin-bottom: 7px; }
+  .proposal-chapter--timeline .proposal-bullet-list { list-style: none; padding-left: 16px; border-left: 1px solid var(--pp-rule); }
+  .proposal-chapter--timeline .proposal-bullet-list li { position: relative; padding-left: 4px; }
+  .proposal-chapter--timeline .proposal-bullet-list li::before { content: ""; position: absolute; left: -21px; top: 8px; width: 7px; height: 7px; border-radius: 50%; background: var(--pp-accent); }
   .proposal-figure { margin: 4px 0; display: flex; flex-direction: column; gap: 7px; }
   .proposal-figure img { width: 100%; max-height: 360px; object-fit: contain; border-radius: var(--pp-radius); border: 1px solid var(--pp-rule); background: var(--pp-paper-alt); }
   .proposal-figure figcaption, .proposal-caption { font-size: 11px; color: var(--pp-muted); }
@@ -466,10 +515,11 @@ const READER_CSS = `
   .proposal-attachments span { color: var(--pp-muted); font-size: 10px; }
   .proposal-acceptance { border: 1px solid var(--pp-rule); border-radius: calc(var(--pp-radius) + 4px); padding: clamp(16px, 3vw, 26px); background: var(--pp-card); }
   .proposal-acceptance-slot { margin-bottom: 18px; }
-  .proposal-signature-grid { display: grid; grid-template-columns: 1fr; gap: 18px; margin-top: 18px; }
-  @media (min-width: 640px) { .proposal-signature-grid { grid-template-columns: 1.3fr 1.3fr 0.7fr; } }
-  .proposal-signature-grid span { font-family: var(--pp-eyebrow-font); font-size: 9px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--pp-muted); }
-  .proposal-signature-grid i { display: block; height: 34px; border-bottom: 1px solid var(--pp-ink); }
+  .proposal-acceptance-status { border-top: 1px solid var(--pp-rule); margin-top: 18px; padding-top: 16px; }
+  .proposal-acceptance-status-title { margin: 0 0 5px; font-family: var(--pp-heading-font); font-size: 17px; font-weight: 600; }
+  .proposal-acceptance-status p { margin: 0; font-size: 13px; line-height: 1.6; color: var(--pp-muted); }
+  .proposal-acceptance-status.is-accepted .proposal-acceptance-status-title { color: #047857; }
+  .proposal-acceptance-status.is-rejected .proposal-acceptance-status-title { color: #b91c1c; }
   .proposal-acceptance-note { margin: 12px 0 0; font-size: 10.5px; line-height: 1.5; color: var(--pp-muted); }
   .proposal-page-footer { display: flex; justify-content: space-between; gap: 12px; margin-top: auto; padding-top: 22px; border-top: 1px solid var(--pp-rule); color: var(--pp-muted); font-family: var(--pp-eyebrow-font); font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; }
   .proposal-reader-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 0 4px; }
@@ -492,21 +542,27 @@ const READER_CSS = `
   @media (max-width: 639px) {
     .proposal-reader-toolbar { position: static; }
     .proposal-reader-brand-copy { display: none; }
-    .proposal-reader-brand .proposal-brand-mark { max-width: 132px; max-height: 34px; }
-    .proposal-cover { min-height: 76vh; }
-    .proposal-cover-inner { min-height: 76vh; padding: 24px 20px 54px; }
+    .proposal-reader-brand .proposal-brand-mark { max-width: 118px; max-height: 32px; }
+    .proposal-toc-backdrop { background: rgba(15,23,42,0.42); }
+    .proposal-toc-panel { left: 0; right: 0; top: auto; bottom: 0; width: 100%; max-height: 78vh; border-radius: 18px 18px 0 0; }
+    .proposal-toc-head { padding: 16px 16px 12px; }
+    .proposal-toc-list { padding: 8px 8px 18px; }
+    .proposal-cover { min-height: 72vh; }
+    .proposal-cover-inner { min-height: 72vh; padding: 24px 20px 54px; }
+    .proposal-cover-brand .proposal-brand-mark { max-height: 40px; max-width: 130px; padding: 5px; }
     .proposal-cover-media { opacity: 0.3; filter: blur(1px); }
     .proposal-cover-shade { background: linear-gradient(180deg, rgba(0,0,0,0.42), rgba(0,0,0,0.86)); }
-    .proposal-cover h1 { font-size: clamp(34px, 11vw, 48px); }
+    .proposal-cover h1 { font-size: clamp(32px, 10.5vw, 46px); }
     .proposal-cover-meta { gap: 12px 20px; }
     .proposal-cover-footer { left: 20px; right: 20px; }
     .proposal-body-text, .proposal-bullet-list { font-size: 15px; }
+    .proposal-chapter--two-col .proposal-bullet-list { columns: 1; }
   }
   .proposal-reader[data-template="standard_v1"] .proposal-cover-shade { background: none; }
   .proposal-reader[data-template="standard_v1"] .proposal-cover-meta { border-color: var(--pp-rule); }
   .proposal-reader[data-template="standard_v1"] .proposal-cover-brand .proposal-brand-mark { background: transparent; padding: 0; }
   .proposal-reader[data-template="minimal_v1"] .proposal-chapter-head { border-bottom-width: 1px; }
-  .proposal-reader[data-template="minimal_v1"] .proposal-chapter-number { opacity: 0.25; }
+  .proposal-reader[data-template="minimal_v1"] .proposal-chapter-number { opacity: 0.2; }
   .proposal-reader[data-template="minimal_v1"] .proposal-cover { color: var(--pp-ink); background: var(--pp-paper); }
   .proposal-reader[data-template="minimal_v1"] .proposal-cover-shade { background: none; }
   .proposal-reader[data-template="minimal_v1"] .proposal-cover-brand .proposal-brand-mark { background: transparent; padding: 0; }
@@ -515,15 +571,18 @@ const READER_CSS = `
   .proposal-reader[data-template="minimal_v1"] .proposal-cover-meta span,
   .proposal-reader[data-template="minimal_v1"] .proposal-cover-footer { color: var(--pp-muted); }
   .proposal-reader[data-template="minimal_v1"] .proposal-cover-meta { border-color: var(--pp-rule); }
-  .proposal-reader[data-template="modern_v1"] .proposal-chapter-head { border-bottom: 3px solid var(--pp-accent); }
-  .proposal-reader[data-template="modern_v1"] .proposal-chapter-number { opacity: 0.9; }
-  .proposal-reader[data-template="modern_v1"] .proposal-page { border-top: 4px solid var(--pp-accent); }
-  .proposal-reader[data-template="modern_v1"] .proposal-section-heading { text-transform: uppercase; letter-spacing: 0.06em; font-size: 13px; color: var(--pp-accent); }
+  .proposal-reader[data-template="minimal_v1"] .proposal-section-heading { font-weight: 500; }
+  .proposal-reader[data-template="modern_v1"] .proposal-chapter-head { border-bottom: 2px solid var(--pp-accent); }
+  .proposal-reader[data-template="modern_v1"] .proposal-chapter-number { opacity: 0.75; }
+  .proposal-reader[data-template="modern_v1"] .proposal-page { border-top: 3px solid var(--pp-accent); }
+  .proposal-reader[data-template="modern_v1"] .proposal-section-heading { text-transform: uppercase; letter-spacing: 0.06em; font-size: 12px; color: var(--pp-accent); }
+  .proposal-reader[data-template="modern_v1"] .proposal-pricing { background: var(--pp-paper-alt); }
   .proposal-reader[data-template="premium_v1"] .proposal-page { background-image: linear-gradient(180deg, rgba(255,255,255,0.38), transparent 28%); }
   .proposal-reader[data-template="premium_v1"] .proposal-chapter-head h2 { font-weight: 400; }
-  .proposal-reader[data-template="premium_v1"] .proposal-chapter-number { font-style: italic; opacity: 0.55; }
+  .proposal-reader[data-template="premium_v1"] .proposal-chapter-number { font-style: italic; opacity: 0.45; }
   .proposal-reader[data-template="premium_v1"] .proposal-section-heading { font-weight: 500; }
   .proposal-reader[data-template="premium_v1"] .proposal-body-text { font-size: 15px; line-height: 1.78; }
+  .proposal-reader[data-template="premium_v1"] .proposal-chapter-head { border-bottom-color: color-mix(in srgb, var(--pp-accent) 35%, var(--pp-rule)); }
 `
 
 function spreadForPage(pageIndex: number): number {
@@ -553,7 +612,7 @@ export function ProposalReader({
     [book.chapters]
   )
   const spreads = useMemo<ReaderSpread[]>(() => {
-    const result: ReaderSpread[] = [{ left: null, right: 0 }]
+    const result: ReaderSpread[] = [{ left: 0, right: null }]
     let index = 1
     while (index < pages.length) {
       result.push({ left: index, right: index + 1 < pages.length ? index + 1 : null })
@@ -568,6 +627,7 @@ export function ProposalReader({
   const [pageIndex, setPageIndex] = useState(0)
   const [direction, setDirection] = useState<"next" | "prev">("next")
   const [continuous, setContinuous] = useState(false)
+  const [tocOpen, setTocOpen] = useState(false)
   const touchStart = useRef<number | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
 
@@ -639,6 +699,7 @@ export function ProposalReader({
   const goToChapter = useCallback(
     (chapterIndex: number) => {
       goToPage(chapterPageIndex(chapterIndex))
+      setTocOpen(false)
     },
     [goToPage]
   )
@@ -659,6 +720,8 @@ export function ProposalReader({
     } else if (event.key === "End") {
       event.preventDefault()
       goToPage(pages.length - 1)
+    } else if (event.key === "Escape") {
+      setTocOpen(false)
     }
   }
 
@@ -676,6 +739,14 @@ export function ProposalReader({
   }
 
   const progress = pages.length > 0 ? ((activePage + 1) / pages.length) * 100 : 0
+  const activeChapterIndex = book.chapters.findIndex(
+    (_, index) => activePage === chapterPageIndex(index)
+  )
+  const activeSpread = spreads[spreadIndex]
+  const pageLabel =
+    isDesktop && activeSpread?.right != null
+      ? `Pages ${activeSpread.left! + 1}–${activeSpread.right + 1} of ${pages.length}`
+      : `Page ${activePage + 1} of ${pages.length}`
   const currentTemplate = book.theme.id
   const style = proposalThemeCssVariables(book.theme) as CSSProperties
 
@@ -718,6 +789,14 @@ export function ProposalReader({
           <button
             type="button"
             className="proposal-reader-button"
+            aria-expanded={tocOpen}
+            onClick={() => setTocOpen((open) => !open)}
+          >
+            Contents
+          </button>
+          <button
+            type="button"
+            className="proposal-reader-button"
             aria-pressed={continuous}
             onClick={() => setContinuous((current) => !current)}
           >
@@ -729,29 +808,64 @@ export function ProposalReader({
             </a>
           ) : null}
           <span className="proposal-progress-label" aria-live="polite">
-            Page {activePage + 1} of {pages.length}
+            {pageLabel}
           </span>
         </div>
       </div>
 
-      <nav className="proposal-chapter-nav" aria-label="Proposal chapters">
-        <button type="button" aria-current={activePage === 0 ? "page" : undefined} onClick={() => goToPage(0)}>
-          Cover
-        </button>
-        {book.chapters.map((chapter, index) => {
-          const active = activePage === chapterPageIndex(index)
-          return (
-            <button
-              key={chapter.key}
-              type="button"
-              aria-current={active ? "page" : undefined}
-              onClick={() => goToChapter(index)}
-            >
-              {chapter.title}
-            </button>
-          )
-        })}
-      </nav>
+      {tocOpen ? (
+        <div className="proposal-toc-layer">
+          <button
+            type="button"
+            className="proposal-toc-backdrop"
+            aria-label="Close contents"
+            onClick={() => setTocOpen(false)}
+          />
+          <nav className="proposal-toc-panel" aria-label="Proposal contents">
+            <div className="proposal-toc-head">
+              <div>
+                <p className="proposal-eyebrow">Contents</p>
+                <p className="proposal-toc-title">Proposal chapters</p>
+              </div>
+              <button type="button" className="proposal-toc-close" onClick={() => setTocOpen(false)}>
+                Close
+              </button>
+            </div>
+            <div className="proposal-toc-list">
+              <button
+                type="button"
+                className={activePage === 0 ? "is-active" : ""}
+                aria-current={activePage === 0 ? "page" : undefined}
+                onClick={() => {
+                  goToPage(0)
+                  setTocOpen(false)
+                }}
+              >
+                <span>Cover</span>
+                <span className="proposal-toc-page">1</span>
+              </button>
+              {book.chapters.map((chapter, index) => {
+                const active = activeChapterIndex === index
+                return (
+                  <button
+                    key={chapter.key}
+                    type="button"
+                    className={active ? "is-active" : ""}
+                    aria-current={active ? "page" : undefined}
+                    onClick={() => goToChapter(index)}
+                  >
+                    <span>
+                      <span className="proposal-toc-number">{String(index + 1).padStart(2, "0")}</span>
+                      {chapter.title}
+                    </span>
+                    <span className="proposal-toc-page">{chapterPageIndex(index) + 1}</span>
+                  </button>
+                )
+              })}
+            </div>
+          </nav>
+        </div>
+      ) : null}
 
       {pages.length === 0 ? (
         <div className="proposal-reader-empty">This proposal has no content yet.</div>
@@ -780,18 +894,24 @@ export function ProposalReader({
           aria-live="polite"
         >
           {isDesktop ? (
-            <div className={`proposal-spread ${direction === "next" ? "is-next" : "is-prev"}`}>
-              {spreads[spreadIndex]?.left != null ? (
-                renderPage(pages[spreads[spreadIndex].left!], spreads[spreadIndex].left! + 1, "left")
-              ) : (
-                <div className="proposal-page proposal-page--empty" aria-hidden />
-              )}
-              {spreads[spreadIndex]?.right != null ? (
-                renderPage(pages[spreads[spreadIndex].right!], spreads[spreadIndex].right! + 1, "right")
-              ) : (
-                <div className="proposal-page proposal-page--empty" aria-hidden />
-              )}
-            </div>
+            spreadIndex === 0 ? (
+              <div className="proposal-spread proposal-spread--cover">
+                {renderPage(pages[0], 1, "cover")}
+              </div>
+            ) : (
+              <div className={`proposal-spread ${direction === "next" ? "is-next" : "is-prev"}`}>
+                {spreads[spreadIndex]?.left != null ? (
+                  renderPage(pages[spreads[spreadIndex].left!], spreads[spreadIndex].left! + 1, "left")
+                ) : (
+                  <div className="proposal-page proposal-page--empty" aria-hidden />
+                )}
+                {spreads[spreadIndex]?.right != null ? (
+                  renderPage(pages[spreads[spreadIndex].right!], spreads[spreadIndex].right! + 1, "right")
+                ) : (
+                  <div className="proposal-page proposal-page--empty" aria-hidden />
+                )}
+              </div>
+            )
           ) : (
             <div className="proposal-spread">
               {renderPage(pages[pageIndex], pageIndex + 1, "mobile")}

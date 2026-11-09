@@ -32,6 +32,7 @@ import {
 } from "@/lib/proposals/design"
 import { ProposalAiAssistant } from "./ProposalAiAssistant"
 import type { ProposalAiPreview, ProposalAiSnapshot } from "@/lib/proposals/ai/types"
+import { isGuidanceText } from "@/lib/proposals/guidance"
 
 type CustomerOpt = { id: string; name: string; email: string | null; phone: string | null; whatsapp_phone?: string | null }
 
@@ -546,6 +547,18 @@ export function ProposalEditorForm({
 
   const contentSegments = useMemo(() => segmentsFromSections(sections), [sections])
   const contentChapters = useMemo(() => chapterRangesFromSections(sections), [sections])
+  const draftGuidanceCount = useMemo(
+    () =>
+      sections.filter((section) => {
+        if (section.type === "heading") return false
+        if (section.hidden) return false
+        if (section.guidance === true) return true
+        if (section.type === "paragraph") return isGuidanceText(section.text)
+        if (section.type === "bullet_list") return section.items.some((item) => isGuidanceText(item))
+        return false
+      }).length,
+    [sections]
+  )
   const aiChapterTitles = useMemo(
     () => contentChapters.map((chapter) => chapter.title),
     [contentChapters]
@@ -695,7 +708,7 @@ export function ProposalEditorForm({
     setSections((prev) => {
       const copy = [...prev]
       const h = copy[headIdx]
-      if (h?.type === "heading") copy[headIdx] = { ...h, level: 2, text }
+      if (h?.type === "heading") copy[headIdx] = { ...h, level: 2, text, guidance: undefined }
       return copy
     })
   }
@@ -704,7 +717,7 @@ export function ProposalEditorForm({
     setSections((prev) => {
       const copy = [...prev]
       const p = copy[paraIdx]
-      if (p?.type === "paragraph") copy[paraIdx] = { ...p, text }
+      if (p?.type === "paragraph") copy[paraIdx] = { ...p, text, guidance: undefined }
       return copy
     })
   }
@@ -712,7 +725,7 @@ export function ProposalEditorForm({
   function updateBlock(index: number, next: ProposalSectionBlock) {
     setSections((prev) => {
       const copy = [...prev]
-      copy[index] = next
+      copy[index] = { ...next, guidance: undefined }
       return copy
     })
   }
@@ -1627,9 +1640,15 @@ export function ProposalEditorForm({
 
           <SectionCard
             title="Content"
-            subtitle="Executive summary, scope, timeline, terms, and other narrative blocks — each section is a heading plus body copy."
+            subtitle="Executive summary, scope, timeline, terms, and other narrative blocks - each section is a heading plus body copy."
           >
             <div className={`space-y-6 ${contentLocked ? "pointer-events-none opacity-60" : ""}`}>
+              {draftGuidanceCount > 0 ? (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+                  <span className="font-semibold">Draft guidance is still present in {draftGuidanceCount} block{draftGuidanceCount === 1 ? "" : "s"}.</span>{" "}
+                  Guidance is hidden from client-facing documents and must be replaced before the proposal can be sent.
+                </div>
+              ) : null}
               {contentChapters.length > 0 ? (
                 <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
                   <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Chapter order</p>
@@ -1742,6 +1761,11 @@ export function ProposalEditorForm({
                             </button>
                           </div>
                         </div>
+                        {head.guidance === true || para.guidance === true || isGuidanceText(head.text) || isGuidanceText(para.text) ? (
+                          <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900">
+                            Draft guidance — hidden from client documents until replaced.
+                          </p>
+                        ) : null}
                         <label className="block text-sm">
                           <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Content</span>
                           <textarea
@@ -1800,6 +1824,13 @@ export function ProposalEditorForm({
                           </button>
                         </div>
                       </div>
+                      {block.guidance === true ||
+                      (block.type === "paragraph" && isGuidanceText(block.text)) ||
+                      (block.type === "bullet_list" && block.items.some((item) => isGuidanceText(item))) ? (
+                        <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900">
+                          Draft guidance — hidden from client documents until replaced.
+                        </p>
+                      ) : null}
                       <div className="space-y-3">
                         {block.type === "heading" ? (
                           <div className="grid gap-3 sm:grid-cols-4">

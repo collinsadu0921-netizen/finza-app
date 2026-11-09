@@ -4,7 +4,7 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveBusinessScopeForUser } from "@/lib/business"
 import { buildFinancialDocumentPdfDisposition } from "@/lib/documents/financialDocumentPdfDisposition"
 import { renderHtmlToPdfBuffer } from "@/lib/pdf/renderHtmlToPdf"
-import { buildProposalHtmlForPdf } from "@/lib/proposals/buildProposalHtmlForPdf"
+import { buildProposalHtmlForPdf, proposalPdfFooterTemplate } from "@/lib/proposals/buildProposalHtmlForPdf"
 import { assembleProposalRenderModel, type ProposalAssetRow, type ProposalRow } from "@/lib/proposals/assembleRenderModel"
 import type { ProposalRenderBusiness, ProposalRenderCustomer } from "@/lib/proposals/renderModel"
 
@@ -80,7 +80,7 @@ export async function GET(
     const { data: proposal, error: pErr } = await supabase
       .from("proposals")
       .select(
-        "id, business_id, customer_id, title, proposal_number, status, template_id, brand_accent_color, cover_asset_id, typography, sections, pricing_mode, pricing_payload, currency_code, public_token, created_at, expires_at"
+        "id, business_id, customer_id, title, proposal_number, status, template_id, brand_accent_color, cover_asset_id, typography, sections, pricing_mode, pricing_payload, currency_code, public_token, created_at, expires_at, accepted_at, rejected_at, rejected_reason"
       )
       .eq("id", proposalId)
       .eq("business_id", businessId)
@@ -125,7 +125,10 @@ export async function GET(
 
     let pdfBuffer: Buffer
     try {
-      pdfBuffer = await renderHtmlToPdfBuffer(html)
+      pdfBuffer = await renderHtmlToPdfBuffer(html, {
+        footerTemplate: proposalPdfFooterTemplate(model),
+        margin: { top: "8mm", right: "8mm", bottom: "15mm", left: "8mm" },
+      })
     } catch (err: unknown) {
       console.error("proposal export-pdf (Chromium) failed:", err)
       const message = err instanceof Error ? err.message : "PDF generation failed"

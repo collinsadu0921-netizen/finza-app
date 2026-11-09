@@ -14,6 +14,8 @@ import {
   type ProposalStatus,
 } from "@/lib/proposals/proposalState"
 import type { ProposalMessagingContext } from "@/lib/proposals/proposalSendMessaging"
+import { parseProposalSections } from "@/lib/proposals/schema"
+import { validateProposalSectionsForPublish } from "@/lib/proposals/guidance"
 import {
   buildProposalDocumentTitleLine,
   buildProposalEmailContextLine,
@@ -100,7 +102,7 @@ export async function POST(
 
     const { data: row, error: loadErr } = await supabase
       .from("proposals")
-      .select("id, business_id, customer_id, status, public_token, sent_at, title, proposal_number, expires_at")
+      .select("id, business_id, customer_id, status, public_token, sent_at, title, proposal_number, expires_at, sections, pricing_mode")
       .eq("id", proposalId)
       .eq("business_id", businessId)
       .is("deleted_at", null)
@@ -118,6 +120,23 @@ export async function POST(
 
     if (proposalStatusIsTerminal(status)) {
       return terminalError(status)
+    }
+
+    const readiness = validateProposalSectionsForPublish(parseProposalSections(proposalRow.sections), {
+      pricing_mode: (proposalRow.pricing_mode as string | null) ?? "none",
+      hasCustomer: Boolean(proposalRow.customer_id),
+    })
+    if (readiness.blocking.length > 0) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: readiness.blocking[0],
+          issues: readiness.blocking,
+          warnings: readiness.warnings,
+          channel,
+        },
+        { status: 422 }
+      )
     }
 
     if (!proposalStaffOutboundChannelsAllowed(status)) {

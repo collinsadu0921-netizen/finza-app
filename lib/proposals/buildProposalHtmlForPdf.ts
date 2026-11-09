@@ -4,6 +4,7 @@ import type {
   ProposalRenderSection,
 } from "./renderModel"
 import { composeProposalBook, type ProposalBook, type ProposalChapter } from "./composition"
+import { getChapterLayout } from "./layout"
 import type { ProposalTheme } from "./design"
 import { customPricingNotesToHtml } from "./parseCustomPricing"
 import { escapeHtml } from "./htmlEscape"
@@ -205,26 +206,70 @@ function attachmentsHtml(attachments: ProposalRenderAttachment[]): string {
     .join("")}</ul></section>`
 }
 
-function acceptanceHtml(): string {
-  return `<section class="pdf-acceptance">
+function acceptanceHtml(model: ProposalRenderModel): string {
+  const status = String(model.status || "draft").toLowerCase()
+  const decisionDate = model.accepted_at || model.rejected_at
+  const dateLabel = decisionDate
+    ? new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "long", year: "numeric" }).format(
+        new Date(decisionDate)
+      )
+    : null
+  const title =
+    status === "accepted" || status === "converted"
+      ? "Accepted online"
+      : status === "rejected"
+        ? "Declined online"
+        : status === "sent" || status === "viewed"
+          ? "Awaiting client decision"
+          : "Draft proposal"
+  const body =
+    status === "accepted" || status === "converted"
+      ? `This proposal was accepted online${dateLabel ? ` on ${dateLabel}` : ""}. The recorded decision confirms the scope, timeline and investment described in this document.`
+      : status === "rejected"
+        ? `This proposal was declined online${dateLabel ? ` on ${dateLabel}` : ""}.${model.rejected_reason ? ` Client note: ${model.rejected_reason}` : ""}`
+        : status === "sent" || status === "viewed"
+          ? "The client can accept or decline this proposal through the public proposal link. The decision is recorded electronically; no handwritten signature is captured."
+          : "This proposal has not yet been sent to the client."
+
+  return `<section class="pdf-acceptance pdf-acceptance--${escapeHtml(status)}">
     <span class="pdf-eyebrow">Client decision</span>
-    <h3>Acceptance</h3>
-    <p class="pdf-paragraph">By accepting this proposal, the client confirms the scope, timeline and investment described in this document.</p>
-    <div class="pdf-signature-grid">
-      <div><span>Name</span><i></i></div>
-      <div><span>Signature</span><i></i></div>
-      <div><span>Date</span><i></i></div>
-    </div>
-    <p class="pdf-acceptance-note">Online acceptance through the proposal link records the client's decision. This PDF signature block is optional and is not a qualified electronic signature.</p>
+    <h3>${escapeHtml(title)}</h3>
+    <p class="pdf-paragraph">${escapeHtml(body)}</p>
+    <p class="pdf-acceptance-note">Online acceptance is an electronic decision record. It is not a qualified electronic signature and this document does not capture a handwritten signature.</p>
   </section>`
+}
+
+/** Footer template for the Chromium PDF layer; page numbers are supplied by Chromium. */
+export function proposalPdfFooterTemplate(model: ProposalRenderModel): string {
+  const business =
+    model.business.trading_name || model.business.legal_name || model.business.name || "Proposal"
+  const title = model.title || "Proposal"
+  return `<div style="width:100%;font-family:Arial,sans-serif;font-size:7px;color:#8a8178;padding:0 12mm;display:flex;justify-content:space-between;gap:12mm;">
+    <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%;">${escapeHtml(business)} · ${escapeHtml(title)}</span>
+    <span style="white-space:nowrap;">Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
+  </div>`
 }
 
 function chapterHtml(chapter: ProposalChapter, book: ProposalBook, model: ProposalRenderModel): string {
   const body = chapter.blocks.map(sectionHtml).join("\n")
   const pricing = chapter.kind === "pricing" ? pricingHtml(book, model) : ""
   const attachments = attachmentsHtml(chapter.attachments)
-  const acceptance = chapter.kind === "acceptance" ? acceptanceHtml() : ""
-  return `<section class="pdf-chapter" id="${escapeHtml(chapter.key)}">
+  const acceptance = chapter.kind === "acceptance" ? acceptanceHtml(model) : ""
+  const layout = getChapterLayout(chapter, chapter.number - 1)
+  const classes = [
+    "pdf-chapter",
+    layout.newPage ? "pdf-chapter--new-page" : "",
+    layout.lead ? "pdf-chapter--lead" : "",
+    layout.twoColumn ? "pdf-chapter--two-col" : "",
+    layout.timeline ? "pdf-chapter--timeline" : "",
+    layout.scope ? "pdf-chapter--scope" : "",
+    layout.hasImages ? "pdf-chapter--has-images" : "",
+    layout.major ? "pdf-chapter--major" : "",
+    `pdf-chapter--${book.theme.id}`,
+  ]
+    .filter(Boolean)
+    .join(" ")
+  return `<section class="${classes}" id="${escapeHtml(chapter.key)}">
     <header class="pdf-chapter-head">
       <span class="pdf-chapter-number">${String(chapter.number).padStart(2, "0")}</span>
       <div>
@@ -266,7 +311,7 @@ function themeCss(theme: ProposalTheme): string {
 
 const BASE_CSS = `
   * { box-sizing: border-box; }
-  @page { size: A4; margin: 14mm 14mm 16mm; }
+  @page { size: A4; margin: 14mm 14mm 18mm; }
   html, body { margin: 0; padding: 0; }
   body {
     font-family: var(--pdf-body-font);
@@ -334,7 +379,7 @@ const BASE_CSS = `
   .pdf-cover--classic .pdf-cover-art { opacity: 0; }
   .pdf-cover-inner { position: relative; z-index: 1; display: flex; flex-direction: column; min-height: 222mm; }
   .pdf-cover-brand { display: flex; align-items: center; gap: 10mm; }
-  .pdf-cover-logo { max-height: 22mm; max-width: 58mm; object-fit: contain; background: #fff; padding: 2mm; }
+  .pdf-cover-logo { max-height: 16mm; max-width: 46mm; object-fit: contain; background: #fff; padding: 1.5mm; }
   .pdf-cover-business { font-size: 11pt; font-weight: 600; letter-spacing: 0.04em; }
   .pdf-cover-copy { margin-top: auto; padding: 18mm 0; max-width: 150mm; }
   .pdf-eyebrow { font-family: var(--pdf-eyebrow-font); font-size: 7.5pt; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; color: var(--pdf-accent); }
@@ -351,40 +396,64 @@ const BASE_CSS = `
   .pdf-cover-meta-row { display: flex; flex-direction: column; gap: 1mm; }
   .pdf-cover-meta-row strong { font-size: 9pt; font-weight: 600; }
   .pdf-chapter {
-    padding: 4mm 2mm 10mm;
+    padding: 2mm 2mm 4mm;
+    margin: 0 0 8mm;
     background: var(--pdf-paper);
-    page-break-before: always;
-    break-before: page;
+    break-before: auto;
+    page-break-before: auto;
   }
-  .pdf-chapter-head { display: flex; gap: 8mm; align-items: flex-start; border-bottom: 1px solid var(--pdf-rule); padding-bottom: 6mm; margin-bottom: 8mm; page-break-after: avoid; }
-  .pdf-chapter-number { font-family: var(--pdf-heading-font); font-size: 34pt; line-height: 0.9; color: var(--pdf-accent); opacity: 0.35; min-width: 18mm; }
-  .pdf-chapter-head h2 { margin: 1mm 0 0; font-family: var(--pdf-heading-font); font-size: 25pt; line-height: 1.08; font-weight: 600; letter-spacing: -0.025em; color: var(--pdf-ink); }
-  .pdf-chapter--modern .pdf-chapter-head h2 { text-transform: none; font-weight: 800; }
+  .pdf-chapter--new-page {
+    break-before: page;
+    page-break-before: always;
+    margin-top: 0;
+    padding-top: 0;
+  }
+  .pdf-chapter--has-images { break-inside: auto; }
+  .pdf-chapter-head {
+    display: flex;
+    gap: 6mm;
+    align-items: flex-start;
+    border-bottom: 1px solid var(--pdf-rule);
+    padding-bottom: 4mm;
+    margin-bottom: 6mm;
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+  .pdf-chapter-number { font-family: var(--pdf-heading-font); font-size: 22pt; line-height: 0.9; color: var(--pdf-accent); opacity: 0.28; min-width: 12mm; }
+  .pdf-chapter-head h2 { margin: 0.5mm 0 0; font-family: var(--pdf-heading-font); font-size: 21pt; line-height: 1.08; font-weight: 600; letter-spacing: -0.02em; color: var(--pdf-ink); }
+  .pdf-chapter--modern_v1 .pdf-chapter-head h2 { font-weight: 800; }
+  .pdf-chapter--premium_v1 .pdf-chapter-head h2 { font-weight: 400; }
   .pdf-chapter-body { max-width: 100%; }
-  .pdf-section-heading { font-family: var(--pdf-heading-font); margin: 7mm 0 2mm; font-size: 14pt; line-height: 1.2; font-weight: 600; color: var(--pdf-ink); page-break-after: avoid; }
-  .pdf-paragraph { margin: 0 0 3.5mm; font-size: 10.5pt; color: var(--pdf-ink); }
+  .pdf-section-heading { font-family: var(--pdf-heading-font); margin: 5mm 0 1.5mm; font-size: 12.5pt; line-height: 1.2; font-weight: 600; color: var(--pdf-ink); break-after: avoid; page-break-after: avoid; }
+  .pdf-paragraph { margin: 0 0 3.2mm; font-size: 10.5pt; color: var(--pdf-ink); orphans: 3; widows: 3; }
+  .pdf-chapter--lead .pdf-paragraph:first-of-type { font-size: 13pt; line-height: 1.55; color: var(--pdf-ink); }
   .pdf-list { margin: 2mm 0 4mm 5mm; padding: 0; }
-  .pdf-list li { margin: 0 0 1.4mm; padding-left: 1mm; }
-  .pdf-figure { margin: 5mm 0; page-break-inside: avoid; }
-  .pdf-figure img { max-width: 100%; height: auto; border-radius: var(--pdf-radius); }
+  .pdf-list li { margin: 0 0 1.2mm; padding-left: 1mm; break-inside: avoid; }
+  .pdf-chapter--two-col .pdf-list { columns: 2; column-gap: 10mm; }
+  .pdf-chapter--timeline .pdf-list { list-style: none; margin-left: 0; border-left: 1px solid var(--pdf-rule); padding-left: 4mm; }
+  .pdf-chapter--timeline .pdf-list li { position: relative; padding-left: 3mm; }
+  .pdf-chapter--timeline .pdf-list li::before { content: ""; position: absolute; left: -5.2mm; top: 1.7mm; width: 1.8mm; height: 1.8mm; border-radius: 50%; background: var(--pdf-accent); }
+  .pdf-figure { margin: 4mm 0; page-break-inside: avoid; break-inside: avoid; }
+  .pdf-figure img { max-width: 100%; max-height: 190mm; height: auto; object-fit: contain; border-radius: var(--pdf-radius); }
   .pdf-figure figcaption, .pdf-caption { margin-top: 1.5mm; font-size: 8pt; color: var(--pdf-muted); }
-  .pdf-gallery { display: grid; grid-template-columns: 1fr 1fr; gap: 3mm; margin: 4mm 0; }
+  .pdf-gallery { display: grid; grid-template-columns: 1fr 1fr; gap: 3mm; margin: 4mm 0; break-inside: avoid; }
   .pdf-gallery-item { margin: 0; }
-  .pdf-gallery-item img { width: 100%; height: 55mm; object-fit: cover; border-radius: var(--pdf-radius); }
-  .pdf-divider { border: 0; border-top: 1px solid var(--pdf-rule); margin: 7mm 0; }
-  .pdf-pricing { margin: 8mm 0 4mm; padding: 7mm; background: var(--pdf-card); border: 1px solid var(--pdf-rule); border-radius: var(--pdf-radius); page-break-inside: auto; }
-  .pdf-pricing-heading h3 { margin: 1mm 0 5mm; font-family: var(--pdf-heading-font); font-size: 17pt; font-weight: 600; }
-  .pdf-price-fixed { display: flex; align-items: baseline; justify-content: space-between; gap: 8mm; border-top: 1px solid var(--pdf-rule); border-bottom: 1px solid var(--pdf-rule); padding: 6mm 0; }
+  .pdf-gallery-item img { width: 100%; height: 48mm; object-fit: cover; border-radius: var(--pdf-radius); }
+  .pdf-divider { border: 0; border-top: 1px solid var(--pdf-rule); margin: 6mm 0; }
+  .pdf-pricing { margin: 6mm 0 4mm; padding: 6mm; background: var(--pdf-card); border: 1px solid var(--pdf-rule); border-radius: var(--pdf-radius); break-inside: auto; page-break-inside: auto; }
+  .pdf-pricing-heading h3 { margin: 1mm 0 4mm; font-family: var(--pdf-heading-font); font-size: 15pt; font-weight: 600; }
+  .pdf-price-fixed { display: flex; align-items: baseline; justify-content: space-between; gap: 8mm; border-top: 1px solid var(--pdf-rule); border-bottom: 1px solid var(--pdf-rule); padding: 5mm 0; break-inside: avoid; }
   .pdf-price-fixed span { font-size: 9pt; color: var(--pdf-muted); }
-  .pdf-price-fixed strong { font-family: var(--pdf-heading-font); font-size: 24pt; font-weight: 600; }
+  .pdf-price-fixed strong { font-family: var(--pdf-heading-font); font-size: 22pt; font-weight: 600; }
   .pdf-price-table { width: 100%; border-collapse: collapse; font-size: 9.5pt; }
-  .pdf-price-table th, .pdf-price-table td { border-bottom: 1px solid var(--pdf-rule); padding: 2.6mm 2mm; text-align: left; vertical-align: top; }
+  .pdf-price-table thead { display: table-header-group; }
+  .pdf-price-table th, .pdf-price-table td { border-bottom: 1px solid var(--pdf-rule); padding: 2.4mm 2mm; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
   .pdf-price-table thead th { font-family: var(--pdf-eyebrow-font); font-size: 7.5pt; text-transform: uppercase; letter-spacing: 0.08em; color: var(--pdf-muted); }
-  .pdf-price-table .num { text-align: right; white-space: nowrap; }
+  .pdf-price-table .num { text-align: right; white-space: nowrap; overflow-wrap: normal; }
   .pdf-price-table .strong { font-weight: 600; color: var(--pdf-ink); }
   .pdf-price-table tr { page-break-inside: avoid; break-inside: avoid; }
-  .pdf-price-total td { border-top: 1px solid var(--pdf-ink); border-bottom: 0; padding-top: 4mm; font-size: 11pt; }
-  .pdf-pricing-note { margin: 4mm 0 0; font-size: 8pt; color: var(--pdf-muted); }
+  .pdf-price-total td { border-top: 1px solid var(--pdf-ink); border-bottom: 0; padding-top: 3.5mm; font-size: 11pt; }
+  .pdf-pricing-note { margin: 3.5mm 0 0; font-size: 8pt; color: var(--pdf-muted); }
   .pdf-custom-pricing { border: 1px solid var(--pdf-rule); border-radius: var(--pdf-radius); padding: 4mm; }
   .pdf-custom-pricing .cp-rate-group { border: 1px solid var(--pdf-rule); border-radius: var(--pdf-radius); overflow: hidden; margin: 2mm 0; }
   .pdf-custom-pricing .cp-rate-row { display: grid; grid-template-columns: 1fr minmax(32mm, 36%); gap: 4mm; padding: 2.2mm 3mm; border-bottom: 1px solid var(--pdf-rule); font-size: 9.5pt; }
@@ -400,17 +469,16 @@ const BASE_CSS = `
   .pdf-attachments ul { margin: 0 0 0 4mm; padding: 0; }
   .pdf-attachments li { margin-bottom: 2mm; font-size: 9pt; }
   .pdf-attachments a { color: var(--pdf-accent); word-break: break-all; }
-  .pdf-acceptance { margin-top: 9mm; padding: 7mm; border: 1px solid var(--pdf-rule); background: var(--pdf-card); border-radius: var(--pdf-radius); page-break-inside: avoid; }
-  .pdf-acceptance h3 { margin: 1mm 0 4mm; font-family: var(--pdf-heading-font); font-size: 20pt; }
-  .pdf-signature-grid { display: grid; grid-template-columns: 1.3fr 1.3fr 0.7fr; gap: 8mm; margin: 12mm 0 6mm; }
-  .pdf-signature-grid span { font-family: var(--pdf-eyebrow-font); font-size: 7pt; text-transform: uppercase; letter-spacing: 0.12em; color: var(--pdf-muted); }
-  .pdf-signature-grid i { display: block; height: 10mm; border-bottom: 1px solid var(--pdf-ink); }
-  .pdf-acceptance-note { font-size: 8pt; color: var(--pdf-muted); margin: 0; }
+  .pdf-acceptance { margin-top: 7mm; padding: 6mm; border: 1px solid var(--pdf-rule); background: var(--pdf-card); border-radius: var(--pdf-radius); break-inside: avoid; page-break-inside: avoid; }
+  .pdf-acceptance h3 { margin: 1mm 0 3mm; font-family: var(--pdf-heading-font); font-size: 18pt; }
+  .pdf-acceptance--accepted, .pdf-acceptance--converted { border-color: color-mix(in srgb, var(--pdf-accent) 42%, var(--pdf-rule)); }
+  .pdf-acceptance--rejected { border-color: #fecaca; }
+  .pdf-acceptance-note { font-size: 8pt; color: var(--pdf-muted); margin: 2mm 0 0; }
   .muted { color: var(--pdf-muted); }
   .small { font-size: 8pt; }
   @media print {
     .pdf-cover { break-after: page; }
-    .pdf-chapter { break-before: page; }
+    .pdf-chapter--new-page { break-before: page; }
   }
 `
 

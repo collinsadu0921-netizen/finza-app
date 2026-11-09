@@ -156,6 +156,14 @@ function isRecoverableBrowserError(message: string): boolean {
   )
 }
 
+export type RenderHtmlToPdfOptions = {
+  displayHeaderFooter?: boolean
+  footerTemplate?: string
+  headerTemplate?: string
+  margin?: { top?: string; right?: string; bottom?: string; left?: string }
+  scale?: number
+}
+
 /**
  * Renders full HTML document string to a PDF buffer (A4, print backgrounds).
  * On Vercel, uses @sparticuz/chromium; locally uses system Chrome/Chromium.
@@ -164,7 +172,10 @@ function isRecoverableBrowserError(message: string): boolean {
  *
  * Vercel: see `ensureSparticuzChromiumEnvForNonLambdaServerless` — required so Sparticuz extracts NSS libs.
  */
-export async function renderHtmlToPdfBuffer(html: string): Promise<Buffer> {
+export async function renderHtmlToPdfBuffer(
+  html: string,
+  options?: RenderHtmlToPdfOptions
+): Promise<Buffer> {
   const renderOnce = async (): Promise<Buffer> => {
     const browser = await getOrCreateSharedBrowser()
     const page = await browser.newPage()
@@ -173,11 +184,20 @@ export async function renderHtmlToPdfBuffer(html: string): Promise<Buffer> {
       // can clip or omit blocks (e.g. quote terms below totals) in headless Chromium page.pdf().
       await page.emulateMediaType("screen")
       await page.setContent(html, { waitUntil: "load", timeout: 45_000 })
+      const margin = {
+        top: options?.margin?.top ?? "8mm",
+        right: options?.margin?.right ?? "8mm",
+        bottom: options?.margin?.bottom ?? "8mm",
+        left: options?.margin?.left ?? "8mm",
+      }
       const pdf = await page.pdf({
         format: "A4",
         printBackground: true,
-        margin: { top: "8mm", right: "8mm", bottom: "8mm", left: "8mm" },
-        scale: 0.88,
+        margin,
+        scale: options?.scale ?? 0.88,
+        displayHeaderFooter: Boolean(options?.displayHeaderFooter || options?.footerTemplate || options?.headerTemplate),
+        headerTemplate: options?.headerTemplate ?? "<span></span>",
+        footerTemplate: options?.footerTemplate ?? "<span></span>",
       })
       return Buffer.from(pdf)
     } finally {
