@@ -265,6 +265,7 @@ function chapterHtml(chapter: ProposalChapter, book: ProposalBook, model: Propos
     layout.scope ? "pdf-chapter--scope" : "",
     layout.hasImages ? "pdf-chapter--has-images" : "",
     layout.major ? "pdf-chapter--major" : "",
+    chapter.kind === "acceptance" ? "pdf-chapter--acceptance" : "",
     `pdf-chapter--${book.theme.id}`,
   ]
     .filter(Boolean)
@@ -409,6 +410,7 @@ const BASE_CSS = `
     padding-top: 0;
   }
   .pdf-chapter--has-images { break-inside: auto; }
+  .pdf-chapter--acceptance { break-inside: avoid; page-break-inside: avoid; }
   .pdf-chapter-head {
     display: flex;
     gap: 6mm;
