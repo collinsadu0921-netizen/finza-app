@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { normalizeCountry } from "@/lib/payments/eligibility"
 import { resolveProfessionalVatBusinessId } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
+import { resolveMonthlyVatNet } from "@/lib/vat/monthlyVat"
 
 export type LedgerLine = {
   id: string
@@ -37,6 +38,11 @@ const TAX_ACCOUNT_MAP: Record<string, string> = {
   "2110": "NHIL",
   "2120": "GETFund",
   "2130": "COVID",
+}
+
+function money(value: unknown): number {
+  const n = Number(value ?? 0)
+  return Number.isFinite(n) ? Math.round((n + Number.EPSILON) * 100) / 100 : 0
 }
 
 export async function GET(request: NextRequest) {
@@ -180,22 +186,76 @@ export async function GET(request: NextRequest) {
       })
     }
 
-    const sortedMonths = Object.keys(byMonth).sort()
+    // A filed return's stored amounts are immutable and authoritative. For
+    // months without a filed return, use the canonical regime-aware
+    // calculation so the ledger preview matches the filing preview.
+    const { data: filedReturns, error: filedReturnsError } = await supabase
+      .from("vat_returns")
+      .select(
+        "id,period_start_date,status,total_output_nhil,total_output_getfund,total_output_covid,total_output_vat,total_input_nhil,total_input_getfund,total_input_covid,total_input_vat,net_vat_payable,net_vat_refund"
+      )
+      .eq("business_id", businessId)
+      .is("deleted_at", null)
+
+    if (filedReturnsError) {
+      console.error("Error fetching filed VAT returns:", filedReturnsError)
+      return NextResponse.json({ error: filedReturnsError.message }, { status: 500 })
+    }
+
+    const filedByMonth = new Map<string, any>()
+    for (const row of filedReturns || []) {
+      const month = String(row.period_start_date || "").slice(0, 7)
+      if (month) filedByMonth.set(month, row)
+    }
+
+    const sortedMonths = Array.from(
+      new Set([...Object.keys(byMonth), ...filedByMonth.keys()])
+    ).sort()
+
+    const emptyMonth = {
+      output_vat: 0,
+      input_vat: 0,
+      output_nhil: 0,
+      input_nhil: 0,
+      output_getfund: 0,
+      input_getfund: 0,
+      output_covid: 0,
+      input_covid: 0,
+      entries: [] as LedgerLine[],
+    }
 
     const monthlyReturns: MonthlyVatReturn[] = sortedMonths.map((month) => {
-      const m = byMonth[month]
-      const net_vat = m.output_vat - m.input_vat
+      const m = byMonth[month] ?? emptyMonth
+      const filed = filedByMonth.get(month)
+      const netVat = resolveMonthlyVatNet({ month, ledger: m, filed })
+
+      if (filed) {
+        return {
+          month,
+          output_nhil: money(filed.total_output_nhil),
+          output_getfund: money(filed.total_output_getfund),
+          output_covid: money(filed.total_output_covid),
+          output_vat: money(filed.total_output_vat),
+          input_nhil: money(filed.total_input_nhil),
+          input_getfund: money(filed.total_input_getfund),
+          input_covid: money(filed.total_input_covid),
+          input_vat: money(filed.total_input_vat),
+          net_vat: netVat,
+          entries: m.entries,
+        }
+      }
+
       return {
         month,
-        output_nhil:    Math.round(m.output_nhil    * 100) / 100,
-        output_getfund: Math.round(m.output_getfund * 100) / 100,
-        output_covid:   Math.round(m.output_covid   * 100) / 100,
-        output_vat:     Math.round(m.output_vat     * 100) / 100,
-        input_nhil:     Math.round(m.input_nhil     * 100) / 100,
-        input_getfund:  Math.round(m.input_getfund  * 100) / 100,
-        input_covid:    Math.round(m.input_covid    * 100) / 100,
-        input_vat:      Math.round(m.input_vat      * 100) / 100,
-        net_vat:        Math.round(net_vat          * 100) / 100,
+        output_nhil: money(m.output_nhil),
+        output_getfund: money(m.output_getfund),
+        output_covid: money(m.output_covid),
+        output_vat: money(m.output_vat),
+        input_nhil: money(m.input_nhil),
+        input_getfund: money(m.input_getfund),
+        input_covid: money(m.input_covid),
+        input_vat: money(m.input_vat),
+        net_vat: netVat,
         entries: m.entries,
       }
     })
