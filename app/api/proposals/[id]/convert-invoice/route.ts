@@ -21,7 +21,7 @@ const bodySchema = z
  */
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> | { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id: proposalId } = await Promise.resolve(params)
