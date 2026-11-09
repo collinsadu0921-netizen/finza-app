@@ -124,6 +124,28 @@ describe("buildProposalHtmlForPdf", () => {
     expect(html).not.toContain("page-break-before: always;\n    background: var(--pdf-paper)")
   })
 
+  it("keeps short pricing cards intact but lets long line-item tables paginate", () => {
+    const short = buildProposalHtmlForPdf(model())
+    expect(short).toContain('class="pdf-pricing pdf-pricing--premium_v1 pdf-pricing--keep"')
+
+    const long = buildProposalHtmlForPdf(
+      model({
+        pricing: {
+          mode: "line_items",
+          items: Array.from({ length: 9 }, (_, index) => ({
+            description: `Service line ${index + 1}`,
+            quantity: 1,
+            unit_price: 1000,
+            discount_amount: 0,
+            line_total: 1000,
+          })),
+        },
+      })
+    )
+    expect(long).toContain('class="pdf-pricing pdf-pricing--premium_v1"')
+    expect(long).not.toContain("pdf-pricing--premium_v1 pdf-pricing--keep")
+  })
+
   it("renders an accepted decision without empty signature lines", () => {
     const html = buildProposalHtmlForPdf(
       model({

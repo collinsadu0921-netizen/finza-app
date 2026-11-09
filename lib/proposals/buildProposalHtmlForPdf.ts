@@ -185,7 +185,15 @@ function pricingHtml(book: ProposalBook, model: ProposalRenderModel): string {
     body = `<div class="pdf-custom-pricing">${customPricingNotesToHtml(pricing.notes)}</div>`
   }
 
-  return `<section class="pdf-pricing pdf-pricing--${theme.id}">
+  // Keep short pricing cards intact; allow genuinely long line-item tables to
+  // paginate with a repeated table header instead of overflowing a page.
+  const keepTogether =
+    pricing.mode !== "line_items" ||
+    (pricing.mode === "line_items" && pricing.items.length <= 8)
+
+  return `<section class="pdf-pricing pdf-pricing--${theme.id}${
+    keepTogether ? " pdf-pricing--keep" : ""
+  }">
     <div class="pdf-pricing-heading"><span class="pdf-eyebrow">Investment</span><h3>${escapeHtml(
       summary.label
     )}</h3></div>
@@ -443,6 +451,8 @@ const BASE_CSS = `
   .pdf-gallery-item img { width: 100%; height: 48mm; object-fit: cover; border-radius: var(--pdf-radius); }
   .pdf-divider { border: 0; border-top: 1px solid var(--pdf-rule); margin: 6mm 0; }
   .pdf-pricing { margin: 6mm 0 4mm; padding: 6mm; background: var(--pdf-card); border: 1px solid var(--pdf-rule); border-radius: var(--pdf-radius); break-inside: auto; page-break-inside: auto; }
+  .pdf-pricing--keep { break-inside: avoid; page-break-inside: avoid; }
+  .pdf-pricing-heading { break-after: avoid; page-break-after: avoid; }
   .pdf-pricing-heading h3 { margin: 1mm 0 4mm; font-family: var(--pdf-heading-font); font-size: 15pt; font-weight: 600; }
   .pdf-price-fixed { display: flex; align-items: baseline; justify-content: space-between; gap: 8mm; border-top: 1px solid var(--pdf-rule); border-bottom: 1px solid var(--pdf-rule); padding: 5mm 0; break-inside: avoid; }
   .pdf-price-fixed span { font-size: 9pt; color: var(--pdf-muted); }
@@ -455,7 +465,7 @@ const BASE_CSS = `
   .pdf-price-table .strong { font-weight: 600; color: var(--pdf-ink); }
   .pdf-price-table tr { page-break-inside: avoid; break-inside: avoid; }
   .pdf-price-total td { border-top: 1px solid var(--pdf-ink); border-bottom: 0; padding-top: 3.5mm; font-size: 11pt; }
-  .pdf-pricing-note { margin: 3.5mm 0 0; font-size: 8pt; color: var(--pdf-muted); }
+  .pdf-pricing-note { margin: 3.5mm 0 0; font-size: 8pt; color: var(--pdf-muted); break-before: avoid; page-break-before: avoid; }
   .pdf-custom-pricing { border: 1px solid var(--pdf-rule); border-radius: var(--pdf-radius); padding: 4mm; }
   .pdf-custom-pricing .cp-rate-group { border: 1px solid var(--pdf-rule); border-radius: var(--pdf-radius); overflow: hidden; margin: 2mm 0; }
   .pdf-custom-pricing .cp-rate-row { display: grid; grid-template-columns: 1fr minmax(32mm, 36%); gap: 4mm; padding: 2.2mm 3mm; border-bottom: 1px solid var(--pdf-rule); font-size: 9.5pt; }
