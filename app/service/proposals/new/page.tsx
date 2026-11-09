@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabaseClient"
 import { getCurrentBusiness } from "@/lib/business"
 import { useSyncServiceBusinessIdInUrl } from "@/lib/navigation/serviceBusinessUrl"
 import { PROPOSAL_TEMPLATE_META, type ProposalTemplateId } from "@/lib/proposals/templates"
+import { ProposalTemplatePreview } from "@/components/proposals/ProposalTemplatePreview"
 
 export default function NewProposalPage() {
   const router = useRouter()
@@ -74,9 +75,11 @@ export default function NewProposalPage() {
 
   return (
     <div className="min-h-screen bg-slate-50 px-4 py-10 sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-2xl rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+      <div className="mx-auto max-w-5xl rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
         <h1 className="text-xl font-bold text-slate-900">New proposal</h1>
-        <p className="mt-1 text-sm text-slate-500">Create a draft, then add sections and media.</p>
+        <p className="mt-1 text-sm text-slate-500">
+          Choose a document design, then add your content and branding in the editor.
+        </p>
         {error ? <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</div> : null}
         <label className="mt-6 block text-sm font-medium text-slate-700">
           Title
@@ -90,29 +93,18 @@ export default function NewProposalPage() {
 
         <fieldset className="mt-6">
           <legend className="text-sm font-medium text-slate-700">Design</legend>
-          <div className="mt-3 grid gap-3 sm:grid-cols-3">
-            {PROPOSAL_TEMPLATE_META.filter((template) => !template.legacy).map((template) => {
-              const active = templateId === template.id
-              return (
-                <button
-                  key={template.id}
-                  type="button"
-                  onClick={() => setTemplateId(template.id)}
-                  aria-pressed={active}
-                  className={`rounded-2xl border p-4 text-left transition ${
-                    active
-                      ? "border-slate-900 bg-slate-900 text-white shadow-sm"
-                      : "border-slate-200 bg-white text-slate-800 shadow-sm hover:border-slate-300"
-                  }`}
-                >
-                  <span className="mb-3 block h-2 w-10 rounded-full" style={{ backgroundColor: template.accent }} />
-                  <span className="block text-sm font-semibold">{template.label}</span>
-                  <span className={`mt-1 block text-xs leading-relaxed ${active ? "text-slate-300" : "text-slate-500"}`}>
-                    {template.description}
-                  </span>
-                </button>
-              )
-            })}
+          <p className="mt-1 text-xs text-slate-500">
+            Each preview uses the same colours, typography and cover treatment as the client document.
+          </p>
+          <div className="mt-4 grid gap-4 sm:grid-cols-3">
+            {PROPOSAL_TEMPLATE_META.filter((template) => !template.legacy).map((template) => (
+              <ProposalTemplatePreview
+                key={template.id}
+                template={template}
+                selected={templateId === template.id}
+                onSelect={() => setTemplateId(template.id)}
+              />
+            ))}
           </div>
         </fieldset>
 

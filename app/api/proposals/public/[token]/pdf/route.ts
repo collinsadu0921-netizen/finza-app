@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { getSupabaseServiceRoleClient } from "@/lib/supabaseServiceRole"
 import { assembleProposalRenderModel, type ProposalAssetRow, type ProposalRow } from "@/lib/proposals/assembleRenderModel"
 import type { ProposalRenderBusiness, ProposalRenderCustomer } from "@/lib/proposals/renderModel"
-import { buildProposalHtmlForPdf } from "@/lib/proposals/buildProposalHtmlForPdf"
+import { buildProposalHtmlForPdf, proposalPdfFooterTemplate } from "@/lib/proposals/buildProposalHtmlForPdf"
 import { renderHtmlToPdfBuffer } from "@/lib/pdf/renderHtmlToPdf"
 import { buildFinancialDocumentPdfDisposition } from "@/lib/documents/financialDocumentPdfDisposition"
 import { normalizeProposalStatus } from "@/lib/proposals/proposalState"
@@ -41,7 +41,7 @@ export async function GET(
     const { data: proposal, error: pErr } = await admin
       .from("proposals")
       .select(
-        "id, business_id, customer_id, title, proposal_number, status, template_id, brand_accent_color, cover_asset_id, typography, sections, pricing_mode, pricing_payload, currency_code, public_token, expires_at, created_at"
+        "id, business_id, customer_id, title, proposal_number, status, template_id, brand_accent_color, cover_asset_id, typography, sections, pricing_mode, pricing_payload, currency_code, public_token, expires_at, created_at, accepted_at, rejected_at, rejected_reason"
       )
       .eq("public_token", token)
       .is("deleted_at", null)
@@ -113,7 +113,10 @@ export async function GET(
     })
 
     const html = buildProposalHtmlForPdf(model)
-    const pdfBuffer = await renderHtmlToPdfBuffer(html)
+    const pdfBuffer = await renderHtmlToPdfBuffer(html, {
+      footerTemplate: proposalPdfFooterTemplate(model),
+      margin: { top: "8mm", right: "8mm", bottom: "15mm", left: "8mm" },
+    })
     const { contentDisposition } = buildFinancialDocumentPdfDisposition({
       label: "Proposal",
       documentNumber: p.proposal_number || p.title || null,

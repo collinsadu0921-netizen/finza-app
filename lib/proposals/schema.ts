@@ -8,18 +8,21 @@ export const proposalSectionBlockSchema = z.discriminatedUnion("type", [
     level: z.number().int().min(1).max(6),
     text: z.string(),
     hidden: z.boolean().optional(),
+    guidance: z.boolean().optional(),
   }),
   z.object({
     type: z.literal("paragraph"),
     id: z.string().min(1).optional(),
     text: z.string(),
     hidden: z.boolean().optional(),
+    guidance: z.boolean().optional(),
   }),
   z.object({
     type: z.literal("bullet_list"),
     id: z.string().min(1).optional(),
     items: z.array(z.string()),
     hidden: z.boolean().optional(),
+    guidance: z.boolean().optional(),
   }),
   z.object({
     type: z.literal("image"),
@@ -27,6 +30,7 @@ export const proposalSectionBlockSchema = z.discriminatedUnion("type", [
     asset_id: z.string().uuid(),
     caption: z.string().optional(),
     hidden: z.boolean().optional(),
+    guidance: z.boolean().optional(),
   }),
   z.object({
     type: z.literal("gallery"),
@@ -34,11 +38,13 @@ export const proposalSectionBlockSchema = z.discriminatedUnion("type", [
     asset_ids: z.array(z.string().uuid()).min(1),
     caption: z.string().optional(),
     hidden: z.boolean().optional(),
+    guidance: z.boolean().optional(),
   }),
   z.object({
     type: z.literal("divider"),
     id: z.string().min(1).optional(),
     hidden: z.boolean().optional(),
+    guidance: z.boolean().optional(),
   }),
 ])
 

@@ -1,5 +1,6 @@
 import type { ProposalRenderAttachment, ProposalRenderModel, ProposalRenderSection } from "./renderModel"
 import { getProposalTheme, type ProposalTheme } from "./design"
+import { stripGuidance } from "./guidance"
 import type { ProposalTemplateId } from "./templates"
 
 export type ProposalChapterKind = "content" | "pricing" | "acceptance"
@@ -118,7 +119,8 @@ export function composeProposalBook(model: ProposalRenderModel): ProposalBook {
     index += 1
   }
   if (introBlocks.length > 0) {
-    chapters.push(makeChapter(0, "Introduction", introBlocks))
+    const publishableIntro = stripGuidance(introBlocks)
+    if (publishableIntro.length > 0) chapters.push(makeChapter(0, "Introduction", publishableIntro))
   }
 
   let hiddenPricingAnchor = false
@@ -146,9 +148,10 @@ export function composeProposalBook(model: ProposalRenderModel): ProposalBook {
     }
 
     const kind = chapterKind(title)
-    // Keep a chapter if it has content, or if it is a pricing/acceptance anchor.
-    if (blocks.length > 0 || kind !== "content") {
-      chapters.push(makeChapter(chapters.length, title, blocks))
+    const publishableBlocks = stripGuidance(blocks)
+    // Keep a chapter if it has publishable content, or if it is a pricing/acceptance anchor.
+    if (publishableBlocks.length > 0 || kind !== "content") {
+      chapters.push(makeChapter(chapters.length, title, publishableBlocks))
     }
   }
 

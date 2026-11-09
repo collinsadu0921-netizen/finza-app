@@ -94,16 +94,18 @@ function premiumStarterSections(): ProposalSectionBlock[] {
       type: "paragraph",
       id: "blk_intro",
       text: "A clear proposal for the work ahead. Replace the guidance below with the client's context, your approach, and the investment.",
+      guidance: true,
     },
     ...STARTER_CHAPTERS.flatMap(([title, body], index): ProposalSectionBlock[] => [
       { type: "heading", level: 2, text: title, id: `blk_ch_${index}_h` },
-      { type: "paragraph", text: body, id: `blk_ch_${index}_p` },
+      { type: "paragraph", text: body, id: `blk_ch_${index}_p`, guidance: true },
       ...(index === 4
         ? [
             {
               type: "bullet_list" as const,
               id: "blk_scope_list",
               items: ["Add a scope item", "Add a deliverable", "Add an assumption or exclusion"],
+              guidance: true,
             },
           ]
         : []),
@@ -113,36 +115,42 @@ function premiumStarterSections(): ProposalSectionBlock[] {
       type: "bullet_list",
       id: "blk_deliverables_list",
       items: ["Add a deliverable", "Add the acceptance criteria"],
+      guidance: true,
     },
     { type: "heading", level: 2, text: "Timeline and milestones", id: "blk_timeline_h" },
     {
       type: "paragraph",
       id: "blk_timeline_p",
       text: "Add the phases, dates and owners agreed with the client.",
+      guidance: true,
     },
     { type: "heading", level: 2, text: "Portfolio", id: "blk_portfolio_h" },
     {
       type: "paragraph",
       id: "blk_portfolio_p",
       text: "Optional: add project images or relevant examples. Do not add work you cannot evidence.",
+      guidance: true,
     },
     { type: "heading", level: 2, text: "Investment and pricing", id: "blk_inv_h" },
     {
       type: "paragraph",
       id: "blk_inv_p",
       text: "Explain what the investment covers, the assumptions behind it, and what is billed separately.",
+      guidance: true,
     },
     { type: "heading", level: 2, text: "Terms and conditions", id: "blk_terms_h" },
     {
       type: "paragraph",
       id: "blk_terms_p",
       text: "Add payment terms, validity, assumptions and any conditions that apply.",
+      guidance: true,
     },
     { type: "heading", level: 2, text: "Acceptance", id: "blk_accept_h" },
     {
       type: "paragraph",
       id: "blk_accept_p",
       text: "Use the online acceptance action to record the client's decision. This is not a qualified electronic signature.",
+      guidance: true,
     },
   ]
 }
@@ -161,6 +169,7 @@ export function defaultSectionsForTemplate(templateId: string): ProposalSectionB
         type: "paragraph",
         id: "blk_scope_p",
         text: "Summarize what is in and out of scope. Use the bullet list below for key deliverables or phases.",
+        guidance: true,
       },
       {
         type: "bullet_list",
@@ -175,6 +184,7 @@ export function defaultSectionsForTemplate(templateId: string): ProposalSectionB
         type: "paragraph",
         id: "blk_inv_p",
         text: "Figures are in the pricing panel on the right; this block is for narrative — scope covered, assumptions, and what is included in the fee.",
+        guidance: true,
       },
     ]
   }

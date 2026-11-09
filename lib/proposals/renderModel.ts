@@ -27,12 +27,12 @@ export type ProposalRenderCustomer = {
 }
 
 export type ProposalRenderSection =
-  | { type: "heading"; level: number; text: string; id?: string; hidden?: boolean }
-  | { type: "paragraph"; text: string; id?: string; hidden?: boolean }
-  | { type: "bullet_list"; items: string[]; id?: string; hidden?: boolean }
-  | { type: "image"; src: string; caption?: string; assetId: string; id?: string; hidden?: boolean }
-  | { type: "gallery"; images: { src: string; assetId: string }[]; caption?: string; id?: string; hidden?: boolean }
-  | { type: "divider"; id?: string; hidden?: boolean }
+  | { type: "heading"; level: number; text: string; id?: string; hidden?: boolean; guidance?: boolean }
+  | { type: "paragraph"; text: string; id?: string; hidden?: boolean; guidance?: boolean }
+  | { type: "bullet_list"; items: string[]; id?: string; hidden?: boolean; guidance?: boolean }
+  | { type: "image"; src: string; caption?: string; assetId: string; id?: string; hidden?: boolean; guidance?: boolean }
+  | { type: "gallery"; images: { src: string; assetId: string }[]; caption?: string; id?: string; hidden?: boolean; guidance?: boolean }
+  | { type: "divider"; id?: string; hidden?: boolean; guidance?: boolean }
 
 export type ProposalRenderAttachment = {
   id: string
@@ -66,6 +66,9 @@ export type ProposalRenderModel = {
   attachments: ProposalRenderAttachment[]
   created_at: string | null
   expires_at: string | null
+  accepted_at?: string | null
+  rejected_at?: string | null
+  rejected_reason?: string | null
   /** Proposal public token — for “copy link” in staff preview only */
   public_token?: string | null
 }
@@ -115,6 +118,9 @@ export function normalizeProposalForRender(input: {
   pricing: PricingPayload
   created_at?: string | null
   expires_at?: string | null
+  accepted_at?: string | null
+  rejected_at?: string | null
+  rejected_reason?: string | null
   assets: Array<{
     id: string
     kind: string
@@ -149,16 +155,16 @@ export function normalizeProposalForRender(input: {
   for (const b of input.sections) {
     switch (b.type) {
       case "heading":
-        sections.push({ type: "heading", level: b.level, text: b.text, id: blockId(b), hidden: b.hidden })
+        sections.push({ type: "heading", level: b.level, text: b.text, id: blockId(b), hidden: b.hidden, guidance: b.guidance })
         break
       case "paragraph":
-        sections.push({ type: "paragraph", text: b.text, id: blockId(b), hidden: b.hidden })
+        sections.push({ type: "paragraph", text: b.text, id: blockId(b), hidden: b.hidden, guidance: b.guidance })
         break
       case "bullet_list":
-        sections.push({ type: "bullet_list", items: b.items, id: blockId(b), hidden: b.hidden })
+        sections.push({ type: "bullet_list", items: b.items, id: blockId(b), hidden: b.hidden, guidance: b.guidance })
         break
       case "divider":
-        sections.push({ type: "divider", id: blockId(b), hidden: b.hidden })
+        sections.push({ type: "divider", id: blockId(b), hidden: b.hidden, guidance: b.guidance })
         break
       case "image": {
         const src = resolveUrl(b.asset_id)
@@ -170,6 +176,7 @@ export function normalizeProposalForRender(input: {
             assetId: b.asset_id,
             id: blockId(b),
             hidden: b.hidden,
+            guidance: b.guidance,
           })
         }
         break
@@ -181,7 +188,7 @@ export function normalizeProposalForRender(input: {
           if (src) images.push({ src, assetId: aid })
         }
         if (images.length > 0) {
-          sections.push({ type: "gallery", images, caption: b.caption, id: blockId(b), hidden: b.hidden })
+          sections.push({ type: "gallery", images, caption: b.caption, id: blockId(b), hidden: b.hidden, guidance: b.guidance })
         }
         break
       }
@@ -236,6 +243,9 @@ export function normalizeProposalForRender(input: {
     attachments,
     created_at: input.created_at ?? null,
     expires_at: input.expires_at ?? null,
+    accepted_at: input.accepted_at ?? null,
+    rejected_at: input.rejected_at ?? null,
+    rejected_reason: input.rejected_reason ?? null,
     public_token: input.public_token,
   }
 }

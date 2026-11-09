@@ -22,6 +22,9 @@ export type ProposalRow = {
   public_token: string | null
   created_at?: string | null
   expires_at?: string | null
+  accepted_at?: string | null
+  rejected_at?: string | null
+  rejected_reason?: string | null
 }
 
 export type ProposalAssetRow = {
@@ -83,6 +86,9 @@ export async function assembleProposalRenderModel(
     pricing,
     created_at: input.proposal.created_at ?? null,
     expires_at: input.proposal.expires_at ?? null,
+    accepted_at: input.proposal.accepted_at ?? null,
+    rejected_at: input.proposal.rejected_at ?? null,
+    rejected_reason: input.proposal.rejected_reason ?? null,
     assets: input.assets.map((a) => ({
       id: a.id,
       kind: a.kind,

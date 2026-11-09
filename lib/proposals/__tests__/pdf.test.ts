@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@jest/globals"
-import { buildProposalHtmlForPdf } from "../buildProposalHtmlForPdf"
+import { buildProposalHtmlForPdf, proposalPdfFooterTemplate } from "../buildProposalHtmlForPdf"
 import type { ProposalRenderModel } from "../renderModel"
 
 function model(overrides: Partial<ProposalRenderModel> = {}): ProposalRenderModel {
@@ -114,6 +114,51 @@ describe("buildProposalHtmlForPdf", () => {
       expect(html).toContain(`pdf-theme-${templateId}`)
       expect(html).toContain("pdf-cover")
     }
+  })
+
+  it("uses content-aware pagination instead of forcing every chapter onto a new page", () => {
+    const html = buildProposalHtmlForPdf(model())
+    const forcedNewPages = (html.match(/<section class="[^"]*pdf-chapter--new-page/g) || []).length
+    expect(forcedNewPages).toBe(1)
+    expect(html).toContain("pdf-chapter--lead")
+    expect(html).not.toContain("page-break-before: always;\n    background: var(--pdf-paper)")
+  })
+
+  it("renders an accepted decision without empty signature lines", () => {
+    const html = buildProposalHtmlForPdf(
+      model({
+        status: "accepted",
+        accepted_at: "2026-11-09T12:00:00.000Z",
+      })
+    )
+    expect(html).toContain("Accepted online")
+    expect(html).toContain("9 November 2026")
+    expect(html).not.toContain("pdf-signature-grid")
+    expect(html).not.toContain("Name</span><i>")
+  })
+
+  it("omits draft guidance from the published PDF", () => {
+    const html = buildProposalHtmlForPdf(
+      model({
+        sections: [
+          { type: "heading", level: 2, text: "Scope" },
+          { type: "paragraph", text: "Real scope content." },
+          { type: "paragraph", text: "Add a deliverable", guidance: true },
+          { type: "paragraph", text: "Introduce your business, relevant experience and the team." },
+        ],
+      })
+    )
+    expect(html).toContain("Real scope content.")
+    expect(html).not.toContain("Add a deliverable")
+    expect(html).not.toContain("Introduce your business")
+  })
+
+  it("builds a PDF footer with business, title and browser-supplied page numbers", () => {
+    const footer = proposalPdfFooterTemplate(model())
+    expect(footer).toContain("Acme Studio")
+    expect(footer).toContain("Website Redesign Proposal")
+    expect(footer).toContain('class="pageNumber"')
+    expect(footer).toContain('class="totalPages"')
   })
 
   it("keeps the legacy standard_v1 template renderable", () => {
