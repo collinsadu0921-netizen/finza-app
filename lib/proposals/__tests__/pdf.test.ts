@@ -221,7 +221,7 @@ describe("buildProposalHtmlForPdf", () => {
       { coverImageDataUri: "data:image/jpeg;base64,AAAA" }
     )
     expect(html).toContain('class="pdf-cover-preload"')
-    expect(html).toContain("--pdf-cover-image:url('data:image/jpeg;base64,AAAA')")
+    expect(html).toContain("background-image:url('data:image/jpeg;base64,AAAA')")
     expect(html).toContain('src="data:image/jpeg;base64,AAAA"')
   })
 
