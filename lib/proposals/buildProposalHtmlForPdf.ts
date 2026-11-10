@@ -89,9 +89,9 @@ function coverMetaRow(label: string, value: string | null | undefined): string {
   return `<div class="pdf-cover-meta-row"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`
 }
 
-function coverHtml(book: ProposalBook): string {
+function coverHtml(book: ProposalBook, coverImageDataUri?: string): string {
   const cover = book.cover
-  const coverImage = safeAttrUrl(cover.coverImageUrl)
+  const coverImage = coverImageDataUri || safeAttrUrl(cover.coverImageUrl)
   const logo = safeAttrUrl(cover.businessLogoUrl)
   const dateLabel = cover.createdAt
     ? new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "long", year: "numeric" }).format(
@@ -593,7 +593,10 @@ function themeCoverImageOpacity(): string {
   return "0.35"
 }
 
-export function buildProposalHtmlForPdf(model: ProposalRenderModel): string {
+export function buildProposalHtmlForPdf(
+  model: ProposalRenderModel,
+  options?: { coverImageDataUri?: string }
+): string {
   const book = composeProposalBook(model)
   const title = escapeHtml(model.title || "Proposal")
   const chapters = book.chapters
@@ -609,7 +612,7 @@ export function buildProposalHtmlForPdf(model: ProposalRenderModel): string {
   <style>${GELASIO_FONT_CSS}${themeCss(book.theme)}${BASE_CSS}</style>
 </head>
 <body class="pdf-document pdf-theme-${escapeHtml(book.templateId)}">
-  ${coverHtml(book)}
+  ${coverHtml(book, options?.coverImageDataUri)}
   ${chapters}
 </body>
 </html>`

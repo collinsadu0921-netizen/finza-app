@@ -5,6 +5,7 @@ import { resolveBusinessScopeForUser } from "@/lib/business"
 import { buildFinancialDocumentPdfDisposition } from "@/lib/documents/financialDocumentPdfDisposition"
 import { renderHtmlToPdfBuffer } from "@/lib/pdf/renderHtmlToPdf"
 import { buildProposalHtmlForPdf, proposalPdfFooterTemplate } from "@/lib/proposals/buildProposalHtmlForPdf"
+import { fetchCoverImageDataUri } from "@/lib/proposals/coverImageData"
 import { assembleProposalRenderModel, type ProposalAssetRow, type ProposalRow } from "@/lib/proposals/assembleRenderModel"
 import type { ProposalRenderBusiness, ProposalRenderCustomer } from "@/lib/proposals/renderModel"
 
@@ -117,7 +118,8 @@ export async function GET(
 
     let html: string
     try {
-      html = buildProposalHtmlForPdf(model)
+      const coverImageDataUri = await fetchCoverImageDataUri(model.presentation.coverImageUrl)
+      html = buildProposalHtmlForPdf(model, { coverImageDataUri })
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "Failed to build document"
       return NextResponse.json({ error: message }, { status: 400 })

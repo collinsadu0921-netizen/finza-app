@@ -217,10 +217,12 @@ describe("buildProposalHtmlForPdf", () => {
           coverAssetId: "asset-1",
           coverImageUrl: "https://example.com/cover.jpg",
         },
-      })
+      }),
+      { coverImageDataUri: "data:image/jpeg;base64,AAAA" }
     )
     expect(html).toContain('class="pdf-cover-preload"')
-    expect(html).toContain("--pdf-cover-image:url('https://example.com/cover.jpg')")
+    expect(html).toContain("--pdf-cover-image:url('data:image/jpeg;base64,AAAA')")
+    expect(html).toContain('src="data:image/jpeg;base64,AAAA"')
   })
 
   it("renders an accepted decision without empty signature lines", () => {
