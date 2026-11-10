@@ -104,10 +104,12 @@ function coverHtml(book: ProposalBook): string {
       )
     : null
 
-  return `<section class="pdf-cover pdf-cover--${book.theme.coverStyle}"${
-    coverImage ? ` style="--pdf-cover-image:url('${coverImage}')"` : ""
-  }>
-    <div class="pdf-cover-art" aria-hidden="true"></div>
+  return `<section class="pdf-cover pdf-cover--${book.theme.coverStyle}">
+    <div class="pdf-cover-art" aria-hidden="true">${
+      coverImage
+        ? `<img class="pdf-cover-image" src="${coverImage}" alt="" onerror="this.style.display='none'" />`
+        : ""
+    }</div>
     <div class="pdf-cover-inner">
       <div class="pdf-cover-brand">
         ${logo ? `<img class="pdf-cover-logo" src="${logo}" alt="" />` : ""}
@@ -393,6 +395,14 @@ const BASE_CSS = `
     background-size: cover;
     background-position: center;
     opacity: ${themeCoverImageOpacity()};
+  }
+  .pdf-cover-image {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center;
   }
   .pdf-cover--minimal .pdf-cover-art {
     opacity: 0;

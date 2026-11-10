@@ -194,8 +194,8 @@ describe("buildProposalHtmlForPdf", () => {
     )
     expect(html).toContain('width="1600" height="900"')
     expect(html).toContain("pdf-chapter--image-text")
-    expect(html).toContain("object-fit: contain")
-    expect(html).not.toContain("object-fit: cover")
+    expect(html).toContain(".pdf-figure img { display: block; max-width: 100%; max-height: 180mm; width: auto; height: auto; object-fit: contain;")
+    expect(html).toContain(".pdf-gallery-item img { width: 100%; height: auto; max-height: 65mm; object-fit: contain;")
     expect(html).toContain("Image unavailable")
   })
 
@@ -205,6 +205,22 @@ describe("buildProposalHtmlForPdf", () => {
     expect(html).toContain("--pdf-heading-font: Gelasio")
     expect(html).not.toContain("fonts.googleapis.com")
     expect(html).not.toContain("fonts.gstatic.com")
+  })
+
+  it("renders a cover image as a waitable image element", () => {
+    const html = buildProposalHtmlForPdf(
+      model({
+        presentation: {
+          templateId: "premium_v1",
+          accentColor: "#123abc",
+          typography: "editorial",
+          coverAssetId: "asset-1",
+          coverImageUrl: "https://example.com/cover.jpg",
+        },
+      })
+    )
+    expect(html).toContain('class="pdf-cover-image"')
+    expect(html).toContain("https://example.com/cover.jpg")
   })
 
   it("renders an accepted decision without empty signature lines", () => {
