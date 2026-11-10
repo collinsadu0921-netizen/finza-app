@@ -168,19 +168,14 @@ export default function PublicProposalPage() {
         <div className="text-sm text-slate-600">
           <p className="font-semibold text-slate-900">{label}</p>
           <p className="mt-1">
-            {st === "accepted"
-              ? "This proposal has been accepted."
-              : st === "rejected"
-                ? "This proposal was declined."
-                : st === "draft"
-                  ? "This proposal is not yet available for a decision."
-                  : `This proposal is ${label.toLowerCase()} and cannot be changed here.`}
+            {st === "draft"
+              ? "This proposal is not yet available for a decision."
+              : st === "expired"
+                ? "This proposal has expired. Contact the business for an updated version."
+                : "This proposal is awaiting a decision."}
           </p>
         </div>
       )}
-      {meta.rejected_reason && st === "rejected" ? (
-        <p className="mt-2 text-xs text-slate-500">Note: {meta.rejected_reason}</p>
-      ) : null}
     </div>
   ) : null
 
