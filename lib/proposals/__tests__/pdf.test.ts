@@ -163,6 +163,7 @@ describe("buildProposalHtmlForPdf", () => {
     )
     expect((html.match(/data-line-item=/g) || []).length).toBe(50)
     expect(html).toContain("display: table-header-group")
+    expect(html).toContain("pdf-price-chunk--new-page")
     expect(html).toContain("Service line 1")
     expect(html).toContain("Service line 50")
   })

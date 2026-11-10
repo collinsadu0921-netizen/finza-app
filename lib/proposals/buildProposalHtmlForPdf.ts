@@ -214,11 +214,11 @@ function pricingHtml(book: ProposalBook, model: ProposalRenderModel): string {
     </div>`
   } else if (pricing.mode === "line_items") {
     const showDiscount = pricing.items.some((item) => Number(item.discount_amount ?? 0) > 0)
-    body = `<table class="pdf-price-table">
+    const renderTable = (items: typeof pricing.items, includeTotal: boolean) => `<table class="pdf-price-table">
       <thead><tr><th>Description</th><th class="num">Qty</th>${
         showDiscount ? `<th class="num">Discount</th>` : ""
       }<th class="num">Amount</th></tr></thead>
-      <tbody>${pricing.items
+      <tbody>${items
         .map((item, index) => {
           const discount = Number(item.discount_amount ?? 0)
           return `<tr data-line-item="${index}">
@@ -229,10 +229,32 @@ function pricingHtml(book: ProposalBook, model: ProposalRenderModel): string {
           </tr>`
         })
         .join("")}</tbody>
-      <tfoot><tr class="pdf-price-total"><td colspan="${showDiscount ? 3 : 2}">${
-        summary.label
-      }</td><td class="num strong">${formatMoney(summary.total ?? 0, currency)}</td></tr></tfoot>
+      ${
+        includeTotal
+          ? `<tfoot><tr class="pdf-price-total"><td colspan="${showDiscount ? 3 : 2}">${
+              summary.label
+            }</td><td class="num strong">${formatMoney(summary.total ?? 0, currency)}</td></tr></tfoot>`
+          : ""
+      }
     </table>`
+
+    const ROWS_PER_TABLE = 20
+    const chunks: (typeof pricing.items)[] = []
+    for (let start = 0; start < pricing.items.length; start += ROWS_PER_TABLE) {
+      chunks.push(pricing.items.slice(start, start + ROWS_PER_TABLE))
+    }
+    body =
+      chunks.length <= 1
+        ? renderTable(pricing.items, true)
+        : `<div class="pdf-price-chunks">${chunks
+            .map(
+              (chunk, index) =>
+                `<div class="pdf-price-chunk${index > 0 ? " pdf-price-chunk--new-page" : ""}">${renderTable(
+                  chunk,
+                  index === chunks.length - 1
+                )}</div>`
+            )
+            .join("")}</div>`
   } else {
     body = `<div class="pdf-custom-pricing">${customPricingNotesToHtml(pricing.notes)}</div>`
   }
@@ -552,6 +574,8 @@ const BASE_CSS = `
   .pdf-price-fixed span { font-size: 9pt; color: var(--pdf-muted); }
   .pdf-price-fixed strong { font-family: var(--pdf-heading-font); font-size: 22pt; font-weight: 600; }
   .pdf-price-table { width: 100%; border-collapse: collapse; font-size: 9.5pt; }
+  .pdf-price-chunk { break-inside: avoid; page-break-inside: avoid; }
+  .pdf-price-chunk--new-page { break-before: page; page-break-before: always; }
   .pdf-price-table thead { display: table-header-group; }
   .pdf-price-table tfoot { display: table-row-group; }
   .pdf-price-table th, .pdf-price-table td { border-bottom: 1px solid var(--pdf-rule); padding: 2.4mm 2mm; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
