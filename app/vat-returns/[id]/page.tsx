@@ -13,6 +13,7 @@ import { useConfirm } from "@/components/ui/ConfirmProvider"
 import type { LedgerLine } from "@/app/api/vat-returns/monthly/route"
 import { GRA_VAT3_BOXES, isPost2026Period } from "@/lib/gra/vatForm"
 import { vatFilingsHref } from "@/lib/vat/vatRoutes"
+import { resolveVatReturnPosition } from "@/lib/vat/vatReturnCalculation"
 import { formatMoney } from "@/lib/money"
 import { repairMojibake } from "@/lib/text/repairMojibake"
 import {
@@ -468,10 +469,18 @@ export default function VatReturnViewPage() {
       Number(vatReturn.total_input_covid || 0) +
       Number(vatReturn.total_input_vat || 0))
 
-  const adjustedOutput = outputTax + Number(vatReturn.output_adjustment || 0)
-  const adjustedInput = inputTax + Number(vatReturn.input_adjustment || 0)
-  const netPayable = Math.max(adjustedOutput - adjustedInput, 0)
-  const netRefund = Math.max(adjustedInput - adjustedOutput, 0)
+  // VAT 3 net is VAT-only. Pre-2026 NHIL/GETFund/COVID are separate levy
+  // liabilities and must never be offset by a VAT refund.
+  const position = resolveVatReturnPosition({
+    periodEndDate: vatReturn.period_end_date,
+    netVatPayable: vatReturn.net_vat_payable,
+    netVatRefund: vatReturn.net_vat_refund,
+    totalOutputNhil: vatReturn.total_output_nhil,
+    totalOutputGetfund: vatReturn.total_output_getfund,
+    totalOutputCovid: vatReturn.total_output_covid,
+  })
+  const netPayable = position.net_vat_payable
+  const netRefund = position.net_vat_refund
 
   const totalCredits = ledgerEntries.reduce((sum, entry) => sum + Number(entry.credit || 0), 0)
   const totalDebits = ledgerEntries.reduce((sum, entry) => sum + Number(entry.debit || 0), 0)
@@ -754,9 +763,12 @@ export default function VatReturnViewPage() {
           <div className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-xl shadow-sm p-6 border-2 border-blue-200 dark:border-blue-800 mb-6">
             <div className="flex justify-between items-center flex-wrap gap-4">
               <div>
-                <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-1">Net VAT</h2>
+                <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-1">Net VAT (VAT 3)</h2>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  VAT-only net. Pre-2026 NHIL, GETFund and COVID levies are separate liabilities.
+                </p>
                 {(Number(vatReturn.output_adjustment) !== 0 || Number(vatReturn.input_adjustment) !== 0) && (
-                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                  <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
                     Adjustments: Output {Number(vatReturn.output_adjustment) > 0 ? "+" : ""}
                     {Number(vatReturn.output_adjustment).toFixed(2)}, Input {Number(vatReturn.input_adjustment) > 0 ? "+" : ""}
                     {Number(vatReturn.input_adjustment).toFixed(2)}
@@ -768,23 +780,79 @@ export default function VatReturnViewPage() {
               <div className="text-right">
                 {netPayable > 0 ? (
                   <>
-                    <p className="text-xs text-gray-500 mb-1">Net VAT Payable (to GRA)</p>
+                    <p className="text-xs text-gray-500 mb-1">Net VAT Payable (VAT only)</p>
                     <p className="text-3xl font-bold text-red-600 dark:text-red-400">{formatCedi(netPayable)}</p>
                   </>
                 ) : netRefund > 0 ? (
                   <>
-                    <p className="text-xs text-gray-500 mb-1">Net VAT Refund Due</p>
+                    <p className="text-xs text-gray-500 mb-1">Net VAT Refund Due (VAT only)</p>
                     <p className="text-3xl font-bold text-green-600 dark:text-green-400">{formatCedi(netRefund)}</p>
                   </>
                 ) : (
                   <>
-                    <p className="text-xs text-gray-500 mb-1">Net VAT Payable</p>
+                    <p className="text-xs text-gray-500 mb-1">Net VAT Payable (VAT only)</p>
                     <p className="text-3xl font-bold text-gray-600 dark:text-gray-400">{formatCedi(0)}</p>
                   </>
                 )}
               </div>
             </div>
           </div>
+
+          {!position.period_is_post_2026 && position.separate_levies_payable > 0 && (
+            <div className="bg-amber-50 dark:bg-amber-900/20 rounded-xl shadow-sm p-6 border border-amber-200 dark:border-amber-800 mb-6">
+              <div className="flex justify-between items-start gap-4 flex-wrap">
+                <div>
+                  <h2 className="text-base font-bold text-gray-900 dark:text-white mb-1">
+                    Separate levies payable
+                  </h2>
+                  <p className="text-xs text-gray-600 dark:text-gray-400 max-w-2xl">
+                    Pre-2026 NHIL, GETFund and COVID are separate from the VAT 3 net VAT.
+                    A VAT refund does not reduce these levies.
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="text-xs text-gray-500 mb-1">Total separate levies</p>
+                  <p className="text-2xl font-bold text-amber-700 dark:text-amber-400">
+                    {formatCedi(position.separate_levies_payable)}
+                  </p>
+                </div>
+              </div>
+              <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+                <div className="flex justify-between sm:block">
+                  <span className="text-gray-500">NHIL payable</span>
+                  <p className="font-semibold text-gray-900 dark:text-white">
+                    {formatCedi(position.separate_nhil_payable)}
+                  </p>
+                </div>
+                <div className="flex justify-between sm:block">
+                  <span className="text-gray-500">GETFund payable</span>
+                  <p className="font-semibold text-gray-900 dark:text-white">
+                    {formatCedi(position.separate_getfund_payable)}
+                  </p>
+                </div>
+                <div className="flex justify-between sm:block">
+                  <span className="text-gray-500">COVID levy payable</span>
+                  <p className="font-semibold text-gray-900 dark:text-white">
+                    {formatCedi(position.separate_covid_payable)}
+                  </p>
+                </div>
+              </div>
+              <div className="mt-4 border-t border-amber-200 dark:border-amber-800 pt-3 flex justify-between items-center gap-4 flex-wrap text-sm">
+                <span className="font-semibold text-gray-900 dark:text-white">
+                  Total taxes payable (VAT + separate levies)
+                </span>
+                <span className="font-bold text-lg text-gray-900 dark:text-white">
+                  {formatCedi(position.total_tax_payable)}
+                </span>
+              </div>
+              {position.total_tax_refund > 0 && (
+                <p className="mt-2 text-xs text-green-700 dark:text-green-400">
+                  VAT refund due: {formatCedi(position.total_tax_refund)}. This is separate
+                  from, and does not offset, the levies above.
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Submission Details */}
           {(vatReturn.submission_date || vatReturn.payment_date || vatReturn.payment_reference) && (

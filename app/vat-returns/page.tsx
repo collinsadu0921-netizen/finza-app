@@ -34,6 +34,9 @@ export default function VatReturnsPage() {
   const [loading, setLoading] = useState(true)
   const [monthlyReturns, setMonthlyReturns] = useState<MonthlyVatReturn[]>([])
   const [grandTotalNetVat, setGrandTotalNetVat] = useState(0)
+  const [grandTotalSeparateLevies, setGrandTotalSeparateLevies] = useState(0)
+  const [grandTotalTaxPayable, setGrandTotalTaxPayable] = useState(0)
+  const [grandTotalTaxRefund, setGrandTotalTaxRefund] = useState(0)
   const [filedByMonth, setFiledByMonth] = useState<Record<string, FiledReturn>>({})
   const [selectedMonth, setSelectedMonth] = useState<MonthlyVatReturn | null>(null)
   const [showDetailsModal, setShowDetailsModal] = useState(false)
@@ -56,6 +59,9 @@ export default function VatReturnsPage() {
         const data = await monthlyRes.json()
         setMonthlyReturns(data.monthlyReturns || [])
         setGrandTotalNetVat(data.grandTotalNetVat || 0)
+        setGrandTotalSeparateLevies(data.grandTotalSeparateLevies || 0)
+        setGrandTotalTaxPayable(data.grandTotalTaxPayable || 0)
+        setGrandTotalTaxRefund(data.grandTotalTaxRefund || 0)
       } else {
         setMonthlyReturns([])
       }
@@ -139,7 +145,8 @@ export default function VatReturnsPage() {
                         <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Month</th>
                         <th className="px-6 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">Output Tax</th>
                         <th className="px-6 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">Input Tax</th>
-                        <th className="px-6 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">Net VAT</th>
+                        <th className="px-6 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">Net VAT (VAT only)</th>
+                        <th className="px-6 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">Levies Payable</th>
                         <th className="px-6 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">Status</th>
                         <th className="px-6 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">Actions</th>
                       </tr>
@@ -164,6 +171,14 @@ export default function VatReturnsPage() {
                               <span className={`font-bold ${monthReturn.net_vat >= 0 ? "text-red-600" : "text-green-600"}`}>
                                 {formatCedi(monthReturn.net_vat)}
                               </span>
+                            </td>
+                            <td
+                              className="px-6 py-4 whitespace-nowrap text-sm text-right font-semibold text-amber-700"
+                              title="Pre-2026 NHIL/GETFund/COVID levies are separate from VAT 3 net VAT and are not offset by a VAT refund."
+                            >
+                              {monthReturn.separate_levies_payable > 0
+                                ? formatCedi(monthReturn.separate_levies_payable)
+                                : "—"}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-center">
                               {filed ? (
@@ -235,16 +250,45 @@ export default function VatReturnsPage() {
 
               {/* Grand Total */}
               <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-                <div className="flex justify-between items-center">
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   <div>
-                    <h3 className="text-base font-semibold text-gray-900">Total VAT Liability</h3>
+                    <h3 className="text-sm font-semibold text-gray-900">Total VAT Liability (VAT only)</h3>
                     <p className="text-xs text-gray-500 mt-1">
-                      Sum of monthly net VAT: stored filed returns, ledger preview for unfiled months
+                      VAT 3 net: stored filed returns, ledger preview for unfiled months
                     </p>
+                    <span className={`mt-2 block text-2xl font-bold ${grandTotalNetVat >= 0 ? "text-red-600" : "text-green-600"}`}>
+                      {formatCedi(grandTotalNetVat)}
+                    </span>
                   </div>
-                  <span className={`text-2xl font-bold ${grandTotalNetVat >= 0 ? "text-red-600" : "text-green-600"}`}>
-                    {formatCedi(grandTotalNetVat)}
-                  </span>
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-900">Separate levies payable</h3>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Pre-2026 NHIL/GETFund/COVID, filed separately
+                    </p>
+                    <span className="mt-2 block text-2xl font-bold text-amber-700">
+                      {formatCedi(grandTotalSeparateLevies)}
+                    </span>
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-900">Total taxes payable</h3>
+                    <p className="text-xs text-gray-500 mt-1">
+                      VAT payable plus separate levies; VAT refunds are not offset
+                    </p>
+                    <span className="mt-2 block text-2xl font-bold text-gray-900">
+                      {formatCedi(grandTotalTaxPayable)}
+                    </span>
+                  </div>
+                  {grandTotalTaxRefund > 0 && (
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-900">VAT refund due (VAT only)</h3>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Separate from levy liabilities
+                      </p>
+                      <span className="mt-2 block text-2xl font-bold text-green-600">
+                        {formatCedi(grandTotalTaxRefund)}
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
             </>
@@ -350,11 +394,55 @@ export default function VatReturnsPage() {
 
                 {/* Net VAT */}
                 <div className="bg-gray-50 rounded-lg p-4 border border-gray-200 flex justify-between items-center">
-                  <p className="text-base font-semibold text-gray-900">Net VAT Payable</p>
+                  <div>
+                    <p className="text-base font-semibold text-gray-900">Net VAT Payable (VAT only)</p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Pre-2026 levies are separate and are not offset by a VAT refund.
+                    </p>
+                  </div>
                   <span className={`text-2xl font-bold ${selectedMonth.net_vat >= 0 ? "text-red-600" : "text-green-600"}`}>
                     {formatCedi(selectedMonth.net_vat)}
                   </span>
                 </div>
+
+                {selectedMonth.separate_levies_payable > 0 && (
+                  <div className="bg-amber-50 rounded-lg p-4 border border-amber-200">
+                    <div className="flex justify-between items-start gap-3">
+                      <div>
+                        <p className="text-base font-semibold text-gray-900">Separate levies payable</p>
+                        <p className="text-xs text-gray-600 mt-0.5">
+                          Pre-2026 NHIL/GETFund/COVID, filed separately from VAT 3.
+                        </p>
+                      </div>
+                      <span className="text-2xl font-bold text-amber-700">
+                        {formatCedi(selectedMonth.separate_levies_payable)}
+                      </span>
+                    </div>
+                    <div className="mt-3 grid grid-cols-3 gap-2 text-sm">
+                      <div>
+                        <p className="text-gray-500">NHIL</p>
+                        <p className="font-semibold">{formatCedi(selectedMonth.separate_nhil_payable)}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-500">GETFund</p>
+                        <p className="font-semibold">{formatCedi(selectedMonth.separate_getfund_payable)}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-500">COVID</p>
+                        <p className="font-semibold">{formatCedi(selectedMonth.separate_covid_payable)}</p>
+                      </div>
+                    </div>
+                    <div className="mt-3 border-t border-amber-200 pt-2 flex justify-between text-sm">
+                      <span className="font-semibold text-gray-900">Total taxes payable (VAT + separate levies)</span>
+                      <span className="font-bold">{formatCedi(selectedMonth.total_tax_payable)}</span>
+                    </div>
+                    {selectedMonth.total_tax_refund > 0 && (
+                      <p className="mt-2 text-xs text-green-700">
+                        VAT refund due: {formatCedi(selectedMonth.total_tax_refund)} (separate from levies).
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 {/* Ledger entries */}
                 <div>

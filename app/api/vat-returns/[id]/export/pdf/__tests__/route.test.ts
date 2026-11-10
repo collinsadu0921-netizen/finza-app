@@ -174,6 +174,42 @@ describe("GET VAT 3 PDF", () => {
     expect(parsed.text).not.toContain("Maximum call stack size exceeded")
   })
 
+  it("shows pre-2026 VAT-only net and separate levies", async () => {
+    const { response, parsed } = await render(
+      filing({
+        period_start_date: "2025-12-01",
+        period_end_date: "2025-12-31",
+        status: "draft",
+        total_taxable_sales: 820.35,
+        total_output_nhil: 20.51,
+        total_output_getfund: 20.51,
+        total_output_covid: 8.2,
+        total_output_vat: 130.43,
+        total_output_tax: 179.65,
+        total_taxable_purchases: 820.35,
+        total_input_nhil: 0,
+        total_input_getfund: 0,
+        total_input_covid: 0,
+        total_input_vat: 130.43,
+        total_input_tax: 130.43,
+        net_vat_payable: 0,
+        net_vat_refund: 0,
+        payment_journal_entry_id: null,
+        payment_date: null,
+        payment_reference: null,
+        payment_amount: null,
+      })
+    )
+
+    expect(response.status).toBe(200)
+    expect(parsed.text).toContain("Net VAT Payable (VAT only)")
+    expect(parsed.text).toContain("Separate levies payable (pre-2026)")
+    expect(parsed.text).toContain("20.51")
+    expect(parsed.text).toContain("8.20")
+    expect(parsed.text).toContain("49.22")
+    expect(parsed.text).toContain("VAT 3 net VAT is VAT-only")
+  })
+
   it("shows supplemental zero-rated and exempt classification", async () => {
     const { response, parsed } = await render(
       filing({

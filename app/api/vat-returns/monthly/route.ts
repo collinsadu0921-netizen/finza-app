@@ -3,7 +3,7 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { normalizeCountry } from "@/lib/payments/eligibility"
 import { resolveProfessionalVatBusinessId } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 import { repairMojibake } from "@/lib/text/repairMojibake"
-import { resolveMonthlyVatNet } from "@/lib/vat/monthlyVat"
+import { resolveMonthlyVatPosition } from "@/lib/vat/monthlyVat"
 
 export type LedgerLine = {
   id: string
@@ -31,7 +31,16 @@ export type MonthlyVatReturn = {
   input_getfund: number
   input_covid: number
   input_vat: number
+  /** VAT-only net. Pre-2026 levies are shown separately below. */
   net_vat: number
+  separate_nhil_payable: number
+  separate_getfund_payable: number
+  separate_covid_payable: number
+  separate_levies_payable: number
+  /** VAT payable plus separate levies payable; never net of VAT refunds. */
+  total_tax_payable: number
+  /** VAT-only refund; separate levies remain payable independently. */
+  total_tax_refund: number
   entries: LedgerLine[]
 }
 
@@ -319,7 +328,8 @@ export async function GET(request: NextRequest) {
     const monthlyReturns: MonthlyVatReturn[] = sortedMonths.map((month) => {
       const m = byMonth[month] ?? emptyMonth
       const filed = filedByMonth.get(month)
-      const netVat = resolveMonthlyVatNet({ month, ledger: m, filed })
+      const position = resolveMonthlyVatPosition({ month, ledger: m, filed })
+      const netVat = money(position.net_vat_payable - position.net_vat_refund)
 
       if (filed) {
         return {
@@ -333,6 +343,12 @@ export async function GET(request: NextRequest) {
           input_covid: money(filed.total_input_covid),
           input_vat: money(filed.total_input_vat),
           net_vat: netVat,
+          separate_nhil_payable: money(position.separate_nhil_payable),
+          separate_getfund_payable: money(position.separate_getfund_payable),
+          separate_covid_payable: money(position.separate_covid_payable),
+          separate_levies_payable: money(position.separate_levies_payable),
+          total_tax_payable: money(position.total_tax_payable),
+          total_tax_refund: money(position.total_tax_refund),
           entries: m.entries,
         }
       }
@@ -348,15 +364,36 @@ export async function GET(request: NextRequest) {
         input_covid: money(m.input_covid),
         input_vat: money(m.input_vat),
         net_vat: netVat,
+        separate_nhil_payable: money(position.separate_nhil_payable),
+        separate_getfund_payable: money(position.separate_getfund_payable),
+        separate_covid_payable: money(position.separate_covid_payable),
+        separate_levies_payable: money(position.separate_levies_payable),
+        total_tax_payable: money(position.total_tax_payable),
+        total_tax_refund: money(position.total_tax_refund),
         entries: m.entries,
       }
     })
 
     const grandTotalNetVat = monthlyReturns.reduce((sum: number, m: MonthlyVatReturn) => sum + m.net_vat, 0)
+    const grandTotalSeparateLevies = monthlyReturns.reduce(
+      (sum: number, m: MonthlyVatReturn) => sum + m.separate_levies_payable,
+      0
+    )
+    const grandTotalTaxPayable = monthlyReturns.reduce(
+      (sum: number, m: MonthlyVatReturn) => sum + m.total_tax_payable,
+      0
+    )
+    const grandTotalTaxRefund = monthlyReturns.reduce(
+      (sum: number, m: MonthlyVatReturn) => sum + m.total_tax_refund,
+      0
+    )
 
     return NextResponse.json({
       monthlyReturns,
       grandTotalNetVat: Math.round(grandTotalNetVat * 100) / 100,
+      grandTotalSeparateLevies: Math.round(grandTotalSeparateLevies * 100) / 100,
+      grandTotalTaxPayable: Math.round(grandTotalTaxPayable * 100) / 100,
+      grandTotalTaxRefund: Math.round(grandTotalTaxRefund * 100) / 100,
       ledger_source: true,
     })
   } catch (error: any) {

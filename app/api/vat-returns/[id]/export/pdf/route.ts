@@ -4,6 +4,7 @@ import { normalizeCountry } from "@/lib/payments/eligibility"
 import { enforceServiceWorkspaceAccess } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 import { createPdfKitDocument } from "@/lib/pdf/createPdfKitDocument"
 import { vatPaymentState } from "@/lib/vat/vatReturnPayment"
+import { resolveVatReturnPosition } from "@/lib/vat/vatReturnCalculation"
 import {
   GRA_VAT3_BOXES,
   getBoxesForSection,
@@ -86,6 +87,14 @@ export async function GET(
 
     // ── Derive period flags ───────────────────────────────────────────────────
     const isPost2026 = isPost2026Period(vatReturn.period_end_date as string)
+    const position = resolveVatReturnPosition({
+      periodEndDate: String(vatReturn.period_end_date || ""),
+      netVatPayable: Number(vatReturn.net_vat_payable || 0),
+      netVatRefund: Number(vatReturn.net_vat_refund || 0),
+      totalOutputNhil: Number(vatReturn.total_output_nhil || 0),
+      totalOutputGetfund: Number(vatReturn.total_output_getfund || 0),
+      totalOutputCovid: Number(vatReturn.total_output_covid || 0),
+    })
     const vatData: GraVatReturnData = {
       total_taxable_sales: Number(vatReturn.total_taxable_sales || 0),
       total_output_nhil: Number(vatReturn.total_output_nhil || 0),
@@ -382,8 +391,8 @@ export async function GET(
       y = 50
     }
 
-    const netPayable = resolveBoxValue(GRA_VAT3_BOXES.box15, vatData, isPost2026)
-    const netRefund = resolveBoxValue(GRA_VAT3_BOXES.box16, vatData, isPost2026)
+    const netPayable = position.net_vat_payable
+    const netRefund = position.net_vat_refund
 
     // Box 15 — Net VAT Payable
     const box15 = GRA_VAT3_BOXES.box15
@@ -391,7 +400,7 @@ export async function GET(
     doc.rect(COL_BOX, y, W_BOX + W_DESC + W_RATE + W_AMOUNT, ROW_H).fill("#ffffff").stroke("#e5e7eb")
     doc.fontSize(8).font("Helvetica").fillColor("#111827")
       .text(`Box ${box15.boxNumber}`, COL_BOX + 4, y + 7, { width: W_BOX - 8 })
-    doc.text("Net VAT Payable (Box 7 - Box 14)", COL_BOX + W_BOX + 4, y + 7, { width: W_DESC + W_RATE - 8 })
+    doc.text("Net VAT Payable (VAT only)", COL_BOX + W_BOX + 4, y + 7, { width: W_DESC + W_RATE - 8 })
     doc.fontSize(9).font("Helvetica-Bold").fillColor(payableColor)
       .text(fmt(netPayable), COL_BOX + W_BOX + W_DESC + W_RATE + 4, y + 6, { width: W_AMOUNT - 8, align: "right" })
     doc.fillColor("#000000")
@@ -403,11 +412,61 @@ export async function GET(
     doc.rect(COL_BOX, y, W_BOX + W_DESC + W_RATE + W_AMOUNT, ROW_H).fill("#ffffff").stroke("#e5e7eb")
     doc.fontSize(8).font("Helvetica").fillColor("#111827")
       .text(`Box ${box16.boxNumber}`, COL_BOX + 4, y + 7, { width: W_BOX - 8 })
-    doc.text("Net VAT Refundable (Box 14 - Box 7)", COL_BOX + W_BOX + 4, y + 7, { width: W_DESC + W_RATE - 8 })
+    doc.text("Net VAT Refundable (VAT only)", COL_BOX + W_BOX + 4, y + 7, { width: W_DESC + W_RATE - 8 })
     doc.fontSize(9).font("Helvetica-Bold").fillColor(refundColor)
       .text(fmt(netRefund), COL_BOX + W_BOX + W_DESC + W_RATE + 4, y + 6, { width: W_AMOUNT - 8, align: "right" })
     doc.fillColor("#000000")
     y += ROW_H + 10
+
+    // Pre-2026 NHIL/GETFund/COVID are separate from VAT 3 net VAT.
+    if (!position.period_is_post_2026 && position.separate_levies_payable > 0) {
+      y = drawSectionHeader("Separate levies payable (pre-2026)", y)
+      const levyRows = [
+        { label: "NHIL payable", value: position.separate_nhil_payable },
+        { label: "GETFund payable", value: position.separate_getfund_payable },
+        { label: "COVID-19 levy payable", value: position.separate_covid_payable },
+      ]
+      for (const row of levyRows) {
+        if (y + ROW_H > PAGE_BOTTOM) {
+          doc.addPage()
+          y = 50
+        }
+        doc.rect(COL_BOX, y, W_BOX + W_DESC + W_RATE + W_AMOUNT, ROW_H).fill("#ffffff").stroke("#e5e7eb")
+        doc.fontSize(8).font("Helvetica").fillColor("#111827")
+          .text(row.label, COL_BOX + 4, y + 7, { width: W_BOX + W_DESC + W_RATE - 8 })
+        doc.fontSize(9).font("Helvetica-Bold").fillColor("#92400e")
+          .text(fmt(row.value), COL_BOX + W_BOX + W_DESC + W_RATE + 4, y + 6, {
+            width: W_AMOUNT - 8,
+            align: "right",
+          })
+        doc.fillColor("#000000")
+        y += ROW_H
+      }
+      if (y + ROW_H > PAGE_BOTTOM) {
+        doc.addPage()
+        y = 50
+      }
+      doc.rect(COL_BOX, y, W_BOX + W_DESC + W_RATE + W_AMOUNT, ROW_H).fill("#fffbeb").stroke("#fcd34d")
+      doc.fontSize(8).font("Helvetica-Bold").fillColor("#111827")
+        .text("Total separate levies payable", COL_BOX + 4, y + 7, {
+          width: W_BOX + W_DESC + W_RATE - 8,
+        })
+      doc.fontSize(9).font("Helvetica-Bold").fillColor("#92400e")
+        .text(fmt(position.separate_levies_payable), COL_BOX + W_BOX + W_DESC + W_RATE + 4, y + 6, {
+          width: W_AMOUNT - 8,
+          align: "right",
+        })
+      doc.fillColor("#000000")
+      y += ROW_H + 4
+      doc.fontSize(7.5).font("Helvetica").fillColor("#4b5563")
+        .text(
+          "VAT 3 net VAT is VAT-only. These pre-2026 levies are separate and are not offset by a VAT refund.",
+          COL_BOX,
+          y,
+          { width: W_BOX + W_DESC + W_RATE + W_AMOUNT }
+        )
+      y += 22
+    }
 
     // ── SUMMARY CALLOUT ───────────────────────────────────────────────────────
     if (y + 60 > PAGE_BOTTOM) {
@@ -417,7 +476,7 @@ export async function GET(
 
     const summaryBg = netPayable > 0 ? "#fef2f2" : netRefund > 0 ? "#f0fdf4" : "#f9fafb"
     const summaryBorder = netPayable > 0 ? "#fca5a5" : netRefund > 0 ? "#86efac" : "#e5e7eb"
-    const summaryLabel = netPayable > 0 ? "Net VAT Payable to GRA" : netRefund > 0 ? "Net VAT Refund Due" : "Net VAT"
+    const summaryLabel = netPayable > 0 ? "Net VAT Payable (VAT only)" : netRefund > 0 ? "Net VAT Refund Due (VAT only)" : "Net VAT (VAT only)"
     const summaryValue = netPayable > 0 ? netPayable : netRefund > 0 ? netRefund : 0
     const summaryColor = netPayable > 0 ? "#dc2626" : netRefund > 0 ? "#16a34a" : "#6b7280"
 

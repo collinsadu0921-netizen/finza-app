@@ -1,15 +1,17 @@
 /**
- * Monthly VAT net resolution.
+ * Monthly VAT position resolution.
  *
  * Filed returns are immutable and authoritative. Months without a filed
- * return use the canonical regime-aware VAT calculation. This keeps the VAT
- * Filings list, detail modal, API and PDF aligned without introducing a
- * second VAT formula in the list component.
+ * return use the canonical regime-aware VAT calculation. VAT 3 net VAT is
+ * VAT-only; pre-2026 NHIL/GETFund/COVID are separate levy liabilities and
+ * are never offset by a VAT refund.
  */
 
 import {
   calculateVatReturnTotals,
+  resolveVatReturnPosition,
   roundMoney,
+  type VatReturnPosition,
 } from "./vatReturnCalculation"
 import { yearMonthToEnd } from "./vatPeriod"
 
@@ -27,21 +29,29 @@ export type MonthlyVatLedgerTotals = {
 export type MonthlyFiledVatReturn = {
   net_vat_payable?: number | null
   net_vat_refund?: number | null
+  total_output_nhil?: number | null
+  total_output_getfund?: number | null
+  total_output_covid?: number | null
 } | null | undefined
 
-export function resolveMonthlyVatNet(input: {
+export function resolveMonthlyVatPosition(input: {
   month: string
   ledger: MonthlyVatLedgerTotals
   filed?: MonthlyFiledVatReturn
-}): number {
+}): VatReturnPosition {
+  const periodEndDate = yearMonthToEnd(input.month) ?? `${input.month}-28`
+
   if (input.filed) {
-    return roundMoney(
-      Number(input.filed.net_vat_payable ?? 0) -
-        Number(input.filed.net_vat_refund ?? 0)
-    )
+    return resolveVatReturnPosition({
+      periodEndDate,
+      netVatPayable: input.filed.net_vat_payable,
+      netVatRefund: input.filed.net_vat_refund,
+      totalOutputNhil: input.filed.total_output_nhil,
+      totalOutputGetfund: input.filed.total_output_getfund,
+      totalOutputCovid: input.filed.total_output_covid,
+    })
   }
 
-  const periodEndDate = yearMonthToEnd(input.month) ?? `${input.month}-28`
   const calculation = calculateVatReturnTotals({
     rows: [
       {
@@ -68,7 +78,24 @@ export function resolveMonthlyVatNet(input: {
     periodEndDate,
   })
 
-  return roundMoney(
-    calculation.net_vat_payable - calculation.net_vat_refund
-  )
+  return {
+    net_vat_payable: calculation.net_vat_payable,
+    net_vat_refund: calculation.net_vat_refund,
+    separate_nhil_payable: calculation.separate_nhil_payable,
+    separate_getfund_payable: calculation.separate_getfund_payable,
+    separate_covid_payable: calculation.separate_covid_payable,
+    separate_levies_payable: calculation.separate_levies_payable,
+    total_tax_payable: calculation.total_tax_payable,
+    total_tax_refund: calculation.total_tax_refund,
+    period_is_post_2026: calculation.period_is_post_2026,
+  }
+}
+
+export function resolveMonthlyVatNet(input: {
+  month: string
+  ledger: MonthlyVatLedgerTotals
+  filed?: MonthlyFiledVatReturn
+}): number {
+  const position = resolveMonthlyVatPosition(input)
+  return roundMoney(position.net_vat_payable - position.net_vat_refund)
 }

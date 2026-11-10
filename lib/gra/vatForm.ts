@@ -229,7 +229,7 @@ export const GRA_VAT3_BOXES: Record<string, GraBox> = {
   box14: {
     boxNumber: 14,
     label: "Total Input Tax",
-    description: "Sum of all claimable input taxes (Box 10 + Box 11 + Box 12 + Box 13)",
+    description: "Sum of input tax components; pre-2026 only VAT is claimable",
     rate: null,
     finzaField: "total_input_tax",
     section: "B",
@@ -243,7 +243,7 @@ export const GRA_VAT3_BOXES: Record<string, GraBox> = {
   box15: {
     boxNumber: 15,
     label: "Net VAT Payable",
-    description: "Net VAT payable to GRA (Box 7 minus Box 14, if positive)",
+    description: "VAT-only net payable to GRA (output VAT minus deductible input VAT, if positive). Pre-2026 NHIL/GETFund/COVID are separate levies.",
     rate: null,
     finzaField: "net_vat_payable",
     section: "C",
@@ -254,7 +254,7 @@ export const GRA_VAT3_BOXES: Record<string, GraBox> = {
   box16: {
     boxNumber: 16,
     label: "Net VAT Refundable",
-    description: "Net VAT refund due from GRA (Box 14 minus Box 7, if positive)",
+    description: "VAT-only refund due from GRA (deductible input VAT minus output VAT, if positive). Pre-2026 levies remain payable separately.",
     rate: null,
     finzaField: "net_vat_refund",
     section: "C",

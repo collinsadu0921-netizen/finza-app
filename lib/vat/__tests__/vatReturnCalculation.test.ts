@@ -1,5 +1,8 @@
 import { describe, expect, it } from "@jest/globals"
-import { calculateVatReturnTotals } from "../vatReturnCalculation"
+import {
+  calculateVatReturnTotals,
+  resolveVatReturnPosition,
+} from "../vatReturnCalculation"
 
 const rows = (overrides: Partial<Record<string, { credits?: number; debits?: number }>>) => {
   const base = {
@@ -32,6 +35,77 @@ describe("calculateVatReturnTotals", () => {
     expect(result.net_vat_payable).toBe(10.9)
     expect(result.total_output_tax).toBe(21.9)
     expect(result.total_input_tax).toBe(10)
+    expect(result.separate_nhil_payable).toBe(2.5)
+    expect(result.separate_getfund_payable).toBe(2.5)
+    expect(result.separate_covid_payable).toBe(1)
+    expect(result.separate_levies_payable).toBe(6)
+    expect(result.total_tax_payable).toBe(16.9)
+    expect(result.total_tax_refund).toBe(0)
+  })
+
+  it("matches the December 2025 production UAT case", () => {
+    const result = calculateVatReturnTotals({
+      rows: rows({
+        VAT: { credits: 130.43, debits: 130.43 },
+        NHIL: { credits: 20.51, debits: 0 },
+        GETFund: { credits: 20.51, debits: 0 },
+        COVID: { credits: 8.2, debits: 0 },
+      }),
+      periodEndDate: "2025-12-31",
+      taxableSales: 820.35,
+      taxablePurchases: 820.35,
+    })
+
+    expect(result.period_is_post_2026).toBe(false)
+    // VAT 3 net is VAT-only: output VAT 130.43 - input VAT 130.43.
+    expect(result.net_vat_payable).toBe(0)
+    expect(result.net_vat_refund).toBe(0)
+    // NHIL/GETFund/COVID are separate pre-2026 levies.
+    expect(result.separate_nhil_payable).toBe(20.51)
+    expect(result.separate_getfund_payable).toBe(20.51)
+    expect(result.separate_covid_payable).toBe(8.2)
+    expect(result.separate_levies_payable).toBe(49.22)
+    expect(result.total_tax_payable).toBe(49.22)
+    expect(result.total_tax_refund).toBe(0)
+  })
+
+  it("does not offset a pre-2026 VAT refund against separate levies", () => {
+    const result = calculateVatReturnTotals({
+      rows: rows({
+        VAT: { credits: 10, debits: 20 },
+        NHIL: { credits: 2.5, debits: 0 },
+        GETFund: { credits: 2.5, debits: 0 },
+        COVID: { credits: 1, debits: 0 },
+      }),
+      periodEndDate: "2025-12-31",
+    })
+
+    expect(result.net_vat_payable).toBe(0)
+    expect(result.net_vat_refund).toBe(10)
+    expect(result.separate_levies_payable).toBe(6)
+    expect(result.total_tax_payable).toBe(6)
+    expect(result.total_tax_refund).toBe(10)
+  })
+
+  it("preserves the January 2027 post-2026 refund", () => {
+    const result = calculateVatReturnTotals({
+      rows: rows({
+        VAT: { credits: 456.25, debits: 738.75 },
+        NHIL: { credits: 76, debits: 123.08 },
+        GETFund: { credits: 76, debits: 123.08 },
+        COVID: { credits: 0, debits: 0 },
+      }),
+      periodEndDate: "2027-01-31",
+      taxableSales: 3641.75,
+      taxablePurchases: 4925.09,
+    })
+
+    expect(result.period_is_post_2026).toBe(true)
+    expect(result.net_vat_payable).toBe(0)
+    expect(result.net_vat_refund).toBe(376.66)
+    expect(result.separate_levies_payable).toBe(0)
+    expect(result.total_tax_payable).toBe(0)
+    expect(result.total_tax_refund).toBe(376.66)
   })
 
   it("uses VAT + NHIL + GETFund net for post-2026 periods", () => {
@@ -152,5 +226,41 @@ describe("calculateVatReturnTotals", () => {
     expect(result.total_output_covid).toBe(1)
     expect(result.total_output_tax).toBe(21)
     expect(result.net_vat_payable).toBe(20)
+  })
+
+  it("splits a stored pre-2026 return into VAT-only net and separate levies", () => {
+    const position = resolveVatReturnPosition({
+      periodEndDate: "2025-12-31",
+      netVatPayable: 0,
+      netVatRefund: 0,
+      totalOutputNhil: 20.51,
+      totalOutputGetfund: 20.51,
+      totalOutputCovid: 8.2,
+    })
+
+    expect(position.net_vat_payable).toBe(0)
+    expect(position.net_vat_refund).toBe(0)
+    expect(position.separate_nhil_payable).toBe(20.51)
+    expect(position.separate_getfund_payable).toBe(20.51)
+    expect(position.separate_covid_payable).toBe(8.2)
+    expect(position.separate_levies_payable).toBe(49.22)
+    expect(position.total_tax_payable).toBe(49.22)
+    expect(position.total_tax_refund).toBe(0)
+  })
+
+  it("does not create separate levies for a stored post-2026 return", () => {
+    const position = resolveVatReturnPosition({
+      periodEndDate: "2027-01-31",
+      netVatPayable: 0,
+      netVatRefund: 376.66,
+      totalOutputNhil: 76,
+      totalOutputGetfund: 76,
+      totalOutputCovid: 0,
+    })
+
+    expect(position.net_vat_refund).toBe(376.66)
+    expect(position.separate_levies_payable).toBe(0)
+    expect(position.total_tax_payable).toBe(0)
+    expect(position.total_tax_refund).toBe(376.66)
   })
 })

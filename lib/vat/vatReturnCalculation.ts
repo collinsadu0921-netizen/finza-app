@@ -53,10 +53,44 @@ export type VatReturnCalculation = {
   total_input_tax: number
   net_vat_payable: number
   net_vat_refund: number
+  /**
+   * Pre-2026 NHIL/GETFund/COVID are output liabilities but were not
+   * claimable as input credits. They are filed/paid separately from the
+   * VAT 3 net VAT and must never be offset by a VAT refund.
+   */
+  separate_nhil_payable: number
+  separate_getfund_payable: number
+  separate_covid_payable: number
+  separate_levies_payable: number
+  /** VAT payable plus separate levies payable. Never net of VAT refunds. */
+  total_tax_payable: number
+  /** VAT-only refund. Separate levies remain payable independently. */
+  total_tax_refund: number
   period_is_post_2026: boolean
   taxable_bases_source: "provided" | "unavailable"
   taxable_bases_complete: boolean
   warnings: string[]
+}
+
+export type VatReturnPositionInput = {
+  periodEndDate: string
+  netVatPayable?: number | null
+  netVatRefund?: number | null
+  totalOutputNhil?: number | null
+  totalOutputGetfund?: number | null
+  totalOutputCovid?: number | null
+}
+
+export type VatReturnPosition = {
+  net_vat_payable: number
+  net_vat_refund: number
+  separate_nhil_payable: number
+  separate_getfund_payable: number
+  separate_covid_payable: number
+  separate_levies_payable: number
+  total_tax_payable: number
+  total_tax_refund: number
+  period_is_post_2026: boolean
 }
 
 export function roundMoney(value: number): number {
@@ -78,6 +112,54 @@ function providedNumber(value: number | null | undefined): number | null {
   if (value == null) return null
   const n = Number(value)
   return Number.isFinite(n) ? roundMoney(n) : null
+}
+
+function buildVatReturnPosition(
+  input: VatReturnPositionInput
+): VatReturnPosition {
+  const periodEndDate = String(input.periodEndDate || "").slice(0, 10)
+  const periodIsPost2026 = periodEndDate >= "2026-01-01"
+  const netVatPayable = roundMoney(amount(input.netVatPayable))
+  const netVatRefund = roundMoney(amount(input.netVatRefund))
+
+  // Pre-2026: NHIL/GETFund/COVID were charged on output but were not
+  // claimable input credits. They are separate liabilities from VAT 3 net
+  // VAT. From 2026 they are included in net VAT under Act 1151.
+  const separateNhilPayable = periodIsPost2026
+    ? 0
+    : roundMoney(amount(input.totalOutputNhil))
+  const separateGetfundPayable = periodIsPost2026
+    ? 0
+    : roundMoney(amount(input.totalOutputGetfund))
+  const separateCovidPayable = periodIsPost2026
+    ? 0
+    : roundMoney(amount(input.totalOutputCovid))
+  const separateLeviesPayable = roundMoney(
+    separateNhilPayable + separateGetfundPayable + separateCovidPayable
+  )
+
+  return {
+    net_vat_payable: netVatPayable,
+    net_vat_refund: netVatRefund,
+    separate_nhil_payable: separateNhilPayable,
+    separate_getfund_payable: separateGetfundPayable,
+    separate_covid_payable: separateCovidPayable,
+    separate_levies_payable: separateLeviesPayable,
+    // Never net a VAT refund against separate levies.
+    total_tax_payable: roundMoney(netVatPayable + separateLeviesPayable),
+    total_tax_refund: netVatRefund,
+    period_is_post_2026: periodIsPost2026,
+  }
+}
+
+/**
+ * Read-model split for a stored VAT return. Keeps VAT 3 net VAT separate
+ * from pre-2026 levy liabilities and never offsets a VAT refund against them.
+ */
+export function resolveVatReturnPosition(
+  input: VatReturnPositionInput
+): VatReturnPosition {
+  return buildVatReturnPosition(input)
 }
 
 export function calculateVatReturnTotals(
@@ -124,6 +206,15 @@ export function calculateVatReturnTotals(
   const adjustedNet = roundMoney(regimeNet + outputAdjustment - inputAdjustment)
   const netVatPayable = Math.max(adjustedNet, 0)
   const netVatRefund = Math.max(-adjustedNet, 0)
+
+  const position = buildVatReturnPosition({
+    periodEndDate,
+    netVatPayable,
+    netVatRefund,
+    totalOutputNhil,
+    totalOutputGetfund,
+    totalOutputCovid,
+  })
 
   const standardRatedSales = providedNumber(input.taxableSales)
   const standardRatedPurchases = providedNumber(input.taxablePurchases)
@@ -173,6 +264,12 @@ export function calculateVatReturnTotals(
     total_input_tax: roundMoney(rawInputTax + inputAdjustment),
     net_vat_payable: roundMoney(netVatPayable),
     net_vat_refund: roundMoney(netVatRefund),
+    separate_nhil_payable: position.separate_nhil_payable,
+    separate_getfund_payable: position.separate_getfund_payable,
+    separate_covid_payable: position.separate_covid_payable,
+    separate_levies_payable: position.separate_levies_payable,
+    total_tax_payable: position.total_tax_payable,
+    total_tax_refund: position.total_tax_refund,
     period_is_post_2026: periodIsPost2026,
     taxable_bases_source: taxableBasesComplete ? "provided" : "unavailable",
     taxable_bases_complete: taxableBasesComplete,
