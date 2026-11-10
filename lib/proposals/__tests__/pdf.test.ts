@@ -122,6 +122,7 @@ describe("buildProposalHtmlForPdf", () => {
     const forcedNewPages = (html.match(/<section class="[^"]*pdf-chapter--new-page/g) || []).length
     expect(forcedNewPages).toBe(3)
     expect(html).toContain("pdf-chapter--lead")
+    expect(html).toContain("pdf-paragraph--short")
     expect(html).not.toContain("page-break-before: always;\n    background: var(--pdf-paper)")
   })
 
