@@ -426,7 +426,10 @@ const BASE_CSS = `
     width: 52%;
     background: var(--pdf-cover-bg);
   }
-  .pdf-cover--with-image .pdf-cover-art::after {
+  .pdf-cover.pdf-cover--with-image .pdf-cover-art {
+    background-image: none;
+  }
+  .pdf-cover.pdf-cover--with-image .pdf-cover-art::after {
     content: none;
   }
   .pdf-cover--minimal .pdf-cover-art {
