@@ -44,6 +44,11 @@ function setupSupabase(options: {
   basesError?: { message: string } | null
   overlap?: Array<Record<string, unknown>>
   insert?: jest.Mock
+  ledger?: Array<{
+    tax_code: string
+    period_debits: number
+    period_credits: number
+  }>
 }) {
   const insert =
     options.insert ||
@@ -57,7 +62,7 @@ function setupSupabase(options: {
 
   const rpc = jest.fn((name: string) => {
     if (name === "extract_tax_return_from_ledger") {
-      return Promise.resolve({ data: ledgerRows, error: null })
+      return Promise.resolve({ data: options.ledger ?? ledgerRows, error: null })
     }
     if (name === "extract_vat_taxable_bases") {
       return Promise.resolve({
@@ -152,6 +157,42 @@ describe("VAT return taxable bases - calculate", () => {
     expect(body.data_quality_exception).toBeUndefined()
   })
 
+  it("keeps pre-2026 VAT-only net separate from NHIL/GETFund/COVID", async () => {
+    setupSupabase({
+      ledger: [
+        { tax_code: "VAT", period_debits: 130.43, period_credits: 130.43 },
+        { tax_code: "NHIL", period_debits: 0, period_credits: 20.51 },
+        { tax_code: "GETFund", period_debits: 0, period_credits: 20.51 },
+        { tax_code: "COVID", period_debits: 0, period_credits: 8.2 },
+      ],
+      bases: {
+        ...completeBases,
+        standard_rated_sales: 820.35,
+        zero_rated_sales: 0,
+        exempt_sales: 0,
+        standard_rated_purchases: 820.35,
+        zero_rated_purchases: 0,
+        exempt_purchases: 0,
+        ledger_revenue_credits: 820.35,
+      },
+    })
+
+    const response = await calculatePost(
+      request("/api/vat-returns/calculate", {
+        period_start_date: "2025-12-01",
+        period_end_date: "2025-12-31",
+      })
+    )
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.calculation.net_vat_payable).toBe(0)
+    expect(body.calculation.net_vat_refund).toBe(0)
+    expect(body.calculation.separate_levies_payable).toBe(49.22)
+    expect(body.calculation.total_tax_payable).toBe(49.22)
+    expect(body.calculation.total_tax_refund).toBe(0)
+  })
+
   it("surfaces a data-quality exception when output VAT has no sales base", async () => {
     setupSupabase({
       bases: {
@@ -202,6 +243,45 @@ describe("VAT return taxable bases - create", () => {
         total_taxable_purchases: 40,
       })
     )
+  })
+
+  it("persists pre-2026 VAT-only net without adding levy liabilities to it", async () => {
+    const { insert } = setupSupabase({
+      ledger: [
+        { tax_code: "VAT", period_debits: 130.43, period_credits: 130.43 },
+        { tax_code: "NHIL", period_debits: 0, period_credits: 20.51 },
+        { tax_code: "GETFund", period_debits: 0, period_credits: 20.51 },
+        { tax_code: "COVID", period_debits: 0, period_credits: 8.2 },
+      ],
+      bases: {
+        ...completeBases,
+        standard_rated_sales: 820.35,
+        zero_rated_sales: 0,
+        exempt_sales: 0,
+        standard_rated_purchases: 820.35,
+        zero_rated_purchases: 0,
+        exempt_purchases: 0,
+        ledger_revenue_credits: 820.35,
+      },
+    })
+
+    const response = await createPost(
+      request("/api/vat-returns/create", {
+        period_start_date: "2025-12-01",
+        period_end_date: "2025-12-31",
+      })
+    )
+
+    expect(response.status).toBe(201)
+    expect(insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        total_output_tax: 179.65,
+        total_input_tax: 130.43,
+        net_vat_payable: 0,
+        net_vat_refund: 0,
+      })
+    )
+    expect(insert.mock.calls[0][0].net_vat_payable).not.toBe(49.22)
   })
 
   it("blocks creation when output VAT has no standard-rated sales base", async () => {

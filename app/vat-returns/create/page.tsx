@@ -121,8 +121,11 @@ function CreateVatReturnContent() {
   const adjustedInputTax = calculation
     ? calculation.total_input_tax + Number(formData.input_adjustment || 0)
     : 0
-  const netVatPayable = Math.max(adjustedOutputTax - adjustedInputTax, 0)
-  const netVatRefund = Math.max(adjustedInputTax - adjustedOutputTax, 0)
+  const netVatPayable = calculation?.net_vat_payable ?? 0
+  const netVatRefund = calculation?.net_vat_refund ?? 0
+  const separateLeviesPayable = calculation?.separate_levies_payable ?? 0
+  const totalTaxPayable = calculation?.total_tax_payable ?? 0
+  const totalTaxRefund = calculation?.total_tax_refund ?? 0
 
   return (
     <ProtectedLayout>
@@ -348,25 +351,53 @@ function CreateVatReturnContent() {
                       <div className="flex justify-between pt-3">
                         {netVatPayable > 0 ? (
                           <>
-                            <span className="font-bold text-red-600 dark:text-red-400">Net VAT Payable</span>
+                            <span className="font-bold text-red-600 dark:text-red-400">Net VAT Payable (VAT only)</span>
                             <span className="font-bold text-xl text-red-600 dark:text-red-400">
                               ₵{netVatPayable.toFixed(2)}
                             </span>
                           </>
                         ) : netVatRefund > 0 ? (
                           <>
-                            <span className="font-bold text-green-600 dark:text-green-400">Net VAT Refund Due</span>
+                            <span className="font-bold text-green-600 dark:text-green-400">Net VAT Refund Due (VAT only)</span>
                             <span className="font-bold text-xl text-green-600 dark:text-green-400">
                               ₵{netVatRefund.toFixed(2)}
                             </span>
                           </>
                         ) : (
                           <>
-                            <span className="font-bold text-slate-500 dark:text-slate-400">Net VAT Payable</span>
+                            <span className="font-bold text-slate-500 dark:text-slate-400">Net VAT Payable (VAT only)</span>
                             <span className="font-bold text-xl text-slate-500 dark:text-slate-400">₵0.00</span>
                           </>
                         )}
                       </div>
+                      {separateLeviesPayable > 0 && (
+                        <div className="mt-3 border-t border-amber-200 dark:border-amber-800 pt-3 space-y-1">
+                          <div className="flex justify-between">
+                            <span className="font-semibold text-amber-700 dark:text-amber-400">
+                              Separate levies payable
+                            </span>
+                            <span className="font-bold text-amber-700 dark:text-amber-400">
+                              ₵{separateLeviesPayable.toFixed(2)}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-500 dark:text-slate-400">
+                            Pre-2026 NHIL/GETFund/COVID are separate from VAT 3 net VAT.
+                          </p>
+                          <div className="flex justify-between pt-1">
+                            <span className="font-semibold text-slate-700 dark:text-slate-300">
+                              Total taxes payable (VAT + separate levies)
+                            </span>
+                            <span className="font-bold text-slate-900 dark:text-white">
+                              ₵{totalTaxPayable.toFixed(2)}
+                            </span>
+                          </div>
+                          {totalTaxRefund > 0 && (
+                            <p className="text-xs text-green-700 dark:text-green-400">
+                              VAT refund due ₵{totalTaxRefund.toFixed(2)} is separate and does not offset the levies.
+                            </p>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
 
