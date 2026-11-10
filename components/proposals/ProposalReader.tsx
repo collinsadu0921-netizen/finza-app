@@ -337,7 +337,11 @@ function ChapterPage({
           </section>
         ) : null}
         {chapter.kind === "acceptance" ? (
-          <section className="proposal-acceptance">
+          <section
+            className={`proposal-acceptance${
+              acceptanceSlot ? "" : " proposal-acceptance--status-only"
+            }`}
+          >
             {acceptanceSlot ? <div className="proposal-acceptance-slot">{acceptanceSlot}</div> : null}
             <div className={`proposal-acceptance-status ${accepted ? "is-accepted" : rejected ? "is-rejected" : ""}`}>
               <p className="proposal-acceptance-status-title">
@@ -516,6 +520,7 @@ const READER_CSS = `
   .proposal-acceptance { border: 1px solid var(--pp-rule); border-radius: calc(var(--pp-radius) + 4px); padding: clamp(16px, 3vw, 26px); background: var(--pp-card); }
   .proposal-acceptance-slot { margin-bottom: 18px; }
   .proposal-acceptance-status { border-top: 1px solid var(--pp-rule); margin-top: 18px; padding-top: 16px; }
+  .proposal-acceptance--status-only .proposal-acceptance-status { border-top: 0; margin-top: 0; padding-top: 0; }
   .proposal-acceptance-status-title { margin: 0 0 5px; font-family: var(--pp-heading-font); font-size: 17px; font-weight: 600; }
   .proposal-acceptance-status p { margin: 0; font-size: 13px; line-height: 1.6; color: var(--pp-muted); }
   .proposal-acceptance-status.is-accepted .proposal-acceptance-status-title { color: #047857; }
