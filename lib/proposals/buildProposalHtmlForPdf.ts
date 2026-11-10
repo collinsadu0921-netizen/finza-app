@@ -106,10 +106,15 @@ function coverHtml(book: ProposalBook): string {
 
   return `<section class="pdf-cover pdf-cover--${book.theme.coverStyle}${
     coverImage ? " pdf-cover--with-image" : ""
-  }">
+  }"${coverImage ? ` style="--pdf-cover-image:url('${coverImage}')"` : ""}>
+    ${
+      coverImage
+        ? `<img class="pdf-cover-preload" src="${coverImage}" alt="" aria-hidden="true" onerror="this.style.display='none'" />`
+        : ""
+    }
     <div class="pdf-cover-art" aria-hidden="true">${
       coverImage
-        ? `<img class="pdf-cover-image" src="${coverImage}" alt="" onerror="this.style.display='none'" /><div class="pdf-cover-image-shade"></div><div class="pdf-cover-image-panel"></div>`
+        ? `<div class="pdf-cover-image-shade"></div><div class="pdf-cover-image-panel"></div>`
         : ""
     }</div>
     <div class="pdf-cover-inner">
@@ -405,13 +410,12 @@ const BASE_CSS = `
     background-position: center;
     opacity: ${themeCoverImageOpacity()};
   }
-  .pdf-cover-image {
+  .pdf-cover-preload {
     position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    object-position: center;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
   }
   .pdf-cover-image-shade {
     position: absolute;
@@ -425,9 +429,6 @@ const BASE_CSS = `
     bottom: 0;
     width: 52%;
     background: var(--pdf-cover-bg);
-  }
-  .pdf-cover--with-image .pdf-cover-art {
-    background-image: none;
   }
   .pdf-cover--with-image .pdf-cover-art::after {
     content: none;
