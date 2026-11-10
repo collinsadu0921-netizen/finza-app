@@ -39,13 +39,13 @@ const FONT_STACKS: Record<ProposalTypography, { heading: string; body: string; e
     eyebrow: 'Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
   },
   serif: {
-    heading: 'Georgia, Cambria, "Times New Roman", ui-serif, serif',
+    heading: 'Gelasio, Georgia, Cambria, "Times New Roman", ui-serif, serif',
     body: 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
     eyebrow: 'Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
   },
   editorial: {
-    heading: 'Georgia, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", ui-serif, serif',
-    body: 'Georgia, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", ui-serif, serif',
+    heading: 'Gelasio, Georgia, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", ui-serif, serif',
+    body: 'Gelasio, Georgia, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", ui-serif, serif',
     eyebrow: 'Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
   },
 }
