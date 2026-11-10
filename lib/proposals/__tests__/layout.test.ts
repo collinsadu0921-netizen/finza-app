@@ -46,8 +46,24 @@ describe("proposal chapter layout", () => {
       1
     )
     expect(images.hasImages).toBe(true)
-    expect(images.newPage).toBe(true)
     expect(images.imageText).toBe(true)
+    expect(images.newPage).toBe(false)
+
+    const gallery = getChapterLayout(
+      chapter({
+        blocks: [
+          { type: "paragraph", text: "Project context." },
+          {
+            type: "gallery",
+            images: [{ src: "https://example.com/a.jpg", assetId: "asset-1" }],
+          },
+        ],
+      }),
+      1
+    )
+    expect(gallery.hasImages).toBe(true)
+    expect(gallery.imageText).toBe(false)
+    expect(gallery.newPage).toBe(true)
 
     const imageText = getChapterLayout(
       chapter({

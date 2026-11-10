@@ -84,6 +84,11 @@ export function getChapterLayout(chapter: ProposalChapter, index: number): Propo
     hasImages,
     imageText,
     major: weight >= 1800 || (hasImages && weight >= 900),
-    newPage: index === 0 || weight >= 2600 || hasImages,
+    newPage:
+      index === 0 ||
+      weight >= 2600 ||
+      (hasImages && !imageText) ||
+      chapter.kind === "pricing" ||
+      chapter.kind === "acceptance",
   }
 }

@@ -120,7 +120,7 @@ describe("buildProposalHtmlForPdf", () => {
   it("uses content-aware pagination instead of forcing every chapter onto a new page", () => {
     const html = buildProposalHtmlForPdf(model())
     const forcedNewPages = (html.match(/<section class="[^"]*pdf-chapter--new-page/g) || []).length
-    expect(forcedNewPages).toBe(1)
+    expect(forcedNewPages).toBe(3)
     expect(html).toContain("pdf-chapter--lead")
     expect(html).not.toContain("page-break-before: always;\n    background: var(--pdf-paper)")
   })
@@ -207,7 +207,7 @@ describe("buildProposalHtmlForPdf", () => {
     expect(html).not.toContain("fonts.gstatic.com")
   })
 
-  it("renders a cover image as a waitable image element", () => {
+  it("renders and preloads a cover image for reliable PDF embedding", () => {
     const html = buildProposalHtmlForPdf(
       model({
         presentation: {
@@ -219,8 +219,8 @@ describe("buildProposalHtmlForPdf", () => {
         },
       })
     )
-    expect(html).toContain('class="pdf-cover-image"')
-    expect(html).toContain("https://example.com/cover.jpg")
+    expect(html).toContain('class="pdf-cover-preload"')
+    expect(html).toContain("--pdf-cover-image:url('https://example.com/cover.jpg')")
   })
 
   it("renders an accepted decision without empty signature lines", () => {
