@@ -143,14 +143,68 @@ describe("buildProposalHtmlForPdf", () => {
         },
       })
     )
-    expect(long).toContain('class="pdf-pricing pdf-pricing--premium_v1"')
+    expect(long).toContain('class="pdf-pricing pdf-pricing--premium_v1 pdf-pricing--long"')
     expect(long).not.toContain("pdf-pricing--premium_v1 pdf-pricing--keep")
   })
 
-  it("loads the editorial serif webfont used by the PDF cover and headings", () => {
+  it("keeps every line item in the HTML and repeats the table header", () => {
+    const items = Array.from({ length: 50 }, (_, index) => ({
+      description: `Service line ${index + 1}`,
+      quantity: 2,
+      unit_price: 1000,
+      discount_amount: index === 0 ? 100 : 0,
+      line_total: 2000 - (index === 0 ? 100 : 0),
+    }))
+    const html = buildProposalHtmlForPdf(
+      model({
+        pricing: { mode: "line_items", items },
+      })
+    )
+    expect((html.match(/data-line-item=/g) || []).length).toBe(50)
+    expect(html).toContain("display: table-header-group")
+    expect(html).toContain("Service line 1")
+    expect(html).toContain("Service line 50")
+  })
+
+  it("preserves image dimensions and uses contain-based image layouts", () => {
+    const html = buildProposalHtmlForPdf(
+      model({
+        sections: [
+          { type: "heading", level: 2, text: "Project overview" },
+          { type: "paragraph", text: "A short introduction beside the image." },
+          {
+            type: "image",
+            src: "https://example.com/photo.jpg",
+            assetId: "asset-1",
+            width: 1600,
+            height: 900,
+            caption: "Office interior",
+          },
+          { type: "heading", level: 2, text: "Project gallery" },
+          {
+            type: "gallery",
+            images: [
+              { src: "https://example.com/a.jpg", assetId: "asset-2", width: 800, height: 1200 },
+              { src: "https://example.com/b.jpg", assetId: "asset-3", width: 1200, height: 800 },
+            ],
+            caption: "Project photographs",
+          },
+        ],
+      })
+    )
+    expect(html).toContain('width="1600" height="900"')
+    expect(html).toContain("pdf-chapter--image-text")
+    expect(html).toContain("object-fit: contain")
+    expect(html).not.toContain("object-fit: cover")
+    expect(html).toContain("Image unavailable")
+  })
+
+  it("embeds the editorial serif font data instead of using Google Fonts", () => {
     const html = buildProposalHtmlForPdf(model())
-    expect(html).toContain("fonts.googleapis.com/css2?family=Gelasio")
+    expect(html).toContain("data:font/woff2;base64")
     expect(html).toContain("--pdf-heading-font: Gelasio")
+    expect(html).not.toContain("fonts.googleapis.com")
+    expect(html).not.toContain("fonts.gstatic.com")
   })
 
   it("renders an accepted decision without empty signature lines", () => {

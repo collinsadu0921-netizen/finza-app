@@ -45,7 +45,7 @@ export async function GET(
 
     const { data: assetsRaw } = await supabase
       .from("proposal_assets")
-      .select("id, kind, mime_type, file_name, role, visible_on_public, internal_only, sort_order, storage_path")
+      .select("id, kind, mime_type, file_name, role, visible_on_public, internal_only, sort_order, storage_path, metadata")
       .eq("proposal_id", proposalId)
       .order("sort_order", { ascending: true })
 

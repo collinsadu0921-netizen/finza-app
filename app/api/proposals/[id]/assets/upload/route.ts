@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import sharp from "sharp"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveBusinessScopeForUser } from "@/lib/business"
 import { createAuditLog } from "@/lib/auditLog"
@@ -75,6 +76,18 @@ export async function POST(
     const role = roleRaw === "attachment" || roleRaw === "inline" || roleRaw === "gallery" ? roleRaw : defaultRole
 
     const originalName = typeof (file as File).name === "string" && (file as File).name ? (file as File).name : "upload"
+    const buf = Buffer.from(await file.arrayBuffer())
+    let metadata: { width?: number; height?: number } = {}
+    if (kind === "image") {
+      try {
+        const image = await sharp(buf).metadata()
+        if (image.width && image.height) {
+          metadata = { width: image.width, height: image.height }
+        }
+      } catch {
+        // Keep the upload usable even if metadata extraction fails.
+      }
+    }
 
     const { data: inserted, error: insErr } = await supabase
       .from("proposal_assets")
@@ -90,6 +103,7 @@ export async function POST(
         visible_on_public: true,
         internal_only: false,
         sort_order: 0,
+        metadata,
       })
       .select("id")
       .single()
@@ -108,7 +122,6 @@ export async function POST(
       return NextResponse.json({ error: "Failed to prepare asset path" }, { status: 500 })
     }
 
-    const buf = Buffer.from(await file.arrayBuffer())
     const { error: upErr } = await supabase.storage.from(PROPOSAL_ASSETS_BUCKET).upload(storagePath, buf, {
       contentType: mime,
       upsert: false,
@@ -122,7 +135,7 @@ export async function POST(
 
     const { data: row } = await supabase
       .from("proposal_assets")
-      .select("id, kind, mime_type, file_name, role, visible_on_public, internal_only, sort_order")
+      .select("id, kind, mime_type, file_name, role, visible_on_public, internal_only, sort_order, metadata")
       .eq("id", assetId)
       .single()
 

@@ -8,6 +8,31 @@ import { getChapterLayout } from "./layout"
 import type { ProposalTheme } from "./design"
 import { customPricingNotesToHtml } from "./parseCustomPricing"
 import { escapeHtml } from "./htmlEscape"
+import { GELASIO_400, GELASIO_400_ITALIC, GELASIO_600 } from "./gelasioFontData"
+
+const GELASIO_FONT_CSS = `
+@font-face {
+  font-family: "Gelasio";
+  src: url("data:font/woff2;base64,${GELASIO_400}") format("woff2");
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+}
+@font-face {
+  font-family: "Gelasio";
+  src: url("data:font/woff2;base64,${GELASIO_600}") format("woff2");
+  font-style: normal;
+  font-weight: 600;
+  font-display: block;
+}
+@font-face {
+  font-family: "Gelasio";
+  src: url("data:font/woff2;base64,${GELASIO_400_ITALIC}") format("woff2");
+  font-style: italic;
+  font-weight: 400;
+  font-display: block;
+}
+`
 
 function formatMoney(amount: number, currency: string | null): string {
   const code = (currency || "GHS").trim().toUpperCase() || "GHS"
@@ -108,6 +133,11 @@ function coverHtml(book: ProposalBook): string {
   </section>`
 }
 
+function imageSizeAttrs(width?: number, height?: number): string {
+  if (!width || !height) return ""
+  return ` width="${Math.round(width)}" height="${Math.round(height)}"`
+}
+
 function sectionHtml(section: ProposalRenderSection): string {
   if (section.hidden) return ""
   switch (section.type) {
@@ -124,15 +154,24 @@ function sectionHtml(section: ProposalRenderSection): string {
     case "image": {
       const src = safeAttrUrl(section.src)
       if (!src) return ""
-      return `<figure class="pdf-figure"><img src="${src}" alt="" />${
+      return `<figure class="pdf-figure"><img src="${src}" alt=""${imageSizeAttrs(
+        section.width,
+        section.height
+      )} onerror="this.style.display='none';this.parentElement.classList.add('is-missing')" />${
         section.caption ? `<figcaption>${escapeHtml(section.caption)}</figcaption>` : ""
       }</figure>`
     }
     case "gallery": {
       const images = section.images
-        .map((image) => safeAttrUrl(image.src))
-        .filter(Boolean)
-        .map((src) => `<figure class="pdf-figure pdf-gallery-item"><img src="${src}" alt="" /></figure>`)
+        .map((image) => ({ src: safeAttrUrl(image.src), width: image.width, height: image.height }))
+        .filter((image) => image.src)
+        .map(
+          (image) =>
+            `<figure class="pdf-figure pdf-gallery-item"><img src="${image.src}" alt=""${imageSizeAttrs(
+              image.width,
+              image.height
+            )} onerror="this.style.display='none';this.parentElement.classList.add('is-missing')" /></figure>`
+        )
         .join("")
       if (!images) return ""
       return `<div class="pdf-gallery">${images}</div>${
@@ -167,9 +206,9 @@ function pricingHtml(book: ProposalBook, model: ProposalRenderModel): string {
         showDiscount ? `<th class="num">Discount</th>` : ""
       }<th class="num">Amount</th></tr></thead>
       <tbody>${pricing.items
-        .map((item) => {
+        .map((item, index) => {
           const discount = Number(item.discount_amount ?? 0)
-          return `<tr>
+          return `<tr data-line-item="${index}">
             <td class="desc">${escapeHtml(item.description)}</td>
             <td class="num">${item.quantity != null ? escapeHtml(String(item.quantity)) : "—"}</td>
             ${showDiscount ? `<td class="num">${discount > 0 ? formatMoney(discount, currency) : "—"}</td>` : ""}
@@ -190,10 +229,11 @@ function pricingHtml(book: ProposalBook, model: ProposalRenderModel): string {
   const keepTogether =
     pricing.mode !== "line_items" ||
     (pricing.mode === "line_items" && pricing.items.length <= 8)
+  const longTable = pricing.mode === "line_items" && pricing.items.length > 8
 
   return `<section class="pdf-pricing pdf-pricing--${theme.id}${
     keepTogether ? " pdf-pricing--keep" : ""
-  }">
+  }${longTable ? " pdf-pricing--long" : ""}">
     <div class="pdf-pricing-heading"><span class="pdf-eyebrow">Investment</span><h3>${escapeHtml(
       summary.label
     )}</h3></div>
@@ -272,6 +312,7 @@ function chapterHtml(chapter: ProposalChapter, book: ProposalBook, model: Propos
     layout.timeline ? "pdf-chapter--timeline" : "",
     layout.scope ? "pdf-chapter--scope" : "",
     layout.hasImages ? "pdf-chapter--has-images" : "",
+    layout.imageText ? "pdf-chapter--image-text" : "",
     layout.major ? "pdf-chapter--major" : "",
     chapter.kind === "acceptance" ? "pdf-chapter--acceptance" : "",
     `pdf-chapter--${book.theme.id}`,
@@ -446,14 +487,22 @@ const BASE_CSS = `
   .pdf-chapter--timeline .pdf-list li { position: relative; padding-left: 3mm; }
   .pdf-chapter--timeline .pdf-list li::before { content: ""; position: absolute; left: -5.2mm; top: 1.7mm; width: 1.8mm; height: 1.8mm; border-radius: 50%; background: var(--pdf-accent); }
   .pdf-figure { margin: 4mm 0; page-break-inside: avoid; break-inside: avoid; }
-  .pdf-figure img { max-width: 100%; max-height: 190mm; height: auto; object-fit: contain; border-radius: var(--pdf-radius); }
-  .pdf-figure figcaption, .pdf-caption { margin-top: 1.5mm; font-size: 8pt; color: var(--pdf-muted); }
-  .pdf-gallery { display: grid; grid-template-columns: 1fr 1fr; gap: 3mm; margin: 4mm 0; break-inside: avoid; }
+  .pdf-figure img { display: block; max-width: 100%; max-height: 180mm; width: auto; height: auto; object-fit: contain; border-radius: var(--pdf-radius); }
+  .pdf-figure figcaption, .pdf-caption { margin-top: 1.5mm; font-size: 8pt; color: var(--pdf-muted); break-before: avoid; page-break-before: avoid; }
+  .pdf-figure.is-missing { min-height: 22mm; display: flex; align-items: center; justify-content: center; border: 1px dashed var(--pdf-rule); border-radius: var(--pdf-radius); background: var(--pdf-paper-alt); }
+  .pdf-figure.is-missing::before { content: "Image unavailable"; font-size: 8pt; color: var(--pdf-muted); }
+  .pdf-chapter--image-text .pdf-chapter-body { display: flow-root; }
+  .pdf-chapter--image-text .pdf-figure { float: right; width: 44%; margin: 0 0 4mm 8mm; }
+  .pdf-chapter--image-text .pdf-figure img { max-height: 105mm; }
+  .pdf-gallery { display: grid; grid-template-columns: 1fr 1fr; gap: 3mm; margin: 4mm 0; break-inside: avoid; align-items: start; }
   .pdf-gallery-item { margin: 0; }
-  .pdf-gallery-item img { width: 100%; height: 48mm; object-fit: cover; border-radius: var(--pdf-radius); }
+  .pdf-gallery-item img { width: 100%; height: auto; max-height: 65mm; object-fit: contain; border-radius: var(--pdf-radius); }
   .pdf-divider { border: 0; border-top: 1px solid var(--pdf-rule); margin: 6mm 0; }
   .pdf-pricing { margin: 6mm 0 4mm; padding: 6mm; background: var(--pdf-card); border: 1px solid var(--pdf-rule); border-radius: var(--pdf-radius); break-inside: auto; page-break-inside: auto; }
   .pdf-pricing--keep { break-inside: avoid; page-break-inside: avoid; }
+  .pdf-pricing--long { padding: 0; border: 0; background: transparent; }
+  .pdf-pricing--long .pdf-pricing-heading { padding: 0 0 2mm; }
+  .pdf-pricing--long .pdf-price-table { font-size: 9pt; }
   .pdf-pricing-heading { break-after: avoid; page-break-after: avoid; }
   .pdf-pricing-heading h3 { margin: 1mm 0 4mm; font-family: var(--pdf-heading-font); font-size: 15pt; font-weight: 600; }
   .pdf-price-fixed { display: flex; align-items: baseline; justify-content: space-between; gap: 8mm; border-top: 1px solid var(--pdf-rule); border-bottom: 1px solid var(--pdf-rule); padding: 5mm 0; break-inside: avoid; }
@@ -461,11 +510,13 @@ const BASE_CSS = `
   .pdf-price-fixed strong { font-family: var(--pdf-heading-font); font-size: 22pt; font-weight: 600; }
   .pdf-price-table { width: 100%; border-collapse: collapse; font-size: 9.5pt; }
   .pdf-price-table thead { display: table-header-group; }
+  .pdf-price-table tfoot { display: table-row-group; }
   .pdf-price-table th, .pdf-price-table td { border-bottom: 1px solid var(--pdf-rule); padding: 2.4mm 2mm; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
   .pdf-price-table thead th { font-family: var(--pdf-eyebrow-font); font-size: 7.5pt; text-transform: uppercase; letter-spacing: 0.08em; color: var(--pdf-muted); }
   .pdf-price-table .num { text-align: right; white-space: nowrap; overflow-wrap: normal; }
   .pdf-price-table .strong { font-weight: 600; color: var(--pdf-ink); }
   .pdf-price-table tr { page-break-inside: avoid; break-inside: avoid; }
+  .pdf-price-total { break-before: avoid; page-break-before: avoid; }
   .pdf-price-total td { border-top: 1px solid var(--pdf-ink); border-bottom: 0; padding-top: 3.5mm; font-size: 11pt; }
   .pdf-pricing-note { margin: 3.5mm 0 0; font-size: 8pt; color: var(--pdf-muted); break-before: avoid; page-break-before: avoid; }
   .pdf-custom-pricing { border: 1px solid var(--pdf-rule); border-radius: var(--pdf-radius); padding: 4mm; }
@@ -515,13 +566,7 @@ export function buildProposalHtmlForPdf(model: ProposalRenderModel): string {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>${title}</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link
-    href="https://fonts.googleapis.com/css2?family=Gelasio:ital,wght@0,400;0,600;1,400&display=swap"
-    rel="stylesheet"
-  />
-  <style>${themeCss(book.theme)}${BASE_CSS}</style>
+  <style>${GELASIO_FONT_CSS}${themeCss(book.theme)}${BASE_CSS}</style>
 </head>
 <body class="pdf-document pdf-theme-${escapeHtml(book.templateId)}">
   ${coverHtml(book)}

@@ -2,6 +2,29 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Self-hosted editorial serif for proposal covers and documents. */
+@font-face {
+  font-family: "Gelasio";
+  src: url("/fonts/gelasio/gelasio-latin-400.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Gelasio";
+  src: url("/fonts/gelasio/gelasio-latin-600.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Gelasio";
+  src: url("/fonts/gelasio/gelasio-latin-400-italic.woff2") format("woff2");
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+}
+
 /* ── Number input: remove spin buttons and prevent scroll-to-change ── */
 input[type="number"]::-webkit-inner-spin-button,
 input[type="number"]::-webkit-outer-spin-button {
