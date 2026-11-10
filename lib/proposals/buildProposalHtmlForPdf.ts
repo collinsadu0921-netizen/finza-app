@@ -106,13 +106,15 @@ function coverHtml(book: ProposalBook, coverImageDataUri?: string): string {
 
   return `<section class="pdf-cover pdf-cover--${book.theme.coverStyle}${
     coverImage ? " pdf-cover--with-image" : ""
-  }"${coverImage ? ` style="--pdf-cover-image:url('${coverImage}')"` : ""}>
+  }">
     ${
       coverImage
         ? `<img class="pdf-cover-preload" src="${coverImage}" alt="" aria-hidden="true" onerror="this.style.display='none'" />`
         : ""
     }
-    <div class="pdf-cover-art" aria-hidden="true">${
+    <div class="pdf-cover-art" aria-hidden="true"${
+      coverImage ? ` style="background-image:url('${coverImage}')"` : ""
+    }>${
       coverImage
         ? `<div class="pdf-cover-image-shade"></div><div class="pdf-cover-image-panel"></div>`
         : ""
