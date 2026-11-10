@@ -155,9 +155,9 @@ function PricingView({
             <thead>
               <tr>
                 <th>Description</th>
-                <th className="num">Qty</th>
-                {showDiscount ? <th className="num">Discount</th> : null}
-                <th className="num">Amount</th>
+                <th className="num qty">Qty</th>
+                {showDiscount ? <th className="num discount">Discount</th> : null}
+                <th className="num amount">Amount</th>
               </tr>
             </thead>
             <tbody>
@@ -166,9 +166,9 @@ function PricingView({
                 return (
                   <tr key={`${item.description}-${index}`}>
                     <td>{item.description}</td>
-                    <td className="num">{item.quantity != null ? item.quantity : "—"}</td>
-                    {showDiscount ? <td className="num">{discount > 0 ? formatProposalMoney(discount, currency) : "—"}</td> : null}
-                    <td className="num strong">{formatProposalMoney(lineItemAmount(item), currency)}</td>
+                    <td className="num qty">{item.quantity != null ? item.quantity : "—"}</td>
+                    {showDiscount ? <td className="num discount">{discount > 0 ? formatProposalMoney(discount, currency) : "—"}</td> : null}
+                    <td className="num strong amount">{formatProposalMoney(lineItemAmount(item), currency)}</td>
                   </tr>
                 )
               })}
@@ -708,6 +708,11 @@ const READER_CSS = `
     .proposal-chapter--two-col .proposal-bullet-list { columns: 1; }
     .proposal-chapter--image-text .proposal-figure { float: none; width: 100%; margin: 0 0 8px; }
     .proposal-gallery { grid-template-columns: 1fr; }
+    .proposal-price-table { table-layout: fixed; font-size: 11px; }
+    .proposal-price-table th, .proposal-price-table td { padding: 8px 4px; word-break: break-word; }
+    .proposal-price-table .qty { width: 32px; }
+    .proposal-price-table .discount { width: 58px; }
+    .proposal-price-table .amount { width: 86px; }
   }
   .proposal-reader[data-template="standard_v1"] .proposal-cover-shade { background: none; }
   .proposal-reader[data-template="standard_v1"] .proposal-cover-meta { border-color: var(--pp-rule); }
