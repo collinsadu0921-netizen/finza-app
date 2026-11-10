@@ -199,6 +199,27 @@ export async function renderHtmlToPdfBuffer(
           /* fall back to the declared system stack */
         }
       })
+      // Wait for every image to finish loading and decoding before printing.
+      // Failed images resolve too, so a broken URL cannot block the export.
+      await page.evaluate(async () => {
+        const images = Array.from(document.images)
+        await Promise.all(
+          images.map(async (image) => {
+            if (!image.complete) {
+              await new Promise<void>((resolve) => {
+                const done = () => resolve()
+                image.addEventListener("load", done, { once: true })
+                image.addEventListener("error", done, { once: true })
+              })
+            }
+            try {
+              await image.decode()
+            } catch {
+              /* broken or unsupported image: leave the fallback markup in place */
+            }
+          })
+        )
+      })
       const margin = {
         top: options?.margin?.top ?? "8mm",
         right: options?.margin?.right ?? "8mm",

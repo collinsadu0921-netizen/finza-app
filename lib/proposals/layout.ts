@@ -7,6 +7,7 @@ export type ProposalChapterLayout = {
   timeline: boolean
   scope: boolean
   hasImages: boolean
+  imageText: boolean
   major: boolean
   newPage: boolean
 }
@@ -33,6 +34,8 @@ function blockWeight(block: ProposalChapter["blocks"][number]): number {
   }
 }
 
+export const proposalBlockWeight = blockWeight
+
 /**
  * Content-driven layout hints shared by the browser reader and PDF builder.
  * These do not change proposal content; they only decide presentation.
@@ -55,6 +58,14 @@ export function getChapterLayout(chapter: ProposalChapter, index: number): Propo
   const hasImages = chapter.blocks.some(
     (block) => block.type === "image" || block.type === "gallery"
   )
+  const imageBlocks = chapter.blocks.filter((block) => block.type === "image")
+  const paragraphBlocks = chapter.blocks.filter((block) => block.type === "paragraph")
+  const imageText =
+    chapter.kind === "content" &&
+    imageBlocks.length === 1 &&
+    paragraphBlocks.length >= 1 &&
+    !chapter.blocks.some((block) => block.type === "gallery") &&
+    weight < 1600
   const title = chapter.title
   const timeline = TIMELINE_TITLE.test(title)
   const scope = SCOPE_TITLE.test(title)
@@ -71,6 +82,7 @@ export function getChapterLayout(chapter: ProposalChapter, index: number): Propo
     timeline,
     scope,
     hasImages,
+    imageText,
     major: weight >= 1800 || (hasImages && weight >= 900),
     newPage: index === 0 || weight >= 2600 || hasImages,
   }

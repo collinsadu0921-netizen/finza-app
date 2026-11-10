@@ -47,6 +47,18 @@ describe("proposal chapter layout", () => {
     )
     expect(images.hasImages).toBe(true)
     expect(images.newPage).toBe(true)
+    expect(images.imageText).toBe(true)
+
+    const imageText = getChapterLayout(
+      chapter({
+        blocks: [
+          { type: "paragraph", text: "Project context and an editorial introduction." },
+          { type: "image", src: "https://example.com/image.png", assetId: "asset-1" },
+        ],
+      }),
+      1
+    )
+    expect(imageText.imageText).toBe(true)
   })
 
   it("uses two columns for longer lists of short bullets and recognises timelines", () => {

@@ -14,18 +14,23 @@ import {
 import BusinessLogoDisplay from "@/components/BusinessLogoDisplay"
 import {
   composeProposalBook,
-  chapterPageIndex,
   type ProposalBook,
-  type ProposalChapter,
 } from "@/lib/proposals/composition"
 import { proposalThemeCssVariables } from "@/lib/proposals/design"
 import { getChapterLayout } from "@/lib/proposals/layout"
+import {
+  buildReaderSheets,
+  chapterReaderPageNumber,
+  chapterStartSheetIndex,
+  type ReaderChapterSegment,
+  type ReaderSheet,
+} from "@/lib/proposals/readerLayout"
 import { chunkCustomPricingForDisplay, parseCustomPricingNotes } from "@/lib/proposals/parseCustomPricing"
 import type { ProposalRenderModel, ProposalRenderSection } from "@/lib/proposals/renderModel"
 
 type ReaderPage =
   | { kind: "cover"; key: "cover" }
-  | { kind: "chapter"; key: string; chapter: ProposalChapter }
+  | { kind: "sheet"; key: string; sheet: ReaderSheet }
 
 type ReaderSpread = { left: number | null; right: number | null }
 
@@ -187,6 +192,46 @@ function PricingNote() {
   )
 }
 
+function ProposalImage({
+  src,
+  alt,
+  width,
+  height,
+  fixedRatio,
+  className,
+}: {
+  src: string
+  alt: string
+  width?: number
+  height?: number
+  fixedRatio?: string
+  className?: string
+}) {
+  const [failed, setFailed] = useState(false)
+  const ratio = fixedRatio ?? (width && height ? `${width} / ${height}` : "4 / 3")
+  return (
+    <div
+      className={`proposal-image-frame ${className ?? ""}`.trim()}
+      style={{ aspectRatio: ratio }}
+    >
+      {failed ? (
+        <div className="proposal-image-fallback" role="img" aria-label={alt || "Image unavailable"}>
+          Image unavailable
+        </div>
+      ) : (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={src}
+          alt={alt}
+          loading="lazy"
+          decoding="async"
+          onError={() => setFailed(true)}
+        />
+      )}
+    </div>
+  )
+}
+
 function BlockView({ block }: { block: ProposalRenderSection }) {
   switch (block.type) {
     case "heading": {
@@ -206,8 +251,13 @@ function BlockView({ block }: { block: ProposalRenderSection }) {
     case "image":
       return (
         <figure className="proposal-figure">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={block.src} alt={block.caption || ""} />
+          <ProposalImage
+            src={block.src}
+            alt={block.caption || "Proposal image"}
+            width={block.width}
+            height={block.height}
+            className="proposal-image-frame--full"
+          />
           {block.caption ? <figcaption>{block.caption}</figcaption> : null}
         </figure>
       )
@@ -216,8 +266,13 @@ function BlockView({ block }: { block: ProposalRenderSection }) {
         <div className="proposal-gallery-wrap">
           <div className="proposal-gallery">
             {block.images.map((image) => (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img key={image.assetId} src={image.src} alt="" />
+              <ProposalImage
+                key={image.assetId}
+                src={image.src}
+                alt=""
+                fixedRatio="4 / 3"
+                className="proposal-image-frame--gallery"
+              />
             ))}
           </div>
           {block.caption ? <p className="proposal-caption">{block.caption}</p> : null}
@@ -239,7 +294,13 @@ function CoverPage({ book, model }: { book: ProposalBook; model: ProposalRenderM
       <div className="proposal-cover-media" aria-hidden>
         {cover.coverImageUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={cover.coverImageUrl} alt="" />
+          <img
+            src={cover.coverImageUrl}
+            alt=""
+            onError={(event) => {
+              event.currentTarget.style.display = "none"
+            }}
+          />
         ) : (
           <div className={`proposal-cover-pattern pattern-${book.theme.coverPattern}`} />
         )}
@@ -277,29 +338,30 @@ function CoverPage({ book, model }: { book: ProposalBook; model: ProposalRenderM
   )
 }
 
-function ChapterPage({
-  chapter,
-  book,
+function ChapterSection({
+  segment,
+  sheet,
   model,
-  pageNumber,
   acceptanceSlot,
 }: {
-  chapter: ProposalChapter
-  book: ProposalBook
+  segment: ReaderChapterSegment
+  sheet: ReaderSheet
   model: ProposalRenderModel
-  pageNumber: number
   acceptanceSlot?: ReactNode
 }) {
-  const layout = getChapterLayout(chapter, chapter.number - 1)
+  const { chapter } = segment
+  const layout = getChapterLayout(chapter, segment.chapterIndex)
   const chapterClass = [
-    "proposal-page",
     "proposal-chapter",
     layout.lead ? "proposal-chapter--lead" : "",
     layout.twoColumn ? "proposal-chapter--two-col" : "",
     layout.timeline ? "proposal-chapter--timeline" : "",
     layout.scope ? "proposal-chapter--scope" : "",
     layout.hasImages ? "proposal-chapter--has-images" : "",
+    layout.imageText ? "proposal-chapter--image-text" : "",
     layout.major ? "proposal-chapter--major" : "",
+    segment.continuation ? "proposal-chapter--continued" : "",
+    sheet.segments.length > 1 ? "proposal-chapter--shared" : "",
   ]
     .filter(Boolean)
     .join(" ")
@@ -307,21 +369,22 @@ function ChapterPage({
   const accepted = status === "accepted" || status === "converted"
   const rejected = status === "rejected"
   const decisionDate = asDateLabel(accepted ? model.accepted_at : rejected ? model.rejected_at : null)
+
   return (
-    <article className={chapterClass} id={`proposal-page-${pageNumber}`}>
+    <section className={chapterClass} id={`proposal-chapter-${chapter.key}-${segment.chunkIndex}`}>
       <header className="proposal-chapter-head">
         <span className="proposal-chapter-number">{String(chapter.number).padStart(2, "0")}</span>
         <div>
-          <p className="proposal-eyebrow">{chapter.eyebrow}</p>
+          <p className="proposal-eyebrow">{segment.continuation ? "Continued" : chapter.eyebrow}</p>
           <h2>{chapter.title}</h2>
         </div>
       </header>
       <div className="proposal-chapter-body">
-        {chapter.blocks.map((block, index) => (
-          <BlockView key={`${chapter.key}-${block.type}-${index}`} block={block} />
+        {segment.blocks.map((block, index) => (
+          <BlockView key={`${chapter.key}-${segment.chunkIndex}-${block.type}-${index}`} block={block} />
         ))}
-        {chapter.kind === "pricing" ? <PricingView model={model} /> : null}
-        {chapter.attachments.length > 0 ? (
+        {segment.isLastChunk && chapter.kind === "pricing" ? <PricingView model={model} /> : null}
+        {segment.isLastChunk && chapter.attachments.length > 0 ? (
           <section className="proposal-attachments">
             <h3>Supporting documents</h3>
             <ul>
@@ -336,7 +399,7 @@ function ChapterPage({
             </ul>
           </section>
         ) : null}
-        {chapter.kind === "acceptance" ? (
+        {segment.isLastChunk && chapter.kind === "acceptance" ? (
           <section
             className={`proposal-acceptance${
               acceptanceSlot ? "" : " proposal-acceptance--status-only"
@@ -363,6 +426,41 @@ function ChapterPage({
           </section>
         ) : null}
       </div>
+    </section>
+  )
+}
+
+function ReaderSheetPage({
+  sheet,
+  book,
+  model,
+  pageNumber,
+  acceptanceSlot,
+}: {
+  sheet: ReaderSheet
+  book: ProposalBook
+  model: ProposalRenderModel
+  pageNumber: number
+  acceptanceSlot?: ReactNode
+}) {
+  return (
+    <article
+      className={`proposal-page proposal-sheet${
+        sheet.segments.length > 1 ? " proposal-sheet--multi" : ""
+      }`}
+      id={`proposal-page-${pageNumber}`}
+    >
+      <div className="proposal-sheet-chapters">
+        {sheet.segments.map((segment) => (
+          <ChapterSection
+            key={segment.key}
+            segment={segment}
+            sheet={sheet}
+            model={model}
+            acceptanceSlot={segment.chapter.kind === "acceptance" ? acceptanceSlot : undefined}
+          />
+        ))}
+      </div>
       <footer className="proposal-page-footer">
         <span>{book.cover.businessName}</span>
         <span>{pageNumber}</span>
@@ -372,7 +470,6 @@ function ChapterPage({
 }
 
 const READER_CSS = `
-  @import url("https://fonts.googleapis.com/css2?family=Gelasio:ital,wght@0,400;0,600;1,400&display=swap");
   .proposal-reader {
     --pp-page-shadow: 0 24px 70px -34px rgba(15, 23, 42, 0.38);
     color: var(--pp-ink);
@@ -470,7 +567,11 @@ const READER_CSS = `
   .proposal-cover-meta div { display: flex; flex-direction: column; gap: 3px; }
   .proposal-cover-meta strong { font-size: 11px; font-weight: 600; }
   .proposal-cover-footer { position: absolute; z-index: 1; left: clamp(24px, 5vw, 56px); right: clamp(24px, 5vw, 56px); bottom: 18px; display: flex; justify-content: space-between; font-family: var(--pp-eyebrow-font); font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--pp-cover-muted); }
-  .proposal-chapter { gap: 18px; }
+  .proposal-sheet-chapters { display: flex; flex-direction: column; gap: 0; min-width: 0; }
+  .proposal-chapter { display: flex; flex-direction: column; gap: 18px; }
+  .proposal-chapter + .proposal-chapter { border-top: 1px solid var(--pp-rule); margin-top: 28px; padding-top: 28px; }
+  .proposal-chapter--continued .proposal-chapter-head h2 { font-size: clamp(18px, 2.4vw, 26px); }
+  .proposal-chapter--continued .proposal-chapter-number { opacity: 0.18; }
   .proposal-chapter-head { display: flex; gap: 16px; align-items: flex-start; border-bottom: 1px solid var(--pp-rule); padding-bottom: 16px; }
   .proposal-chapter-number { min-width: 40px; font-family: var(--pp-heading-font); font-size: clamp(26px, 3.2vw, 40px); line-height: 0.88; color: var(--pp-accent); opacity: 0.28; }
   .proposal-chapter-head h2 { margin: 4px 0 0; font-family: var(--pp-heading-font); font-size: clamp(23px, 3vw, 34px); line-height: 1.06; font-weight: 600; letter-spacing: -0.02em; }
@@ -486,11 +587,29 @@ const READER_CSS = `
   .proposal-chapter--timeline .proposal-bullet-list li { position: relative; padding-left: 4px; }
   .proposal-chapter--timeline .proposal-bullet-list li::before { content: ""; position: absolute; left: -21px; top: 8px; width: 7px; height: 7px; border-radius: 50%; background: var(--pp-accent); }
   .proposal-figure { margin: 4px 0; display: flex; flex-direction: column; gap: 7px; }
-  .proposal-figure img { width: 100%; max-height: 360px; object-fit: contain; border-radius: var(--pp-radius); border: 1px solid var(--pp-rule); background: var(--pp-paper-alt); }
+  .proposal-image-frame {
+    position: relative; display: flex; align-items: center; justify-content: center;
+    width: 100%; overflow: hidden; border-radius: var(--pp-radius);
+    border: 1px solid var(--pp-rule); background: var(--pp-paper-alt);
+  }
+  .proposal-image-frame img { display: block; width: 100%; height: 100%; object-fit: contain; }
+  .proposal-image-frame--full { max-height: 420px; }
+  .proposal-image-fallback {
+    display: flex; align-items: center; justify-content: center; width: 100%; height: 100%;
+    min-height: 120px; padding: 18px; color: var(--pp-muted); font-size: 12px;
+    text-align: center; background: var(--pp-paper-alt);
+  }
   .proposal-figure figcaption, .proposal-caption { font-size: 11px; color: var(--pp-muted); }
+  .proposal-chapter--image-text .proposal-chapter-body { display: block; }
+  .proposal-chapter--image-text .proposal-chapter-body > * + * { margin-top: 13px; }
+  .proposal-chapter--image-text .proposal-figure {
+    float: right; width: min(46%, 340px); margin: 0 0 14px 20px;
+  }
+  .proposal-chapter--image-text .proposal-figure .proposal-image-frame { max-height: 340px; }
+  .proposal-chapter--image-text .proposal-chapter-body::after { content: ""; display: block; clear: both; }
   .proposal-gallery-wrap { display: flex; flex-direction: column; gap: 8px; }
-  .proposal-gallery { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  .proposal-gallery img { width: 100%; height: 150px; object-fit: cover; border-radius: var(--pp-radius); border: 1px solid var(--pp-rule); }
+  .proposal-gallery { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-items: start; }
+  .proposal-gallery .proposal-image-frame { max-height: 260px; }
   .proposal-divider { border: 0; border-top: 1px solid var(--pp-rule); margin: 8px 0; width: 100%; }
   .proposal-pricing { margin: 8px 0 0; padding: clamp(16px, 3vw, 28px); background: var(--pp-card); border: 1px solid var(--pp-rule); border-radius: calc(var(--pp-radius) + 4px); }
   .proposal-pricing-fixed .proposal-fixed-row { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 10px; margin-top: 12px; padding: 16px 0; border-top: 1px solid var(--pp-rule); border-bottom: 1px solid var(--pp-rule); }
@@ -563,6 +682,8 @@ const READER_CSS = `
     .proposal-cover-footer { left: 20px; right: 20px; }
     .proposal-body-text, .proposal-bullet-list { font-size: 15px; }
     .proposal-chapter--two-col .proposal-bullet-list { columns: 1; }
+    .proposal-chapter--image-text .proposal-figure { float: none; width: 100%; margin: 0 0 8px; }
+    .proposal-gallery { grid-template-columns: 1fr; }
   }
   .proposal-reader[data-template="standard_v1"] .proposal-cover-shade { background: none; }
   .proposal-reader[data-template="standard_v1"] .proposal-cover-meta { border-color: var(--pp-rule); }
@@ -610,12 +731,18 @@ export function ProposalReader({
   className?: string
 }) {
   const book = useMemo(() => composeProposalBook(model), [model])
+  const sheets = useMemo(() => buildReaderSheets(book.chapters), [book.chapters])
+  const chapterStarts = useMemo(() => chapterStartSheetIndex(sheets), [sheets])
+  const chapterIndexByKey = useMemo(
+    () => new Map(book.chapters.map((chapter, index) => [chapter.key, index])),
+    [book.chapters]
+  )
   const pages = useMemo<ReaderPage[]>(
     () => [
       { kind: "cover", key: "cover" },
-      ...book.chapters.map((chapter) => ({ kind: "chapter" as const, key: chapter.key, chapter })),
+      ...sheets.map((sheet) => ({ kind: "sheet" as const, key: sheet.key, sheet })),
     ],
-    [book.chapters]
+    [sheets]
   )
   const spreads = useMemo<ReaderSpread[]>(() => {
     const result: ReaderSpread[] = [{ left: 0, right: null }]
@@ -704,10 +831,13 @@ export function ProposalReader({
 
   const goToChapter = useCallback(
     (chapterIndex: number) => {
-      goToPage(chapterPageIndex(chapterIndex))
+      const chapter = book.chapters[chapterIndex]
+      if (!chapter) return
+      const start = chapterStarts.get(chapter.key) ?? 0
+      goToPage(start + 1)
       setTocOpen(false)
     },
-    [goToPage]
+    [book.chapters, chapterStarts, goToPage]
   )
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -745,9 +875,10 @@ export function ProposalReader({
   }
 
   const progress = pages.length > 0 ? ((activePage + 1) / pages.length) * 100 : 0
-  const activeChapterIndex = book.chapters.findIndex(
-    (_, index) => activePage === chapterPageIndex(index)
-  )
+  const activeSheet = activePage > 0 ? sheets[activePage - 1] : null
+  const activeChapterIndex = activeSheet?.segments[0]
+    ? chapterIndexByKey.get(activeSheet.segments[0].chapter.key) ?? -1
+    : -1
   const activeSpread = spreads[spreadIndex]
   const pageLabel =
     isDesktop && activeSpread?.right != null
@@ -760,13 +891,15 @@ export function ProposalReader({
     page.kind === "cover" ? (
       <CoverPage key={`${page.key}-${keySuffix}`} book={book} model={model} />
     ) : (
-      <ChapterPage
+      <ReaderSheetPage
         key={`${page.key}-${keySuffix}`}
-        chapter={page.chapter}
+        sheet={page.sheet}
         book={book}
         model={model}
         pageNumber={pageNumber}
-        acceptanceSlot={page.chapter.kind === "acceptance" ? acceptanceSlot : undefined}
+        acceptanceSlot={page.sheet.segments.some((segment) => segment.chapter.kind === "acceptance")
+          ? acceptanceSlot
+          : undefined}
       />
     )
 
@@ -864,7 +997,9 @@ export function ProposalReader({
                       <span className="proposal-toc-number">{String(index + 1).padStart(2, "0")}</span>
                       {chapter.title}
                     </span>
-                    <span className="proposal-toc-page">{chapterPageIndex(index) + 1}</span>
+                    <span className="proposal-toc-page">
+                      {chapterReaderPageNumber(chapterStarts, chapter.key)}
+                    </span>
                   </button>
                 )
               })}
@@ -881,13 +1016,17 @@ export function ProposalReader({
             page.kind === "cover" ? (
               <CoverPage key="cover" book={book} model={model} />
             ) : (
-              <ChapterPage
-                key={page.chapter.key}
-                chapter={page.chapter}
+              <ReaderSheetPage
+                key={page.key}
+                sheet={page.sheet}
                 book={book}
                 model={model}
                 pageNumber={index + 1}
-                acceptanceSlot={page.chapter.kind === "acceptance" ? acceptanceSlot : undefined}
+                acceptanceSlot={page.sheet.segments.some(
+                  (segment) => segment.chapter.kind === "acceptance"
+                )
+                  ? acceptanceSlot
+                  : undefined}
               />
             )
           )}

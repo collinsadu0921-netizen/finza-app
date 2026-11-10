@@ -37,6 +37,7 @@ export type ProposalAssetRow = {
   internal_only: boolean
   sort_order: number
   storage_path: string
+  metadata?: { width?: number; height?: number } | null
 }
 
 export async function assembleProposalRenderModel(
@@ -98,6 +99,7 @@ export async function assembleProposalRenderModel(
       visible_on_public: a.visible_on_public,
       internal_only: a.internal_only,
       sort_order: a.sort_order,
+      metadata: a.metadata ?? null,
     })),
     assetUrlById,
     publicView: input.publicView,

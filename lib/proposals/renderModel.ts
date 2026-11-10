@@ -30,8 +30,8 @@ export type ProposalRenderSection =
   | { type: "heading"; level: number; text: string; id?: string; hidden?: boolean; guidance?: boolean }
   | { type: "paragraph"; text: string; id?: string; hidden?: boolean; guidance?: boolean }
   | { type: "bullet_list"; items: string[]; id?: string; hidden?: boolean; guidance?: boolean }
-  | { type: "image"; src: string; caption?: string; assetId: string; id?: string; hidden?: boolean; guidance?: boolean }
-  | { type: "gallery"; images: { src: string; assetId: string }[]; caption?: string; id?: string; hidden?: boolean; guidance?: boolean }
+  | { type: "image"; src: string; caption?: string; assetId: string; width?: number; height?: number; id?: string; hidden?: boolean; guidance?: boolean }
+  | { type: "gallery"; images: { src: string; assetId: string; width?: number; height?: number }[]; caption?: string; id?: string; hidden?: boolean; guidance?: boolean }
   | { type: "divider"; id?: string; hidden?: boolean; guidance?: boolean }
 
 export type ProposalRenderAttachment = {
@@ -84,6 +84,7 @@ type AssetMap = Map<
     visible_on_public: boolean
     internal_only: boolean
     sort_order: number
+    metadata?: { width?: number; height?: number } | null
   }
 >
 
@@ -130,6 +131,7 @@ export function normalizeProposalForRender(input: {
     visible_on_public: boolean
     internal_only: boolean
     sort_order: number
+    metadata?: { width?: number; height?: number } | null
   }>
   assetUrlById: Record<string, string>
   /** When true, omit internal_only assets and non–public-visible media for inline */
@@ -142,14 +144,25 @@ export function normalizeProposalForRender(input: {
   }
   const assetMap: AssetMap = m
 
-  const resolveUrl = (assetId: string): string | null => {
+  const resolveAsset = (
+    assetId: string
+  ): { src: string; width?: number; height?: number } | null => {
     const row = assetMap.get(assetId)
     if (!row) return null
     if (input.publicView) {
       if (row.internal_only || !row.visible_on_public) return null
     }
-    return input.assetUrlById[assetId] || null
+    const src = input.assetUrlById[assetId]
+    if (!src) return null
+    const width = Number(row.metadata?.width)
+    const height = Number(row.metadata?.height)
+    return {
+      src,
+      width: Number.isFinite(width) && width > 0 ? width : undefined,
+      height: Number.isFinite(height) && height > 0 ? height : undefined,
+    }
   }
+  const resolveUrl = (assetId: string): string | null => resolveAsset(assetId)?.src ?? null
 
   const sections: ProposalRenderSection[] = []
   for (const b of input.sections) {
@@ -167,11 +180,13 @@ export function normalizeProposalForRender(input: {
         sections.push({ type: "divider", id: blockId(b), hidden: b.hidden, guidance: b.guidance })
         break
       case "image": {
-        const src = resolveUrl(b.asset_id)
-        if (src) {
+        const asset = resolveAsset(b.asset_id)
+        if (asset) {
           sections.push({
             type: "image",
-            src,
+            src: asset.src,
+            width: asset.width,
+            height: asset.height,
             caption: b.caption,
             assetId: b.asset_id,
             id: blockId(b),
@@ -182,10 +197,10 @@ export function normalizeProposalForRender(input: {
         break
       }
       case "gallery": {
-        const images: { src: string; assetId: string }[] = []
+        const images: { src: string; assetId: string; width?: number; height?: number }[] = []
         for (const aid of b.asset_ids) {
-          const src = resolveUrl(aid)
-          if (src) images.push({ src, assetId: aid })
+          const asset = resolveAsset(aid)
+          if (asset) images.push({ ...asset, assetId: aid })
         }
         if (images.length > 0) {
           sections.push({ type: "gallery", images, caption: b.caption, id: blockId(b), hidden: b.hidden, guidance: b.guidance })

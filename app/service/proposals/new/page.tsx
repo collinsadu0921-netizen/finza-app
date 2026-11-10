@@ -75,12 +75,6 @@ export default function NewProposalPage() {
 
   return (
     <div className="min-h-screen bg-slate-50 px-4 py-10 sm:px-6 lg:px-8">
-      <link rel="preconnect" href="https://fonts.googleapis.com" />
-      <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-      <link
-        href="https://fonts.googleapis.com/css2?family=Gelasio:ital,wght@0,400;0,600&display=swap"
-        rel="stylesheet"
-      />
       <div className="mx-auto max-w-5xl rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
         <h1 className="text-xl font-bold text-slate-900">New proposal</h1>
         <p className="mt-1 text-sm text-slate-500">
