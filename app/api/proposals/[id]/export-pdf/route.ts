@@ -126,6 +126,7 @@ export async function GET(
     let pdfBuffer: Buffer
     try {
       pdfBuffer = await renderHtmlToPdfBuffer(html, {
+        mediaType: "print",
         footerTemplate: proposalPdfFooterTemplate(model),
         margin: { top: "8mm", right: "8mm", bottom: "15mm", left: "8mm" },
       })

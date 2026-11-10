@@ -489,8 +489,9 @@ const BASE_CSS = `
   .pdf-figure { margin: 4mm 0; page-break-inside: avoid; break-inside: avoid; }
   .pdf-figure img { display: block; max-width: 100%; max-height: 180mm; width: auto; height: auto; object-fit: contain; border-radius: var(--pdf-radius); }
   .pdf-figure figcaption, .pdf-caption { margin-top: 1.5mm; font-size: 8pt; color: var(--pdf-muted); break-before: avoid; page-break-before: avoid; }
-  .pdf-figure.is-missing { min-height: 22mm; display: flex; align-items: center; justify-content: center; border: 1px dashed var(--pdf-rule); border-radius: var(--pdf-radius); background: var(--pdf-paper-alt); }
-  .pdf-figure.is-missing::before { content: "Image unavailable"; font-size: 8pt; color: var(--pdf-muted); }
+  .pdf-figure.is-missing { min-height: 22mm; display: block; padding: 8mm 4mm; text-align: center; border: 1px dashed var(--pdf-rule); border-radius: var(--pdf-radius); background: var(--pdf-paper-alt); }
+  .pdf-figure.is-missing::before { content: "Image unavailable"; display: block; font-size: 8pt; color: var(--pdf-muted); }
+  .pdf-figure.is-missing figcaption { margin-top: 2mm; }
   .pdf-chapter--image-text .pdf-chapter-body { display: flow-root; }
   .pdf-chapter--image-text .pdf-figure { float: right; width: 44%; margin: 0 0 4mm 8mm; }
   .pdf-chapter--image-text .pdf-figure img { max-height: 105mm; }

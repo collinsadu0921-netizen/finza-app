@@ -98,8 +98,6 @@ export async function GET(
       .order("sort_order", { ascending: true })
 
     const assets = (assetsRaw || []) as ProposalAssetRow[]
-    const tokenSeg = encodeURIComponent(token)
-    const assetOrigin = new URL(request.url).origin
     const { model } = await assembleProposalRenderModel(admin, {
       proposal: p as ProposalRow,
       business: b,
@@ -108,12 +106,11 @@ export async function GET(
       publicView: true,
       signTtlSec: 7200,
       includePublicToken: false,
-      publicAssetUrlForId: (assetId) =>
-        `${assetOrigin}/api/proposals/public/${tokenSeg}/assets/${encodeURIComponent(assetId)}`,
     })
 
     const html = buildProposalHtmlForPdf(model)
     const pdfBuffer = await renderHtmlToPdfBuffer(html, {
+      mediaType: "print",
       footerTemplate: proposalPdfFooterTemplate(model),
       margin: { top: "8mm", right: "8mm", bottom: "15mm", left: "8mm" },
     })

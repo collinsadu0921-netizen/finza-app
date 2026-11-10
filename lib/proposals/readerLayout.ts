@@ -200,12 +200,16 @@ export function buildReaderSheets(
   for (let index = 0; index < sheets.length - 1; index += 1) {
     const lead = sheets[index]
     const next = sheets[index + 1]
+    const nextFirst = next.segments[0]
+    const nextLayout = nextFirst
+      ? getChapterLayout(nextFirst.chapter, nextFirst.chapterIndex)
+      : null
     if (
       lead.segments.length === 1 &&
       !lead.major &&
       !lead.locked &&
       lead.weight <= MERGE_LEAD_WEIGHT &&
-      next.major &&
+      (next.major || nextLayout?.hasImages) &&
       !next.locked &&
       lead.weight + next.weight <= MAX_SHEET_WEIGHT
     ) {

@@ -162,6 +162,8 @@ export type RenderHtmlToPdfOptions = {
   headerTemplate?: string
   margin?: { top?: string; right?: string; bottom?: string; left?: string }
   scale?: number
+  /** Proposal exports need print media so Chromium repeats table headers. */
+  mediaType?: "screen" | "print"
 }
 
 /**
@@ -180,9 +182,9 @@ export async function renderHtmlToPdfBuffer(
     const browser = await getOrCreateSharedBrowser()
     const page = await browser.newPage()
     try {
-      // Use screen styles for PDF — emulateMediaType("print") applies @media print rules that
-      // can clip or omit blocks (e.g. quote terms below totals) in headless Chromium page.pdf().
-      await page.emulateMediaType("screen")
+      // Proposals use print media so Chromium repeats table headers. Other
+      // documents keep the legacy screen path to avoid changing their output.
+      await page.emulateMediaType(options?.mediaType ?? "screen")
       await page.setContent(html, { waitUntil: "load", timeout: 45_000 })
       // Proposal PDFs use Gelasio for editorial serif typography because the
       // serverless Chromium image only ships Open Sans. Wait for the webfont
