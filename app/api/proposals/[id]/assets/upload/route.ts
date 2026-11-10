@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import sharp from "sharp"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
+import { getSupabaseServiceRoleClient } from "@/lib/supabaseServiceRole"
 import { resolveBusinessScopeForUser } from "@/lib/business"
 import { createAuditLog } from "@/lib/auditLog"
 import {
@@ -39,6 +40,10 @@ export async function POST(
       return NextResponse.json({ error: scope.error }, { status: scope.status })
     }
     const businessId = scope.businessId
+    const storageAdmin = getSupabaseServiceRoleClient()
+    if (!storageAdmin) {
+      return NextResponse.json({ error: "Service unavailable" }, { status: 503 })
+    }
 
     const { data: proposal } = await supabase
       .from("proposals")
@@ -122,7 +127,7 @@ export async function POST(
       return NextResponse.json({ error: "Failed to prepare asset path" }, { status: 500 })
     }
 
-    const { error: upErr } = await supabase.storage.from(PROPOSAL_ASSETS_BUCKET).upload(storagePath, buf, {
+    const { error: upErr } = await storageAdmin.storage.from(PROPOSAL_ASSETS_BUCKET).upload(storagePath, buf, {
       contentType: mime,
       upsert: false,
     })
