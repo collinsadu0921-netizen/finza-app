@@ -3,6 +3,7 @@ import { getSupabaseServiceRoleClient } from "@/lib/supabaseServiceRole"
 import { assembleProposalRenderModel, type ProposalAssetRow, type ProposalRow } from "@/lib/proposals/assembleRenderModel"
 import type { ProposalRenderBusiness, ProposalRenderCustomer } from "@/lib/proposals/renderModel"
 import { buildProposalHtmlForPdf, proposalPdfFooterTemplate } from "@/lib/proposals/buildProposalHtmlForPdf"
+import { fetchCoverImageDataUri } from "@/lib/proposals/coverImageData"
 import { renderHtmlToPdfBuffer } from "@/lib/pdf/renderHtmlToPdf"
 import { buildFinancialDocumentPdfDisposition } from "@/lib/documents/financialDocumentPdfDisposition"
 import { normalizeProposalStatus } from "@/lib/proposals/proposalState"
@@ -108,7 +109,8 @@ export async function GET(
       includePublicToken: false,
     })
 
-    const html = buildProposalHtmlForPdf(model)
+    const coverImageDataUri = await fetchCoverImageDataUri(model.presentation.coverImageUrl)
+    const html = buildProposalHtmlForPdf(model, { coverImageDataUri })
     const pdfBuffer = await renderHtmlToPdfBuffer(html, {
       mediaType: "print",
       footerTemplate: proposalPdfFooterTemplate(model),
