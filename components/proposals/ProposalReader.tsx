@@ -212,6 +212,7 @@ function ProposalImage({
   height,
   fixedRatio,
   className,
+  unavailable,
 }: {
   src: string
   alt: string
@@ -219,15 +220,17 @@ function ProposalImage({
   height?: number
   fixedRatio?: string
   className?: string
+  unavailable?: boolean
 }) {
   const [failed, setFailed] = useState(false)
   const ratio = fixedRatio ?? (width && height ? `${width} / ${height}` : "4 / 3")
+  const isUnavailable = unavailable || failed || !src
   return (
     <div
       className={`proposal-image-frame ${className ?? ""}`.trim()}
       style={{ aspectRatio: ratio }}
     >
-      {failed ? (
+      {isUnavailable ? (
         <div className="proposal-image-fallback" role="img" aria-label={alt || "Image unavailable"}>
           Image unavailable
         </div>
@@ -269,6 +272,7 @@ function BlockView({ block }: { block: ProposalRenderSection }) {
             alt={block.caption || "Proposal image"}
             width={block.width}
             height={block.height}
+            unavailable={block.unavailable}
             className="proposal-image-frame--full"
           />
           {block.caption ? <figcaption>{block.caption}</figcaption> : null}
@@ -283,6 +287,7 @@ function BlockView({ block }: { block: ProposalRenderSection }) {
                 key={image.assetId}
                 src={image.src}
                 alt=""
+                unavailable={image.unavailable}
                 fixedRatio="4 / 3"
                 className="proposal-image-frame--gallery"
               />

@@ -30,8 +30,8 @@ export type ProposalRenderSection =
   | { type: "heading"; level: number; text: string; id?: string; hidden?: boolean; guidance?: boolean }
   | { type: "paragraph"; text: string; id?: string; hidden?: boolean; guidance?: boolean }
   | { type: "bullet_list"; items: string[]; id?: string; hidden?: boolean; guidance?: boolean }
-  | { type: "image"; src: string; caption?: string; assetId: string; width?: number; height?: number; id?: string; hidden?: boolean; guidance?: boolean }
-  | { type: "gallery"; images: { src: string; assetId: string; width?: number; height?: number }[]; caption?: string; id?: string; hidden?: boolean; guidance?: boolean }
+  | { type: "image"; src: string; caption?: string; assetId: string; width?: number; height?: number; unavailable?: boolean; id?: string; hidden?: boolean; guidance?: boolean }
+  | { type: "gallery"; images: { src: string; assetId: string; width?: number; height?: number; unavailable?: boolean }[]; caption?: string; id?: string; hidden?: boolean; guidance?: boolean }
   | { type: "divider"; id?: string; hidden?: boolean; guidance?: boolean }
 
 export type ProposalRenderAttachment = {
@@ -146,18 +146,18 @@ export function normalizeProposalForRender(input: {
 
   const resolveAsset = (
     assetId: string
-  ): { src: string; width?: number; height?: number } | null => {
+  ): { src: string; width?: number; height?: number; unavailable?: boolean } | null => {
     const row = assetMap.get(assetId)
     if (!row) return null
     if (input.publicView) {
       if (row.internal_only || !row.visible_on_public) return null
     }
     const src = input.assetUrlById[assetId]
-    if (!src) return null
     const width = Number(row.metadata?.width)
     const height = Number(row.metadata?.height)
     return {
-      src,
+      src: src || "",
+      unavailable: !src,
       width: Number.isFinite(width) && width > 0 ? width : undefined,
       height: Number.isFinite(height) && height > 0 ? height : undefined,
     }
@@ -187,6 +187,7 @@ export function normalizeProposalForRender(input: {
             src: asset.src,
             width: asset.width,
             height: asset.height,
+            unavailable: asset.unavailable,
             caption: b.caption,
             assetId: b.asset_id,
             id: blockId(b),
@@ -197,7 +198,7 @@ export function normalizeProposalForRender(input: {
         break
       }
       case "gallery": {
-        const images: { src: string; assetId: string; width?: number; height?: number }[] = []
+        const images: { src: string; assetId: string; width?: number; height?: number; unavailable?: boolean }[] = []
         for (const aid of b.asset_ids) {
           const asset = resolveAsset(aid)
           if (asset) images.push({ ...asset, assetId: aid })

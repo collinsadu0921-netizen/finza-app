@@ -104,10 +104,12 @@ function coverHtml(book: ProposalBook): string {
       )
     : null
 
-  return `<section class="pdf-cover pdf-cover--${book.theme.coverStyle}">
+  return `<section class="pdf-cover pdf-cover--${book.theme.coverStyle}${
+    coverImage ? " pdf-cover--with-image" : ""
+  }">
     <div class="pdf-cover-art" aria-hidden="true">${
       coverImage
-        ? `<img class="pdf-cover-image" src="${coverImage}" alt="" onerror="this.style.display='none'" />`
+        ? `<img class="pdf-cover-image" src="${coverImage}" alt="" onerror="this.style.display='none'" /><div class="pdf-cover-image-shade"></div><div class="pdf-cover-image-panel"></div>`
         : ""
     }</div>
     <div class="pdf-cover-inner">
@@ -155,7 +157,11 @@ function sectionHtml(section: ProposalRenderSection): string {
         .join("")}</ul>`
     case "image": {
       const src = safeAttrUrl(section.src)
-      if (!src) return ""
+      if (!src || section.unavailable) {
+        return `<figure class="pdf-figure is-missing">${
+          section.caption ? `<figcaption>${escapeHtml(section.caption)}</figcaption>` : ""
+        }</figure>`
+      }
       return `<figure class="pdf-figure"><img src="${src}" alt=""${imageSizeAttrs(
         section.width,
         section.height
@@ -165,15 +171,18 @@ function sectionHtml(section: ProposalRenderSection): string {
     }
     case "gallery": {
       const images = section.images
-        .map((image) => ({ src: safeAttrUrl(image.src), width: image.width, height: image.height }))
-        .filter((image) => image.src)
-        .map(
-          (image) =>
-            `<figure class="pdf-figure pdf-gallery-item"><img src="${image.src}" alt=""${imageSizeAttrs(
-              image.width,
-              image.height
-            )} onerror="this.style.display='none';this.parentElement.classList.add('is-missing')" /></figure>`
-        )
+        .map((image) => {
+          const src = safeAttrUrl(image.src)
+          const unavailable = image.unavailable || !src
+          return `<figure class="pdf-figure pdf-gallery-item${unavailable ? " is-missing" : ""}">${
+            unavailable
+              ? ""
+              : `<img src="${src}" alt=""${imageSizeAttrs(
+                  image.width,
+                  image.height
+                )} onerror="this.style.display='none';this.parentElement.classList.add('is-missing')" />`
+          }</figure>`
+        })
         .join("")
       if (!images) return ""
       return `<div class="pdf-gallery">${images}</div>${
@@ -403,6 +412,25 @@ const BASE_CSS = `
     height: 100%;
     object-fit: cover;
     object-position: center;
+  }
+  .pdf-cover-image-shade {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.28);
+  }
+  .pdf-cover-image-panel {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 52%;
+    background: var(--pdf-cover-bg);
+  }
+  .pdf-cover--with-image .pdf-cover-art {
+    background-image: none;
+  }
+  .pdf-cover--with-image .pdf-cover-art::after {
+    content: none;
   }
   .pdf-cover--minimal .pdf-cover-art {
     opacity: 0;
