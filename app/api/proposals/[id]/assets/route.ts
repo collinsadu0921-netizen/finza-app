@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { resolveBusinessScopeForUser } from "@/lib/business"
 import { signProposalAssetPaths } from "@/lib/proposals/signing"
+import { isProposalAssetStoragePath } from "@/lib/proposals/storageConstants"
 import type { ProposalAssetRow } from "@/lib/proposals/assembleRenderModel"
 
 export const dynamic = "force-dynamic"
@@ -45,14 +46,17 @@ export async function GET(
 
     const { data: assetsRaw } = await supabase
       .from("proposal_assets")
-      .select("id, kind, mime_type, file_name, role, visible_on_public, internal_only, sort_order, storage_path, metadata")
+      .select("id, kind, mime_type, file_name, role, visible_on_public, internal_only, sort_order, storage_path, metadata, upload_state")
       .eq("proposal_id", proposalId)
+      .eq("upload_state", "ready")
       .order("sort_order", { ascending: true })
 
     const assets = (assetsRaw || []) as ProposalAssetRow[]
     const signed = await signProposalAssetPaths(
       supabase,
-      assets.map((a) => ({ id: a.id, storage_path: a.storage_path })),
+      assets
+        .filter((a) => isProposalAssetStoragePath(a.storage_path, businessId, proposalId))
+        .map((a) => ({ id: a.id, storage_path: a.storage_path })),
       3600
     )
 

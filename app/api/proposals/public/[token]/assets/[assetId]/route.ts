@@ -1,14 +1,21 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getSupabaseServiceRoleClient } from "@/lib/supabaseServiceRole"
-import { PROPOSAL_ASSETS_BUCKET } from "@/lib/proposals/storageConstants"
+import { detectProposalAssetMime } from "@/lib/proposals/assetValidation"
+import {
+  PROPOSAL_ASSET_ALLOWED_MIMES,
+  PROPOSAL_ASSETS_BUCKET,
+  isProposalAssetStoragePath,
+  sanitizeProposalAssetDisplayName,
+} from "@/lib/proposals/storageConstants"
 
 export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
 
 /**
- * Public proposal file — same-origin proxy so inline images and attachment links work
- * on /proposal-public/* without depending on cross-origin Supabase signed URLs.
- * Access: valid public_token + asset visible_on_public + not internal_only.
+ * Public proposal file proxy. Access requires a valid public token, a ready
+ * asset, public visibility, and a storage path bound to the proposal's exact
+ * business/proposal prefix. Service-role download is used only after those
+ * checks; the object is never served from a client-supplied path.
  */
 export async function GET(
   _request: NextRequest,
@@ -29,7 +36,7 @@ export async function GET(
 
     const { data: proposal, error: pErr } = await admin
       .from("proposals")
-      .select("id, expires_at")
+      .select("id, business_id, expires_at")
       .eq("public_token", token)
       .is("deleted_at", null)
       .maybeSingle()
@@ -45,9 +52,13 @@ export async function GET(
 
     const { data: asset, error: aErr } = await admin
       .from("proposal_assets")
-      .select("id, proposal_id, storage_path, mime_type, file_name, visible_on_public, internal_only")
+      .select(
+        "id, proposal_id, business_id, storage_path, mime_type, file_name, visible_on_public, internal_only, upload_state"
+      )
       .eq("id", id)
       .eq("proposal_id", proposal.id)
+      .eq("business_id", proposal.business_id)
+      .eq("upload_state", "ready")
       .maybeSingle()
 
     if (aErr || !asset) {
@@ -59,7 +70,12 @@ export async function GET(
     }
 
     const path = (asset.storage_path as string | null)?.trim()
-    if (!path || path === "__placeholder__") {
+    if (!path || !isProposalAssetStoragePath(path, proposal.business_id, proposal.id)) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 })
+    }
+
+    const declaredMime = String(asset.mime_type || "").trim().toLowerCase()
+    if (!PROPOSAL_ASSET_ALLOWED_MIMES.has(declaredMime)) {
       return NextResponse.json({ error: "Not found" }, { status: 404 })
     }
 
@@ -70,16 +86,29 @@ export async function GET(
     }
 
     const buf = Buffer.from(await file.arrayBuffer())
-    const mime = (asset.mime_type as string)?.trim() || "application/octet-stream"
-    const name = (asset.file_name as string)?.trim() || "file"
-    const asciiName = name.replace(/[^\x20-\x7e]/g, "_").slice(0, 120) || "file"
+    const detectedMime = detectProposalAssetMime(buf)
+    if (!detectedMime || detectedMime !== declaredMime) {
+      console.error("proposal public asset MIME mismatch", { assetId: asset.id, declaredMime, detectedMime })
+      return NextResponse.json({ error: "Not found" }, { status: 404 })
+    }
+
+    const name =
+      sanitizeProposalAssetDisplayName(asset.file_name as string | null)
+        .replace(/[^\x20-\x7e]/g, "_")
+        .replace(/"/g, "")
+        .slice(0, 120) || "file"
+    const isImage = detectedMime.startsWith("image/")
+    const disposition = isImage ? "inline" : "attachment"
 
     return new NextResponse(new Uint8Array(buf), {
       status: 200,
       headers: {
-        "Content-Type": mime,
-        "Content-Disposition": `inline; filename="${asciiName.replace(/"/g, "")}"`,
+        "Content-Type": detectedMime,
+        "Content-Disposition": `${disposition}; filename="${name}"`,
         "Cache-Control": "private, max-age=300",
+        "X-Content-Type-Options": "nosniff",
+        "Cross-Origin-Resource-Policy": "same-origin",
+        "Content-Security-Policy": "default-src 'none'; sandbox",
       },
     })
   } catch (e: unknown) {

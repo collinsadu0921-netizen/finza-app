@@ -33,6 +33,7 @@ import {
 import { ProposalAiAssistant } from "./ProposalAiAssistant"
 import type { ProposalAiPreview, ProposalAiSnapshot } from "@/lib/proposals/ai/types"
 import { isGuidanceText } from "@/lib/proposals/guidance"
+import { PROPOSAL_ASSETS_BUCKET, PROPOSAL_ASSET_MAX_BYTES } from "@/lib/proposals/storageConstants"
 
 type CustomerOpt = { id: string; name: string; email: string | null; phone: string | null; whatsapp_phone?: string | null }
 
@@ -261,6 +262,8 @@ export function ProposalEditorForm({
   const sendMenuRef = useRef<HTMLDivElement>(null)
   const [copiedTip, setCopiedTip] = useState(false)
   const [assets, setAssets] = useState<AssetRow[]>([])
+  const [uploadBusy, setUploadBusy] = useState(false)
+  const [uploadLabel, setUploadLabel] = useState("")
   const [convertedEstimateId, setConvertedEstimateId] = useState<string | null>(null)
   const [convertedAt, setConvertedAt] = useState<string | null>(null)
   const [convertedInvoiceId, setConvertedInvoiceId] = useState<string | null>(null)
@@ -855,19 +858,66 @@ export function ProposalEditorForm({
 
   async function onUpload(file: File) {
     setError("")
-    const fd = new FormData()
-    fd.append("file", file)
-    const res = await fetch(`/api/proposals/${proposalId}/assets/upload?${qs}`, {
-      method: "POST",
-      body: fd,
-      credentials: "same-origin",
-    })
-    const data = await res.json().catch(() => ({}))
-    if (!res.ok) {
-      setError(data.error || "Upload failed")
+    if (file.size <= 0) {
+      setError("The selected file is empty.")
       return
     }
-    await reloadAssets()
+    if (file.size > PROPOSAL_ASSET_MAX_BYTES) {
+      setError("Files must be 15 MB or smaller.")
+      return
+    }
+    if (!file.type) {
+      setError("Could not determine the file type.")
+      return
+    }
+
+    setUploadBusy(true)
+    setUploadLabel(file.name)
+    try {
+      const intentRes = await fetch(`/api/proposals/${proposalId}/assets/upload-intent?${qs}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          business_id: businessId,
+          file_name: file.name,
+          mime_type: file.type,
+          file_size: file.size,
+        }),
+      })
+      const intent = await intentRes.json().catch(() => ({}))
+      if (!intentRes.ok || !intent.path || !intent.token) {
+        throw new Error(intent.error || "Could not prepare the upload.")
+      }
+
+      const { error: uploadError } = await supabase.storage
+        .from(PROPOSAL_ASSETS_BUCKET)
+        .uploadToSignedUrl(intent.path, intent.token, file, {
+          contentType: file.type,
+          upsert: false,
+        })
+      if (uploadError) throw new Error(uploadError.message || "Upload failed.")
+
+      const finalizeRes = await fetch(`/api/proposals/${proposalId}/assets/finalize?${qs}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          business_id: businessId,
+          asset_id: intent.asset_id,
+          path: intent.path,
+        }),
+      })
+      const finalized = await finalizeRes.json().catch(() => ({}))
+      if (!finalizeRes.ok) throw new Error(finalized.error || "Upload could not be finalized.")
+
+      await reloadAssets()
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Upload failed")
+    } finally {
+      setUploadBusy(false)
+      setUploadLabel("")
+    }
   }
 
   async function patchAsset(id: string, patch: Record<string, unknown>) {
@@ -2226,13 +2276,24 @@ export function ProposalEditorForm({
             <input
               type="file"
               accept="image/jpeg,image/png,image/webp,application/pdf"
-              className="block w-full max-w-lg cursor-pointer text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-sm file:font-medium file:text-slate-800 hover:file:bg-slate-200"
+              disabled={uploadBusy}
+              className="block w-full max-w-lg cursor-pointer text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-sm file:font-medium file:text-slate-800 hover:file:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-60"
               onChange={(e) => {
                 const f = e.target.files?.[0]
                 e.target.value = ""
                 if (f) void onUpload(f)
               }}
             />
+            {uploadBusy ? (
+              <p className="mt-2 text-xs text-slate-600" role="status">
+                Uploading {uploadLabel || "file"}… Do not close this page.
+              </p>
+            ) : (
+              <p className="mt-2 text-xs text-slate-500">
+                Images or PDF, up to 15 MB. Files upload directly to private storage and are validated before
+                they appear in the proposal.
+              </p>
+            )}
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
               {assets.length === 0 ? (
                 <p className="col-span-full rounded-xl border border-dashed border-slate-200 py-10 text-center text-sm text-slate-500">

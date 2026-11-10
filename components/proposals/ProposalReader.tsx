@@ -303,7 +303,7 @@ function BlockView({ block }: { block: ProposalRenderSection }) {
   }
 }
 
-function CoverPage({ book, model }: { book: ProposalBook; model: ProposalRenderModel }) {
+function CoverPage({ book }: { book: ProposalBook }) {
   const cover = book.cover
   const issued = asDateLabel(cover.createdAt)
   const expires = asDateLabel(cover.expiresAt)
@@ -347,10 +347,6 @@ function CoverPage({ book, model }: { book: ProposalBook; model: ProposalRenderM
           {expires ? <div><span>Valid until</span><strong>{expires}</strong></div> : null}
           <div><span>Prepared by</span><strong>{cover.businessTradingName || cover.businessLegalName || cover.businessName}</strong></div>
         </div>
-      </div>
-      <div className="proposal-cover-footer">
-        <span>{book.theme.label} edition</span>
-        <span>{model.currency_code}</span>
       </div>
     </article>
   )
@@ -918,7 +914,7 @@ export function ProposalReader({
 
   const renderPage = (page: ReaderPage, pageNumber: number, keySuffix: string) =>
     page.kind === "cover" ? (
-      <CoverPage key={`${page.key}-${keySuffix}`} book={book} model={model} />
+      <CoverPage key={`${page.key}-${keySuffix}`} book={book} />
     ) : (
       <ReaderSheetPage
         key={`${page.key}-${keySuffix}`}
@@ -1043,7 +1039,7 @@ export function ProposalReader({
         <div className="proposal-continuous" id="proposal-continuous">
           {pages.map((page, index) =>
             page.kind === "cover" ? (
-              <CoverPage key="cover" book={book} model={model} />
+              <CoverPage key="cover" book={book} />
             ) : (
               <ReaderSheetPage
                 key={page.key}

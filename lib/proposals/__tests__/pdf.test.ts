@@ -79,6 +79,14 @@ describe("buildProposalHtmlForPdf", () => {
     expect(html).toContain("print-color-adjust: exact")
   })
 
+  it("disables PDF ligatures and omits decorative cover edition/currency labels", () => {
+    const html = buildProposalHtmlForPdf(model())
+    expect(html).toContain("font-variant-ligatures: none")
+    expect(html).toContain('font-feature-settings: "liga" 0')
+    expect(html).not.toContain("pdf-cover-footer")
+    expect(html).not.toMatch(/>\s*(Premium|Modern|Minimal) edition\s*</i)
+  })
+
   it("applies the chosen accent and escapes user text", () => {
     const html = buildProposalHtmlForPdf(
       model({

@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { z } from "zod"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
+import { getSupabaseServiceRoleClient } from "@/lib/supabaseServiceRole"
 import { resolveBusinessScopeForUser } from "@/lib/business"
 import { createAuditLog } from "@/lib/auditLog"
-import { PROPOSAL_ASSETS_BUCKET } from "@/lib/proposals/storageConstants"
+import { PROPOSAL_ASSETS_BUCKET, isProposalAssetStoragePath } from "@/lib/proposals/storageConstants"
 import { normalizeProposalStatus, proposalCanBeEditedByStaff } from "@/lib/proposals/proposalState"
 
 export const dynamic = "force-dynamic"
@@ -156,14 +157,34 @@ export async function DELETE(
     if (!asset?.storage_path) {
       return NextResponse.json({ error: "Asset not found" }, { status: 404 })
     }
-
-    const { error: delDb } = await supabase.from("proposal_assets").delete().eq("id", assetId)
-    if (delDb) {
-      return NextResponse.json({ error: delDb.message }, { status: 500 })
+    if (!isProposalAssetStoragePath(asset.storage_path, businessId, proposalId)) {
+      return NextResponse.json({ error: "Asset not found" }, { status: 404 })
     }
 
-    if (asset.storage_path && !asset.storage_path.startsWith("__")) {
-      await supabase.storage.from(PROPOSAL_ASSETS_BUCKET).remove([asset.storage_path])
+    const admin = getSupabaseServiceRoleClient()
+    if (!admin) {
+      return NextResponse.json({ error: "Service unavailable" }, { status: 503 })
+    }
+
+    // Remove the private object first. The server has already re-checked the
+    // proposal/business/path binding, so this cannot delete another tenant's
+    // object. If object deletion fails, keep the DB row so staff can retry.
+    const { error: storageDeleteError } = await admin.storage
+      .from(PROPOSAL_ASSETS_BUCKET)
+      .remove([asset.storage_path])
+    if (storageDeleteError) {
+      console.error("proposal asset storage delete:", storageDeleteError)
+      return NextResponse.json({ error: "Failed to delete the stored file" }, { status: 500 })
+    }
+
+    const { error: delDb } = await supabase
+      .from("proposal_assets")
+      .delete()
+      .eq("id", assetId)
+      .eq("proposal_id", proposalId)
+      .eq("business_id", businessId)
+    if (delDb) {
+      return NextResponse.json({ error: delDb.message }, { status: 500 })
     }
 
     await createAuditLog({

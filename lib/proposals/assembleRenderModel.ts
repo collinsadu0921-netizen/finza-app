@@ -3,6 +3,7 @@ import { normalizeProposalForRender, type ProposalRenderBusiness, type ProposalR
 import { parseProposalSections } from "./schema"
 import { pricingPayloadForRender } from "./pricingForDb"
 import { signProposalAssetPaths } from "./signing"
+import { isProposalAssetStoragePath } from "./storageConstants"
 
 export type ProposalRow = {
   id: string
@@ -38,6 +39,7 @@ export type ProposalAssetRow = {
   sort_order: number
   storage_path: string
   metadata?: { width?: number; height?: number } | null
+  upload_state?: string | null
 }
 
 export async function assembleProposalRenderModel(
@@ -59,6 +61,8 @@ export async function assembleProposalRenderModel(
 ) {
   const signRows = input.assets
     .filter((a) => {
+      if (a.upload_state && a.upload_state !== "ready") return false
+      if (!isProposalAssetStoragePath(a.storage_path, input.proposal.business_id, input.proposal.id)) return false
       if (input.publicView && (a.internal_only || !a.visible_on_public)) return false
       return true
     })

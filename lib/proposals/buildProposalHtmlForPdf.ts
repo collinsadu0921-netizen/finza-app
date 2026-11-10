@@ -404,6 +404,11 @@ const BASE_CSS = `
     background: var(--pdf-paper);
     font-size: 10.5pt;
     line-height: 1.58;
+    /* Keep individual letters in the PDF text stream so copy/search and
+       assistive technology can read Gelasio text without split ffi/fi glyphs.
+       This is scoped to PDF export; the browser reader keeps normal ligatures. */
+    font-variant-ligatures: none;
+    font-feature-settings: "liga" 0, "clig" 0, "dlig" 0, "hlig" 0, "calt" 0;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
