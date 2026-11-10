@@ -89,4 +89,43 @@ describe("proposal reader sheets", () => {
     expect(chapterReaderPageNumber(starts, "b")).toBe(2)
     expect(chapterReaderPageNumber(starts, "c")).toBeGreaterThanOrEqual(3)
   })
+
+  it("splits long line-item pricing across reader sheets without losing items", () => {
+    const items = Array.from({ length: 50 }, (_, index) => ({
+      description: `Service line ${index + 1}`,
+      quantity: 1,
+      unit_price: 1000,
+      discount_amount: 0,
+      line_total: 1000,
+    }))
+    const sheets = buildReaderSheets(
+      [chapter({ key: "pricing", number: 2, title: "Investment and pricing", kind: "pricing" })],
+      { mode: "line_items", items }
+    )
+    const pricingSegments = sheets
+      .flatMap((sheet) => sheet.segments)
+      .filter((segment) => segment.pricingItems && segment.pricingItems.length > 0)
+    expect(pricingSegments.length).toBe(5)
+    expect(
+      pricingSegments.reduce((sum, segment) => sum + (segment.pricingItems?.length ?? 0), 0)
+    ).toBe(50)
+    expect(pricingSegments[pricingSegments.length - 1].pricingShowTotal).toBe(true)
+    expect(pricingSegments[0].pricingShowTotal).toBe(false)
+  })
+
+  it("merges a short lead-in into the next major image sheet", () => {
+    const lead = chapter({ key: "lead", number: 1, title: "Introduction" })
+    const imageChapter = chapter({
+      key: "images",
+      number: 2,
+      title: "Facilities overview",
+      blocks: [
+        { type: "paragraph", text: "A".repeat(300) },
+        { type: "image", src: "https://example.com/a.jpg", assetId: "asset-1" },
+      ],
+    })
+    const sheets = buildReaderSheets([lead, imageChapter])
+    expect(sheets).toHaveLength(1)
+    expect(sheets[0].segments.map((segment) => segment.chapter.key)).toEqual(["lead", "images"])
+  })
 })

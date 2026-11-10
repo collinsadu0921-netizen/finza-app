@@ -1,12 +1,17 @@
 import type { ProposalChapter } from "./composition"
 import type { ProposalRenderSection } from "./renderModel"
+import type { PricingPayload } from "./schema"
 import { getChapterLayout, proposalBlockWeight } from "./layout"
+
+type LineItem = Extract<PricingPayload, { mode: "line_items" }>["items"][number]
 
 export type ReaderChapterSegment = {
   key: string
   chapter: ProposalChapter
   chapterIndex: number
   blocks: ProposalRenderSection[]
+  pricingItems?: LineItem[]
+  pricingShowTotal?: boolean
   continuation: boolean
   chunkIndex: number
   isLastChunk: boolean
@@ -24,6 +29,14 @@ export type ReaderSheet = {
 
 const MAX_CHUNK_WEIGHT = 1150
 const MAX_SHEET_WEIGHT = 1350
+const MAX_PRICING_ROWS_PER_PAGE = 10
+const MERGE_LEAD_WEIGHT = 450
+
+type SegmentSpec = {
+  blocks: ProposalRenderSection[]
+  pricingItems?: LineItem[]
+  pricingShowTotal?: boolean
+}
 
 function chunkBlocks(blocks: ProposalRenderSection[]): ProposalRenderSection[][] {
   const chunks: ProposalRenderSection[][] = []
@@ -104,24 +117,49 @@ function chunkBlocks(blocks: ProposalRenderSection[]): ProposalRenderSection[][]
  * major, pricing and acceptance chapters get a fresh, visually distinct sheet.
  * Long chapters are split at safe block boundaries.
  */
-export function buildReaderSheets(chapters: ProposalChapter[]): ReaderSheet[] {
+export function buildReaderSheets(
+  chapters: ProposalChapter[],
+  pricing?: PricingPayload
+): ReaderSheet[] {
   const sheets: ReaderSheet[] = []
+  const lineItems = pricing?.mode === "line_items" ? pricing.items : null
 
   chapters.forEach((chapter, chapterIndex) => {
     const layout = getChapterLayout(chapter, chapterIndex)
-    const chunks = chapter.kind === "content" ? chunkBlocks(chapter.blocks) : [chapter.blocks]
     const reserved = chapter.kind !== "content"
+    let specs: SegmentSpec[]
 
-    chunks.forEach((blocks, chunkIndex) => {
-      const isLastChunk = chunkIndex === chunks.length - 1
+    if (chapter.kind === "pricing" && lineItems && lineItems.length > MAX_PRICING_ROWS_PER_PAGE) {
+      specs = []
+      for (let start = 0; start < lineItems.length; start += MAX_PRICING_ROWS_PER_PAGE) {
+        const end = Math.min(lineItems.length, start + MAX_PRICING_ROWS_PER_PAGE)
+        specs.push({
+          blocks: start === 0 ? chapter.blocks : [],
+          pricingItems: lineItems.slice(start, end),
+          pricingShowTotal: end === lineItems.length,
+        })
+      }
+    } else if (chapter.kind === "content" && !layout.hasImages) {
+      specs = chunkBlocks(chapter.blocks).map((blocks) => ({ blocks }))
+    } else {
+      specs = [{ blocks: chapter.blocks }]
+    }
+
+    specs.forEach((spec, chunkIndex) => {
+      const isLastChunk = chunkIndex === specs.length - 1
       const attachmentWeight = isLastChunk ? chapter.attachments.length * 80 : 0
       const segmentWeight =
-        blocks.reduce((sum, block) => sum + proposalBlockWeight(block), 0) + attachmentWeight
+        spec.blocks.reduce((sum, block) => sum + proposalBlockWeight(block), 0) +
+        (spec.pricingItems?.length ?? 0) * 70 +
+        (spec.pricingShowTotal ? 120 : 0) +
+        attachmentWeight
       const segment: ReaderChapterSegment = {
         key: `${chapter.key}-chunk-${chunkIndex}`,
         chapter,
         chapterIndex,
-        blocks,
+        blocks: spec.blocks,
+        pricingItems: spec.pricingItems,
+        pricingShowTotal: spec.pricingShowTotal,
         continuation: chunkIndex > 0,
         chunkIndex,
         isLastChunk,
@@ -155,6 +193,28 @@ export function buildReaderSheets(chapters: ProposalChapter[]): ReaderSheet[] {
       if (reserved && isLastChunk) sheet.locked = true
     })
   })
+
+  // A very short lead-in (for example an introduction) should not occupy a
+  // whole sheet immediately before a major image chapter. Merge it into the
+  // next major sheet when both fit comfortably.
+  for (let index = 0; index < sheets.length - 1; index += 1) {
+    const lead = sheets[index]
+    const next = sheets[index + 1]
+    if (
+      lead.segments.length === 1 &&
+      !lead.major &&
+      !lead.locked &&
+      lead.weight <= MERGE_LEAD_WEIGHT &&
+      next.major &&
+      !next.locked &&
+      lead.weight + next.weight <= MAX_SHEET_WEIGHT
+    ) {
+      next.segments.unshift(...lead.segments)
+      next.weight += lead.weight
+      sheets.splice(index, 1)
+      index -= 1
+    }
+  }
 
   return sheets
 }

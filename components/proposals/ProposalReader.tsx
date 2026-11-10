@@ -79,6 +79,8 @@ function BrandMark({
   )
 }
 
+type PricingLineItem = Extract<ProposalRenderModel["pricing"], { mode: "line_items" }>["items"][number]
+
 function CustomPricingView({ notes }: { notes: string }) {
   const chunks = useMemo(() => chunkCustomPricingForDisplay(parseCustomPricingNotes(notes)), [notes])
   return (
@@ -115,7 +117,15 @@ function CustomPricingView({ notes }: { notes: string }) {
   )
 }
 
-function PricingView({ model }: { model: ProposalRenderModel }) {
+function PricingView({
+  model,
+  items,
+  showTotal = true,
+}: {
+  model: ProposalRenderModel
+  items?: PricingLineItem[]
+  showTotal?: boolean
+}) {
   const pricing = model.pricing
   if (pricing.mode === "none") return null
   const currency = model.currency_code
@@ -134,7 +144,8 @@ function PricingView({ model }: { model: ProposalRenderModel }) {
   }
 
   if (pricing.mode === "line_items") {
-    const showDiscount = pricing.items.some((item) => Number(item.discount_amount ?? 0) > 0)
+    const displayItems = items ?? pricing.items
+    const showDiscount = displayItems.some((item) => Number(item.discount_amount ?? 0) > 0)
     const total = pricing.items.reduce((sum, item) => sum + lineItemAmount(item), 0)
     return (
       <div className="proposal-pricing">
@@ -150,7 +161,7 @@ function PricingView({ model }: { model: ProposalRenderModel }) {
               </tr>
             </thead>
             <tbody>
-              {pricing.items.map((item, index) => {
+              {displayItems.map((item, index) => {
                 const discount = Number(item.discount_amount ?? 0)
                 return (
                   <tr key={`${item.description}-${index}`}>
@@ -162,15 +173,17 @@ function PricingView({ model }: { model: ProposalRenderModel }) {
                 )
               })}
             </tbody>
-            <tfoot>
-              <tr>
-                <td colSpan={showDiscount ? 3 : 2}>Total investment</td>
-                <td className="num strong">{formatProposalMoney(total, currency)}</td>
-              </tr>
-            </tfoot>
+            {showTotal ? (
+              <tfoot>
+                <tr>
+                  <td colSpan={showDiscount ? 3 : 2}>Total investment</td>
+                  <td className="num strong">{formatProposalMoney(total, currency)}</td>
+                </tr>
+              </tfoot>
+            ) : null}
           </table>
         </div>
-        <PricingNote />
+        {showTotal ? <PricingNote /> : null}
       </div>
     )
   }
@@ -223,7 +236,7 @@ function ProposalImage({
         <img
           src={src}
           alt={alt}
-          loading="lazy"
+          loading="eager"
           decoding="async"
           onError={() => setFailed(true)}
         />
@@ -383,7 +396,13 @@ function ChapterSection({
         {segment.blocks.map((block, index) => (
           <BlockView key={`${chapter.key}-${segment.chunkIndex}-${block.type}-${index}`} block={block} />
         ))}
-        {segment.isLastChunk && chapter.kind === "pricing" ? <PricingView model={model} /> : null}
+        {chapter.kind === "pricing" ? (
+          <PricingView
+            model={model}
+            items={segment.pricingItems}
+            showTotal={segment.pricingShowTotal ?? true}
+          />
+        ) : null}
         {segment.isLastChunk && chapter.attachments.length > 0 ? (
           <section className="proposal-attachments">
             <h3>Supporting documents</h3>
@@ -731,7 +750,7 @@ export function ProposalReader({
   className?: string
 }) {
   const book = useMemo(() => composeProposalBook(model), [model])
-  const sheets = useMemo(() => buildReaderSheets(book.chapters), [book.chapters])
+  const sheets = useMemo(() => buildReaderSheets(book.chapters, model.pricing), [book.chapters, model.pricing])
   const chapterStarts = useMemo(() => chapterStartSheetIndex(sheets), [sheets])
   const chapterIndexByKey = useMemo(
     () => new Map(book.chapters.map((chapter, index) => [chapter.key, index])),
