@@ -153,8 +153,8 @@ export default function VatReturnsPage() {
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-100">
                       {monthlyReturns.map((monthReturn) => {
-                        const outputTotal = monthReturn.output_nhil + monthReturn.output_getfund + monthReturn.output_vat
-                        const inputTotal = monthReturn.input_nhil + monthReturn.input_getfund + monthReturn.input_vat
+                        const outputTotal = monthReturn.output_nhil + monthReturn.output_getfund + monthReturn.output_covid + monthReturn.output_vat
+                        const inputTotal = monthReturn.input_nhil + monthReturn.input_getfund + monthReturn.input_covid + monthReturn.input_vat
                         const filed = filedByMonth[monthReturn.month]
                         return (
                           <tr key={monthReturn.month} className="hover:bg-gray-50 transition-colors">
@@ -367,6 +367,12 @@ export default function VatReturnsPage() {
                         <span className="text-gray-500">GETFund <span className="text-xs">(levy)</span></span>
                         <span>{formatCedi(selectedMonth.output_getfund)}</span>
                       </div>
+                      {selectedMonth.output_covid > 0 && (
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">COVID-19 <span className="text-xs">(levy)</span></span>
+                          <span>{formatCedi(selectedMonth.output_covid)}</span>
+                        </div>
+                      )}
                       <div className="flex justify-between font-semibold border-t pt-1 mt-1">
                         <span>VAT (15%)</span>
                         <span>{formatCedi(selectedMonth.output_vat)}</span>
@@ -384,6 +390,12 @@ export default function VatReturnsPage() {
                         <span className="text-gray-500">GETFund <span className="text-xs">(levy)</span></span>
                         <span>{formatCedi(selectedMonth.input_getfund)}</span>
                       </div>
+                      {selectedMonth.input_covid > 0 && (
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">COVID-19 <span className="text-xs">(levy)</span></span>
+                          <span>{formatCedi(selectedMonth.input_covid)}</span>
+                        </div>
+                      )}
                       <div className="flex justify-between font-semibold border-t pt-1 mt-1">
                         <span>VAT (15%)</span>
                         <span>{formatCedi(selectedMonth.input_vat)}</span>
