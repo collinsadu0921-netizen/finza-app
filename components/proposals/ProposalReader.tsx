@@ -372,6 +372,7 @@ function ChapterPage({
 }
 
 const READER_CSS = `
+  @import url("https://fonts.googleapis.com/css2?family=Gelasio:ital,wght@0,400;0,600;1,400&display=swap");
   .proposal-reader {
     --pp-page-shadow: 0 24px 70px -34px rgba(15, 23, 42, 0.38);
     color: var(--pp-ink);

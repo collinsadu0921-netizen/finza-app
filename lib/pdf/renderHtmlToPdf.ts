@@ -184,6 +184,21 @@ export async function renderHtmlToPdfBuffer(
       // can clip or omit blocks (e.g. quote terms below totals) in headless Chromium page.pdf().
       await page.emulateMediaType("screen")
       await page.setContent(html, { waitUntil: "load", timeout: 45_000 })
+      // Proposal PDFs use Gelasio for editorial serif typography because the
+      // serverless Chromium image only ships Open Sans. Wait for the webfont
+      // before printing so Chromium does not embed a sans fallback.
+      await page.evaluate(async () => {
+        try {
+          await Promise.all([
+            document.fonts.load("400 12pt Gelasio"),
+            document.fonts.load("600 12pt Gelasio"),
+            document.fonts.load("italic 400 12pt Gelasio"),
+          ])
+          await document.fonts.ready
+        } catch {
+          /* fall back to the declared system stack */
+        }
+      })
       const margin = {
         top: options?.margin?.top ?? "8mm",
         right: options?.margin?.right ?? "8mm",

@@ -147,6 +147,12 @@ describe("buildProposalHtmlForPdf", () => {
     expect(long).not.toContain("pdf-pricing--premium_v1 pdf-pricing--keep")
   })
 
+  it("loads the editorial serif webfont used by the PDF cover and headings", () => {
+    const html = buildProposalHtmlForPdf(model())
+    expect(html).toContain("fonts.googleapis.com/css2?family=Gelasio")
+    expect(html).toContain("--pdf-heading-font: Gelasio")
+  })
+
   it("renders an accepted decision without empty signature lines", () => {
     const html = buildProposalHtmlForPdf(
       model({
