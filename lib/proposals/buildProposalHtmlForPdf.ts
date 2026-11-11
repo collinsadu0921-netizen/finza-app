@@ -114,7 +114,7 @@ function coverHtml(book: ProposalBook, coverImageDataUri?: string): string {
     }</div>
     <div class="pdf-cover-inner">
       <div class="pdf-cover-brand">
-        ${logo ? `<img class="pdf-cover-logo" src="${logo}" alt="" />` : ""}
+        ${logo ? `<span class="doc-brand-logo"><img class="pdf-cover-logo logo" src="${logo}" alt="" /></span>` : ""}
         <div class="pdf-cover-business">${escapeHtml(cover.businessName)}</div>
       </div>
       <div class="pdf-cover-copy">
@@ -496,6 +496,13 @@ const BASE_CSS = `
   .pdf-cover--classic .pdf-cover-art { opacity: 0; }
   .pdf-cover-inner { position: relative; z-index: 1; display: flex; flex-direction: column; min-height: 222mm; }
   .pdf-cover-brand { display: flex; align-items: center; gap: 10mm; }
+  /* finza-regression:pdf-logo-white-backing — same Chromium transparent-PNG issue as financial documents */
+  .doc-brand-logo {
+    display: inline-block;
+    line-height: 0;
+    background-color: #ffffff;
+  }
+  .doc-brand-logo .logo { display: block; background-color: #ffffff; }
   .pdf-cover-logo { max-height: 16mm; max-width: 46mm; object-fit: contain; background: #fff; padding: 1.5mm; }
   .pdf-cover-business { font-size: 11pt; font-weight: 600; letter-spacing: 0.04em; }
   .pdf-cover-copy { margin-top: auto; padding: 18mm 0; max-width: 150mm; }

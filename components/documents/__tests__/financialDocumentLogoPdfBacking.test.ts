@@ -36,7 +36,14 @@ describe("PDF / document logo opaque backing (transparent PNG regression)", () =
       title: "Test proposal",
       proposal_number: "P-1",
       status: "draft",
-      template_id: "t1",
+      template_id: "premium_v1",
+      presentation: {
+        templateId: "premium_v1",
+        accentColor: null,
+        typography: "editorial",
+        coverAssetId: null,
+        coverImageUrl: null,
+      },
       currency_code: "GHS",
       business: {
         name: "Acme",
@@ -46,6 +53,8 @@ describe("PDF / document logo opaque backing (transparent PNG regression)", () =
       sections: [{ type: "paragraph", text: "Hello." }],
       pricing: { mode: "none" },
       attachments: [],
+      created_at: "2026-01-15T00:00:00.000Z",
+      expires_at: null,
     }
     const html = buildProposalHtmlForPdf(model)
     expect(html).toContain("finza-regression:pdf-logo-white-backing")
