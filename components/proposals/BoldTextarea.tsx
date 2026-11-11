@@ -74,7 +74,7 @@ export function BoldTextarea({
         onKeyDown={handleKeyDown}
       />
       {value.includes("**") ? (
-        <div className="mt-1.5 rounded-md border border-slate-100 bg-slate-50 px-2.5 py-1.5 text-xs leading-relaxed text-slate-700">
+        <div className="mt-1.5 whitespace-pre-wrap rounded-md border border-slate-100 bg-slate-50 px-2.5 py-1.5 text-xs leading-relaxed text-slate-700">
           <span className="mr-1.5 font-semibold uppercase tracking-wide text-slate-400">Preview</span>
           <InlineFormattedText text={value} />
         </div>
