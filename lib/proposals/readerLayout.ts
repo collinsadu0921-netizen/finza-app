@@ -2,6 +2,7 @@ import type { ProposalChapter } from "./composition"
 import type { ProposalRenderSection } from "./renderModel"
 import type { PricingPayload } from "./schema"
 import { getChapterLayout, proposalBlockWeight } from "./layout"
+import { splitRichTextDoc } from "./richText"
 
 type LineItem = Extract<PricingPayload, { mode: "line_items" }>["items"][number]
 
@@ -52,6 +53,14 @@ function chunkBlocks(blocks: ProposalRenderSection[]): ProposalRenderSection[][]
   }
 
   for (const block of blocks) {
+    if (block.type === "rich_text" && proposalBlockWeight(block) > MAX_CHUNK_WEIGHT) {
+      flush()
+      for (const doc of splitRichTextDoc(block.doc, MAX_CHUNK_WEIGHT - 40)) {
+        chunks.push([{ ...block, doc }])
+      }
+      continue
+    }
+
     if (block.type === "bullet_list" && proposalBlockWeight(block) > MAX_CHUNK_WEIGHT) {
       flush()
       let itemGroup: string[] = []

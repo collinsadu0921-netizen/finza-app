@@ -9,6 +9,7 @@ import type { ProposalTheme } from "./design"
 import { customPricingNotesToHtml } from "./parseCustomPricing"
 import { escapeHtml } from "./htmlEscape"
 import { GELASIO_400, GELASIO_400_ITALIC, GELASIO_600 } from "./gelasioFontData"
+import { richTextDocToHtml } from "./richText"
 
 const GELASIO_FONT_CSS = `
 @font-face {
@@ -127,11 +128,30 @@ function coverHtml(book: ProposalBook, coverImageDataUri?: string): string {
               )}</strong>${cover.customerEmail ? `<em>${escapeHtml(cover.customerEmail)}</em>` : ""}</div>`
             : ""
         }
+        ${
+          cover.preparedByName
+            ? `<div class="pdf-cover-sender">
+                <span>Prepared by</span>
+                <strong>${escapeHtml(cover.preparedByName)}</strong>
+                ${cover.preparedByTitle ? `<em>${escapeHtml(cover.preparedByTitle)}</em>` : ""}
+                <span class="pdf-cover-sender-org">${escapeHtml(
+                  cover.businessTradingName || cover.businessLegalName || cover.businessName
+                )}</span>
+                ${
+                  cover.preparedByEmail || cover.preparedByPhone
+                    ? `<span class="pdf-cover-sender-contact">${escapeHtml(
+                        [cover.preparedByEmail, cover.preparedByPhone].filter(Boolean).join(" · ")
+                      )}</span>`
+                    : ""
+                }
+              </div>`
+            : ""
+        }
       </div>
       <div class="pdf-cover-meta">
         ${coverMetaRow("Issued", dateLabel)}
         ${coverMetaRow("Valid until", expiresLabel)}
-        ${coverMetaRow("Prepared by", cover.businessTradingName || cover.businessLegalName || cover.businessName)}
+        ${cover.preparedByName ? "" : coverMetaRow("Prepared by", cover.businessTradingName || cover.businessLegalName || cover.businessName)}
       </div>
     </div>
   </section>`
@@ -153,6 +173,8 @@ function sectionHtml(section: ProposalRenderSection): string {
       return `<p class="pdf-paragraph${section.text.length <= 600 ? " pdf-paragraph--short" : ""}">${escapeHtml(
         section.text
       ).replace(/\n/g, "<br/>")}</p>`
+    case "rich_text":
+      return `<div class="pdf-rich-text">${richTextDocToHtml(section.doc)}</div>`
     case "bullet_list":
       return `<ul class="pdf-list${section.items.length <= 8 ? " pdf-list--short" : ""}">${section.items
         .map((item) => `<li>${escapeHtml(item)}</li>`)
@@ -515,6 +537,20 @@ const BASE_CSS = `
   .pdf-cover-client span, .pdf-cover-meta-row span { font-family: var(--pdf-eyebrow-font); font-size: 7pt; text-transform: uppercase; letter-spacing: 0.14em; color: var(--pdf-cover-muted); }
   .pdf-cover-client strong { font-size: 14pt; font-weight: 600; }
   .pdf-cover-client em { font-style: normal; font-size: 9pt; color: var(--pdf-cover-muted); }
+  .pdf-cover-sender {
+    display: flex; flex-direction: column; gap: 0.8mm; margin-top: 5mm; max-width: 140mm;
+    border-left: 1.5pt solid var(--pdf-accent); padding-left: 5mm;
+  }
+  .pdf-cover-sender > span:first-child { font-family: var(--pdf-eyebrow-font); font-size: 6.8pt; text-transform: uppercase; letter-spacing: 0.14em; color: var(--pdf-cover-muted); }
+  .pdf-cover-sender strong { font-family: var(--pdf-heading-font); font-size: 12pt; font-weight: 600; overflow-wrap: anywhere; }
+  .pdf-cover-sender em { font-style: italic; font-size: 8.5pt; color: var(--pdf-cover-muted); }
+  .pdf-cover-sender-org { font-size: 8.5pt; font-weight: 600; }
+  .pdf-cover-sender-contact { font-size: 8pt; color: var(--pdf-cover-muted); overflow-wrap: anywhere; }
+  .pdf-cover--minimal .pdf-cover-sender { border-left-color: var(--pdf-rule); }
+  .pdf-cover--minimal .pdf-cover-sender strong { font-weight: 500; }
+  .pdf-cover--modern .pdf-cover-sender > span:first-child { color: var(--pdf-accent); }
+  .pdf-cover--premium .pdf-cover-sender { border-left-color: rgba(255,255,255,0.42); }
+  .pdf-cover--premium .pdf-cover-sender strong { font-weight: 500; }
   .pdf-cover-meta { display: flex; flex-wrap: wrap; gap: 6mm 16mm; border-top: 1px solid rgba(255,255,255,0.18); padding-top: 6mm; }
   .pdf-cover--minimal .pdf-cover-meta { border-color: var(--pdf-rule); }
   .pdf-cover-meta-row { display: flex; flex-direction: column; gap: 1mm; }
@@ -558,6 +594,16 @@ const BASE_CSS = `
   .pdf-list { margin: 2mm 0 4mm 5mm; padding: 0; }
   .pdf-list--short { break-inside: avoid; page-break-inside: avoid; }
   .pdf-list li { margin: 0 0 1.2mm; padding-left: 1mm; break-inside: avoid; }
+  .pdf-rich-text > * + * { margin-top: 2.6mm; }
+  .pdf-rich-paragraph { margin: 0; }
+  .pdf-rich-heading { margin: 5mm 0 1.5mm; font-family: var(--pdf-heading-font); font-size: 12pt; line-height: 1.25; font-weight: 600; color: var(--pdf-ink); break-after: avoid; page-break-after: avoid; }
+  .pdf-rich-subheading { margin: 4mm 0 1.2mm; font-family: var(--pdf-heading-font); font-size: 10.8pt; line-height: 1.3; font-weight: 600; color: var(--pdf-ink); break-after: avoid; page-break-after: avoid; }
+  .pdf-rich-list { margin-top: 0; margin-bottom: 0; }
+  .pdf-rich-list--ordered { list-style: decimal; }
+  .pdf-rich-text a { color: var(--pdf-accent); font-weight: 600; text-decoration: underline; overflow-wrap: anywhere; }
+  .pdf-rich-text strong { font-weight: 700; }
+  .pdf-rich-text em { font-style: italic; }
+  .pdf-rich-text u { text-decoration: underline; text-underline-offset: 1pt; }
   .pdf-chapter--two-col .pdf-list { columns: 2; column-gap: 10mm; }
   .pdf-chapter--timeline .pdf-list { list-style: none; margin-left: 0; border-left: 1px solid var(--pdf-rule); padding-left: 4mm; }
   .pdf-chapter--timeline .pdf-list li { position: relative; padding-left: 3mm; }

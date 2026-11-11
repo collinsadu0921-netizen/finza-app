@@ -12,6 +12,7 @@ import {
 } from "@/lib/proposals/pricingSectionCopy"
 import { formatMoney } from "@/lib/money"
 import BusinessLogoDisplay from "@/components/BusinessLogoDisplay"
+import { RichTextContent } from "@/components/proposals/RichTextContent"
 
 function CustomPricingBlocks({ notes }: { notes: string }) {
   const chunks = useMemo(() => chunkCustomPricingForDisplay(parseCustomPricingNotes(notes)), [notes])
@@ -185,6 +186,8 @@ function renderSectionBlock(s: ProposalRenderSection, key: string, doc: boolean)
           {s.text}
         </p>
       )
+    case "rich_text":
+      return <RichTextContent key={key} doc={s.doc} className={doc ? "mt-4" : ""} />
     case "bullet_list":
       return (
         <ul key={key} className={`list-disc pl-5 ${doc ? "mt-4 space-y-2 text-[15px] text-slate-700" : "space-y-1 text-sm"}`}>
@@ -351,8 +354,14 @@ export function ProposalDocumentView({
               <div className="sm:pt-0.5">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Prepared by</p>
                 <p className="mt-1 text-lg font-semibold leading-snug tracking-tight text-slate-900 sm:text-xl lg:whitespace-nowrap">
-                  {bizLabel}
+                  {model.sender?.name || bizLabel}
                 </p>
+                {model.sender ? (
+                  <p className="text-xs leading-snug text-slate-600">
+                    {model.sender.title ? `${model.sender.title} · ` : ""}
+                    {bizLabel}
+                  </p>
+                ) : null}
               </div>
             </div>
             <div className="min-w-0 sm:px-2 sm:text-center">
@@ -386,7 +395,8 @@ export function ProposalDocumentView({
               />
               <div>
                 <h1 className="text-2xl font-bold tracking-tight text-slate-900">{model.title || "Proposal"}</h1>
-                <p className="mt-1.5 text-sm font-semibold text-slate-800">{bizLabel}</p>
+                <p className="mt-1.5 text-sm font-semibold text-slate-800">{model.sender?.name || bizLabel}</p>
+                {model.sender ? <p className="text-xs text-slate-600">{bizLabel}</p> : null}
                 {model.proposal_number ? (
                   <p className="mt-1 text-xs font-medium uppercase tracking-wide text-slate-400">Ref {model.proposal_number}</p>
                 ) : null}

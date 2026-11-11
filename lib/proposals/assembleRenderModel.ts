@@ -21,6 +21,10 @@ export type ProposalRow = {
   pricing_payload: unknown
   currency_code: string | null
   public_token: string | null
+  prepared_by_name?: string | null
+  prepared_by_title?: string | null
+  prepared_by_email?: string | null
+  prepared_by_phone?: string | null
   created_at?: string | null
   expires_at?: string | null
   accepted_at?: string | null
@@ -87,6 +91,14 @@ export async function assembleProposalRenderModel(
     currency_code: input.proposal.currency_code,
     business: input.business,
     customer: input.customer,
+    sender: input.proposal.prepared_by_name
+      ? {
+          name: input.proposal.prepared_by_name,
+          title: input.proposal.prepared_by_title ?? null,
+          email: input.proposal.prepared_by_email ?? null,
+          phone: input.proposal.prepared_by_phone ?? null,
+        }
+      : null,
     sections,
     pricing,
     created_at: input.proposal.created_at ?? null,

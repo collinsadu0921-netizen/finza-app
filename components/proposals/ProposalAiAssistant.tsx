@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import type { ProposalSectionBlock } from "@/lib/proposals/schema"
+import { richTextDocToPlainText } from "@/lib/proposals/richText"
 import type {
   ProposalAiPreview,
   ProposalAiResponse,
@@ -178,7 +179,7 @@ export function ProposalAiAssistant({
     if (!preview) return
     if (result?.ok && busyAction === null) {
       const confirmed = window.confirm(
-        "Apply these AI changes to the editor? Nothing is saved until you click Save. Review the affected chapters before saving."
+        "Apply these AI changes to the editor? Nothing is saved until you click Save. Review the affected chapters before saving. AI replacement resets formatting only in chapters it replaces; other chapters keep their formatting."
       )
       if (!confirmed) return
       onApply(preview)
@@ -432,6 +433,13 @@ export function ProposalAiAssistant({
                             return (
                               <p key={index} className="text-xs leading-relaxed text-slate-700">
                                 {block.text}
+                              </p>
+                            )
+                          }
+                          if (block.type === "rich_text") {
+                            return (
+                              <p key={index} className="whitespace-pre-wrap text-xs leading-relaxed text-slate-700">
+                                {richTextDocToPlainText(block.doc)}
                               </p>
                             )
                           }

@@ -24,6 +24,7 @@ function model(overrides: Partial<ProposalRenderModel> = {}): ProposalRenderMode
       default_currency: "GHS",
     },
     customer: { name: "Example Client", email: "client@example.com" },
+    sender: null,
     sections: [
       { type: "heading", level: 1, text: "Proposal" },
       { type: "paragraph", text: "Thank you for the opportunity." },

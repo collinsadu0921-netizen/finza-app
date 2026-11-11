@@ -15,6 +15,10 @@ export type ProposalCover = {
   coverImageUrl: string | null
   customerName: string | null
   customerEmail: string | null
+  preparedByName: string | null
+  preparedByTitle: string | null
+  preparedByEmail: string | null
+  preparedByPhone: string | null
   createdAt: string | null
   expiresAt: string | null
   accent: string
@@ -251,6 +255,10 @@ export function composeProposalBook(model: ProposalRenderModel): ProposalBook {
       coverImageUrl: model.presentation.coverImageUrl ?? null,
       customerName: model.customer?.name ?? null,
       customerEmail: model.customer?.email ?? null,
+      preparedByName: model.sender?.name ?? null,
+      preparedByTitle: model.sender?.title ?? null,
+      preparedByEmail: model.sender?.email ?? null,
+      preparedByPhone: model.sender?.phone ?? null,
       createdAt: model.created_at ?? null,
       expiresAt: model.expires_at ?? null,
       accent: theme.accent,

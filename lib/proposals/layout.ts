@@ -1,4 +1,5 @@
 import type { ProposalChapter } from "./composition"
+import { richTextDocWeight, textFromRuns } from "./richText"
 
 export type ProposalChapterLayout = {
   weight: number
@@ -21,6 +22,8 @@ function blockWeight(block: ProposalChapter["blocks"][number]): number {
       return 60
     case "paragraph":
       return Math.min(900, block.text.trim().length)
+    case "rich_text":
+      return Math.min(2_600, richTextDocWeight(block.doc))
     case "bullet_list":
       return block.items.reduce((sum, item) => sum + Math.min(240, item.length + 35), 0)
     case "image":
@@ -47,9 +50,15 @@ export function getChapterLayout(chapter: ProposalChapter, index: number): Propo
     (chapter.kind === "acceptance" ? 500 : 0) +
     chapter.attachments.length * 80
 
-  const bulletItems = chapter.blocks.flatMap((block) =>
-    block.type === "bullet_list" ? block.items : []
-  )
+  const bulletItems = chapter.blocks.flatMap((block) => {
+    if (block.type === "bullet_list") return block.items
+    if (block.type !== "rich_text") return []
+    return block.doc.blocks.flatMap((item) =>
+      item.type === "bullet_list" || item.type === "ordered_list"
+        ? item.items.map((runs) => textFromRuns(runs))
+        : []
+    )
+  })
   const averageBulletLength =
     bulletItems.length > 0
       ? bulletItems.reduce((sum, item) => sum + item.length, 0) / bulletItems.length

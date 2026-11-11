@@ -1,4 +1,5 @@
 import type { ProposalRenderSection } from "./renderModel"
+import { richTextDocToPlainText, type ProposalRichTextDoc } from "./richText"
 
 /** Exact placeholder copy shipped by Finza's starter templates. */
 const GUIDANCE_TEXTS = new Set(
@@ -41,6 +42,7 @@ export function isGuidanceText(value: string | null | undefined): boolean {
 function isGuidanceBlock(block: ProposalRenderSection): boolean {
   if (block.guidance === true) return true
   if (block.type === "heading" || block.type === "paragraph") return isGuidanceText(block.text)
+  if (block.type === "rich_text") return isGuidanceText(richTextDocToPlainText(block.doc))
   if (block.type === "bullet_list") {
     return block.items.length > 0 && block.items.every((item) => isGuidanceText(item))
   }
@@ -60,6 +62,7 @@ export function stripGuidance(blocks: ProposalRenderSection[]): ProposalRenderSe
       if (block.type === "paragraph") return Boolean(block.text.trim())
       if (block.type === "bullet_list") return block.items.length > 0
       if (block.type === "heading") return Boolean(block.text.trim())
+      if (block.type === "rich_text") return Boolean(richTextDocToPlainText(block.doc).trim())
       return true
     })
 }
@@ -73,6 +76,7 @@ type PublishableBlock = {
   type: string
   text?: string
   items?: string[]
+  doc?: unknown
   hidden?: boolean
   guidance?: boolean
 }
@@ -85,6 +89,9 @@ function isGuidanceBlockLike(block: PublishableBlock): boolean {
   }
   if (block.type === "bullet_list" && Array.isArray(block.items)) {
     return block.items.length > 0 && block.items.every((item) => isGuidanceText(item))
+  }
+  if (block.type === "rich_text") {
+    return isGuidanceText(richTextDocToPlainText(block.doc as ProposalRichTextDoc | null | undefined))
   }
   return false
 }
@@ -110,6 +117,7 @@ export function validateProposalSectionsForPublish(
   const meaningful = visible.filter((section) => {
     if (section.type === "heading" || section.type === "divider") return false
     if (section.type === "paragraph") return Boolean(section.text?.trim())
+    if (section.type === "rich_text") return Boolean(richTextDocToPlainText(section.doc as ProposalRichTextDoc | null | undefined).trim())
     if (section.type === "bullet_list") {
       return (section.items ?? []).some((item) => item.trim() && !isGuidanceText(item))
     }

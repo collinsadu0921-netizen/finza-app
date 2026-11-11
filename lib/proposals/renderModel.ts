@@ -7,6 +7,7 @@ import {
   type ProposalTypography,
 } from "./design"
 import { normalizeTemplateId, type ProposalTemplateId } from "./templates"
+import { splitRichTextDoc, type ProposalRichTextDoc } from "./richText"
 
 export type ProposalRenderBusiness = {
   name: string
@@ -26,9 +27,18 @@ export type ProposalRenderCustomer = {
   phone?: string | null
 }
 
+/** Per-proposal snapshot. The business remains the official issuer. */
+export type ProposalRenderSender = {
+  name: string
+  title?: string | null
+  email?: string | null
+  phone?: string | null
+}
+
 export type ProposalRenderSection =
   | { type: "heading"; level: number; text: string; id?: string; hidden?: boolean; guidance?: boolean }
   | { type: "paragraph"; text: string; id?: string; hidden?: boolean; guidance?: boolean }
+  | { type: "rich_text"; doc: ProposalRichTextDoc; id?: string; hidden?: boolean; guidance?: boolean }
   | { type: "bullet_list"; items: string[]; id?: string; hidden?: boolean; guidance?: boolean }
   | { type: "image"; src: string; caption?: string; assetId: string; width?: number; height?: number; unavailable?: boolean; id?: string; hidden?: boolean; guidance?: boolean }
   | { type: "gallery"; images: { src: string; assetId: string; width?: number; height?: number; unavailable?: boolean }[]; caption?: string; id?: string; hidden?: boolean; guidance?: boolean }
@@ -61,6 +71,7 @@ export type ProposalRenderModel = {
   currency_code: string
   business: ProposalRenderBusiness
   customer: ProposalRenderCustomer | null
+  sender: ProposalRenderSender | null
   sections: ProposalRenderSection[]
   pricing: PricingPayload
   attachments: ProposalRenderAttachment[]
@@ -93,6 +104,23 @@ function blockId(b: ProposalSectionBlock): string | undefined {
 }
 
 /** ISO code for display: explicit proposal override, else business default, else GHS. */
+function trimmedOrNull(value: unknown): string | null {
+  if (typeof value !== "string") return null
+  const text = value.trim()
+  return text || null
+}
+
+function normalizeRenderSender(input: ProposalRenderSender | null | undefined): ProposalRenderSender | null {
+  const name = trimmedOrNull(input?.name)
+  if (!name) return null
+  return {
+    name,
+    title: trimmedOrNull(input?.title),
+    email: trimmedOrNull(input?.email),
+    phone: trimmedOrNull(input?.phone),
+  }
+}
+
 function resolveProposalDisplayCurrency(
   proposalCurrency: string | null | undefined,
   business: ProposalRenderBusiness
@@ -115,6 +143,7 @@ export function normalizeProposalForRender(input: {
   currency_code?: string | null
   business: ProposalRenderBusiness
   customer: ProposalRenderCustomer | null
+  sender?: ProposalRenderSender | null
   sections: ProposalSectionBlock[]
   pricing: PricingPayload
   created_at?: string | null
@@ -173,6 +202,19 @@ export function normalizeProposalForRender(input: {
       case "paragraph":
         sections.push({ type: "paragraph", text: b.text, id: blockId(b), hidden: b.hidden, guidance: b.guidance })
         break
+      case "rich_text": {
+        const parts = splitRichTextDoc(b.doc, 1_100)
+        parts.forEach((doc, index) => {
+          sections.push({
+            type: "rich_text",
+            doc,
+            id: index === 0 ? blockId(b) : undefined,
+            hidden: b.hidden,
+            guidance: b.guidance,
+          })
+        })
+        break
+      }
       case "bullet_list":
         sections.push({ type: "bullet_list", items: b.items, id: blockId(b), hidden: b.hidden, guidance: b.guidance })
         break
@@ -254,6 +296,7 @@ export function normalizeProposalForRender(input: {
     currency_code: resolveProposalDisplayCurrency(input.currency_code, input.business),
     business: input.business,
     customer: input.customer,
+    sender: normalizeRenderSender(input.sender),
     sections,
     pricing: input.pricing,
     attachments,

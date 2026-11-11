@@ -27,6 +27,7 @@ import {
 } from "@/lib/proposals/readerLayout"
 import { chunkCustomPricingForDisplay, parseCustomPricingNotes } from "@/lib/proposals/parseCustomPricing"
 import type { ProposalRenderModel, ProposalRenderSection } from "@/lib/proposals/renderModel"
+import { RichTextContent } from "@/components/proposals/RichTextContent"
 
 type ReaderPage =
   | { kind: "cover"; key: "cover" }
@@ -256,6 +257,8 @@ function BlockView({ block }: { block: ProposalRenderSection }) {
     }
     case "paragraph":
       return <p className="proposal-body-text">{block.text}</p>
+    case "rich_text":
+      return <RichTextContent doc={block.doc} />
     case "bullet_list":
       return (
         <ul className="proposal-bullet-list">
@@ -341,11 +344,28 @@ function CoverPage({ book }: { book: ProposalBook }) {
               {cover.customerEmail ? <em>{cover.customerEmail}</em> : null}
             </div>
           ) : null}
+          {cover.preparedByName ? (
+            <div className="proposal-cover-sender">
+              <span>Prepared by</span>
+              <strong>{cover.preparedByName}</strong>
+              {cover.preparedByTitle ? <em>{cover.preparedByTitle}</em> : null}
+              <span className="proposal-cover-sender-org">
+                {cover.businessTradingName || cover.businessLegalName || cover.businessName}
+              </span>
+              {cover.preparedByEmail || cover.preparedByPhone ? (
+                <span className="proposal-cover-sender-contact">
+                  {[cover.preparedByEmail, cover.preparedByPhone].filter(Boolean).join(" · ")}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
         </div>
         <div className="proposal-cover-meta">
           {issued ? <div><span>Issued</span><strong>{issued}</strong></div> : null}
           {expires ? <div><span>Valid until</span><strong>{expires}</strong></div> : null}
-          <div><span>Prepared by</span><strong>{cover.businessTradingName || cover.businessLegalName || cover.businessName}</strong></div>
+          {!cover.preparedByName ? (
+            <div><span>Prepared by</span><strong>{cover.businessTradingName || cover.businessLegalName || cover.businessName}</strong></div>
+          ) : null}
         </div>
       </div>
     </article>
@@ -583,6 +603,15 @@ const READER_CSS = `
   .proposal-cover-client span, .proposal-cover-meta span { font-family: var(--pp-eyebrow-font); font-size: 9px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--pp-cover-muted); }
   .proposal-cover-client strong { font-size: 17px; }
   .proposal-cover-client em { font-style: normal; font-size: 12px; color: var(--pp-cover-muted); }
+  .proposal-cover-sender {
+    display: flex; flex-direction: column; gap: 2px; margin-top: 18px; max-width: 42ch;
+    border-left: 1px solid color-mix(in srgb, var(--pp-accent) 70%, transparent); padding-left: 14px;
+  }
+  .proposal-cover-sender > span:first-child { font-family: var(--pp-eyebrow-font); font-size: 9px; text-transform: uppercase; letter-spacing: .12em; color: var(--pp-cover-muted); }
+  .proposal-cover-sender strong { font-family: var(--pp-heading-font); font-size: 16px; line-height: 1.2; overflow-wrap: anywhere; }
+  .proposal-cover-sender em { font-style: italic; font-size: 11px; color: var(--pp-cover-muted); }
+  .proposal-cover-sender-org { font-size: 11px; font-weight: 600; }
+  .proposal-cover-sender-contact { font-size: 10.5px; color: var(--pp-cover-muted); overflow-wrap: anywhere; }
   .proposal-cover-meta { display: flex; flex-wrap: wrap; gap: 18px 32px; border-top: 1px solid rgba(255,255,255,0.2); padding-top: 16px; }
   .proposal-cover-meta div { display: flex; flex-direction: column; gap: 3px; }
   .proposal-cover-meta strong { font-size: 11px; font-weight: 600; }
@@ -735,6 +764,13 @@ const READER_CSS = `
   .proposal-reader[data-template="premium_v1"] .proposal-section-heading { font-weight: 500; }
   .proposal-reader[data-template="premium_v1"] .proposal-body-text { font-size: 15px; line-height: 1.78; }
   .proposal-reader[data-template="premium_v1"] .proposal-chapter-head { border-bottom-color: color-mix(in srgb, var(--pp-accent) 35%, var(--pp-rule)); }
+  .proposal-reader[data-template="minimal_v1"] .proposal-cover-sender { border-left-color: var(--pp-rule); }
+  .proposal-reader[data-template="minimal_v1"] .proposal-cover-sender strong { font-weight: 500; }
+  .proposal-reader[data-template="modern_v1"] .proposal-cover-sender { border-left-width: 3px; }
+  .proposal-reader[data-template="modern_v1"] .proposal-cover-sender > span:first-child { color: var(--pp-accent); }
+  .proposal-reader[data-template="premium_v1"] .proposal-cover-sender { border-left-color: color-mix(in srgb, var(--pp-cover-ink) 45%, transparent); }
+  .proposal-reader[data-template="premium_v1"] .proposal-cover-sender strong { font-weight: 500; }
+  .proposal-reader[data-template="premium_v1"] .proposal-cover-sender em { font-family: var(--pp-heading-font); }
 `
 
 function spreadForPage(pageIndex: number): number {

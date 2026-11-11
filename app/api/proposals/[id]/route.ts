@@ -82,7 +82,7 @@ export async function GET(
     const { data: proposal, error: pErr } = await supabase
       .from("proposals")
       .select(
-        "id, business_id, customer_id, title, proposal_number, status, template_id, brand_accent_color, cover_asset_id, typography, sections, pricing_mode, pricing_payload, currency_code, public_token, expires_at, sent_at, viewed_at, accepted_at, rejected_at, rejected_reason, converted_estimate_id, converted_invoice_id, converted_at, converted_invoice_at, created_at, updated_at"
+        "id, business_id, customer_id, title, proposal_number, status, template_id, brand_accent_color, cover_asset_id, typography, prepared_by_name, prepared_by_title, prepared_by_email, prepared_by_phone, sections, pricing_mode, pricing_payload, currency_code, public_token, expires_at, sent_at, viewed_at, accepted_at, rejected_at, rejected_reason, converted_estimate_id, converted_invoice_id, converted_at, converted_invoice_at, created_at, updated_at"
       )
       .eq("id", proposalId)
       .eq("business_id", businessId)
@@ -147,6 +147,22 @@ const putSchema = z
     brand_accent_color: z.string().max(7).nullable().optional(),
     cover_asset_id: z.string().uuid().nullable().optional(),
     typography: z.enum(["sans", "serif", "editorial"]).optional(),
+    prepared_by_name: z.string().trim().max(200).nullable().optional(),
+    prepared_by_title: z.string().trim().max(160).nullable().optional(),
+    prepared_by_email: z
+      .string()
+      .trim()
+      .max(254)
+      .refine((value) => !value || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value), "Invalid sender email")
+      .nullable()
+      .optional(),
+    prepared_by_phone: z
+      .string()
+      .trim()
+      .max(50)
+      .refine((value) => !value || /^[0-9+()\-\s.]+$/.test(value), "Invalid sender phone")
+      .nullable()
+      .optional(),
     pricing_mode: z.enum(["none", "fixed", "line_items", "custom"]).optional(),
     pricing_payload: z.unknown().optional(),
     currency_code: z.string().max(8).nullable().optional(),
@@ -289,6 +305,18 @@ export async function PUT(
     if (body.data.typography !== undefined) {
       patch.typography = normalizeTypography(body.data.typography)
     }
+    if (body.data.prepared_by_name !== undefined) {
+      patch.prepared_by_name = body.data.prepared_by_name?.trim() || null
+    }
+    if (body.data.prepared_by_title !== undefined) {
+      patch.prepared_by_title = body.data.prepared_by_title?.trim() || null
+    }
+    if (body.data.prepared_by_email !== undefined) {
+      patch.prepared_by_email = body.data.prepared_by_email?.trim() || null
+    }
+    if (body.data.prepared_by_phone !== undefined) {
+      patch.prepared_by_phone = body.data.prepared_by_phone?.trim() || null
+    }
     if (body.data.currency_code !== undefined) {
       patch.currency_code = body.data.currency_code?.trim() || null
     }
@@ -311,7 +339,7 @@ export async function PUT(
       .update(patch)
       .eq("id", proposalId)
       .eq("business_id", businessId)
-      .select("id, title, status, template_id, brand_accent_color, cover_asset_id, typography, customer_id, sections, pricing_mode, pricing_payload, currency_code, updated_at")
+      .select("id, title, status, template_id, brand_accent_color, cover_asset_id, typography, prepared_by_name, prepared_by_title, prepared_by_email, prepared_by_phone, customer_id, sections, pricing_mode, pricing_payload, currency_code, updated_at")
       .single()
 
     if (error || !row) {

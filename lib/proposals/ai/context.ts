@@ -1,7 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
-import { parseProposalSections, pricingModeSchema, type PricingMode } from "@/lib/proposals/schema"
+import { parseProposalSections, pricingModeSchema, type PricingMode, type ProposalSectionBlock } from "@/lib/proposals/schema"
 import { pricingPayloadForRender } from "@/lib/proposals/pricingForDb"
 import { normalizeProposalStatus, type ProposalStatus } from "@/lib/proposals/proposalState"
+import { richTextDocToPlainText } from "@/lib/proposals/richText"
 
 export type ProposalAiBusinessContext = {
   id: string
@@ -226,8 +227,30 @@ export async function loadProposalAiContext(
   }
 }
 
+function aiReadableSections(sections: ProposalSectionBlock[]): ProposalSectionBlock[] {
+  return sections.map((section) => {
+    if (section.type !== "rich_text") return section
+    return {
+      type: "paragraph",
+      text: richTextDocToPlainText(section.doc),
+      ...(section.id ? { id: section.id } : {}),
+      ...(section.hidden ? { hidden: true } : {}),
+    }
+  })
+}
+
 /** Reduce context to the minimum needed by the model and avoid unnecessary PII. */
 export function compactProposalAiContext(context: ProposalAiContext, snapshot?: unknown) {
+  const snapshotRecord =
+    snapshot && typeof snapshot === "object" ? (snapshot as Record<string, unknown>) : null
+  const normalizedSnapshot = snapshotRecord
+    ? {
+        ...snapshotRecord,
+        sections: Array.isArray(snapshotRecord.sections)
+          ? aiReadableSections(snapshotRecord.sections as ProposalSectionBlock[])
+          : snapshotRecord.sections,
+      }
+    : null
   return {
     business: context.business,
     proposal: {
@@ -241,12 +264,12 @@ export function compactProposalAiContext(context: ProposalAiContext, snapshot?: 
       name: customer.name,
     })),
     services: context.services,
-    currentDraft: snapshot ?? {
+    currentDraft: normalizedSnapshot ?? {
       title: context.proposal.title,
       customer_id: context.proposal.customerId,
       template_id: context.proposal.templateId,
       currency_code: context.proposal.currencyCode,
-      sections: context.proposal.sections,
+      sections: aiReadableSections(context.proposal.sections),
       pricing_mode: context.proposal.pricingMode,
       pricing_payload: context.proposal.pricingPayload,
     },

@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { proposalRichTextDocSchema } from "./richText"
 
 /** Structured section blocks stored on `proposals.sections` (JSONB). */
 export const proposalSectionBlockSchema = z.discriminatedUnion("type", [
@@ -21,6 +22,13 @@ export const proposalSectionBlockSchema = z.discriminatedUnion("type", [
     type: z.literal("bullet_list"),
     id: z.string().min(1).optional(),
     items: z.array(z.string()),
+    hidden: z.boolean().optional(),
+    guidance: z.boolean().optional(),
+  }),
+  z.object({
+    type: z.literal("rich_text"),
+    id: z.string().min(1).optional(),
+    doc: proposalRichTextDocSchema,
     hidden: z.boolean().optional(),
     guidance: z.boolean().optional(),
   }),

@@ -17,6 +17,15 @@ import {
   proposalStaffOutboundChannelsAllowed,
 } from "@/lib/proposals/proposalState"
 import { formatMoney } from "@/lib/money"
+import { RichTextEditor } from "@/components/proposals/RichTextEditor"
+import {
+  emptyRichTextDoc,
+  normalizeRichTextDoc,
+  plainTextToRichTextDoc,
+  richTextDocToPlainText,
+  textFromRuns,
+  type ProposalRichTextDoc,
+} from "@/lib/proposals/richText"
 import { ExportLink } from "@/components/ui/ExportButton"
 import {
   PROPOSAL_TEMPLATE_META,
@@ -141,6 +150,7 @@ function SectionCard({
 const BLOCK_LABEL: Record<ProposalSectionBlock["type"], string> = {
   heading: "Heading",
   paragraph: "Paragraph",
+  rich_text: "Rich text",
   bullet_list: "Bullet list",
   image: "Image",
   gallery: "Gallery",
@@ -173,7 +183,11 @@ function segmentsFromSections(sections: ProposalSectionBlock[]): EditorSegment[]
   while (i < sections.length) {
     const s = sections[i]
     const next = sections[i + 1]
-    if (s.type === "heading" && s.level === 2 && next?.type === "paragraph") {
+    if (
+      s.type === "heading" &&
+      s.level === 2 &&
+      (next?.type === "paragraph" || next?.type === "rich_text")
+    ) {
       out.push({ kind: "pair", headIdx: i, paraIdx: i + 1 })
       i += 2
     } else {
@@ -182,6 +196,37 @@ function segmentsFromSections(sections: ProposalSectionBlock[]): EditorSegment[]
     }
   }
   return out
+}
+
+function legacyBulletDoc(items: string[]): ProposalRichTextDoc {
+  const normalized = items.map((item) => item.trim()).filter(Boolean)
+  if (normalized.length === 0) return emptyRichTextDoc()
+  return {
+    version: 1,
+    blocks: [
+      {
+        type: "bullet_list",
+        items: normalized.map((item) => {
+          const first = plainTextToRichTextDoc(item).blocks[0]
+          return first && first.type === "paragraph" ? first.runs : [{ type: "text" as const, text: item }]
+        }),
+      },
+    ],
+  }
+}
+
+function bodyDocFromSection(block: ProposalSectionBlock): ProposalRichTextDoc {
+  if (block.type === "rich_text") return normalizeRichTextDoc(block.doc)
+  if (block.type === "paragraph") return plainTextToRichTextDoc(block.text)
+  if (block.type === "bullet_list") return legacyBulletDoc(block.items)
+  return emptyRichTextDoc()
+}
+
+function bodyPlainText(block: ProposalSectionBlock): string {
+  if (block.type === "rich_text") return richTextDocToPlainText(block.doc)
+  if (block.type === "paragraph") return block.text
+  if (block.type === "bullet_list") return block.items.join("\n")
+  return ""
 }
 
 type EditorChapterRange = {
@@ -282,6 +327,12 @@ export function ProposalEditorForm({
   const moreMenuRef = useRef<HTMLDivElement>(null)
   const [shareLinkOpen, setShareLinkOpen] = useState(false)
   const [deleteBusy, setDeleteBusy] = useState(false)
+  const [preparedByName, setPreparedByName] = useState("")
+  const [preparedByTitle, setPreparedByTitle] = useState("")
+  const [preparedByEmail, setPreparedByEmail] = useState("")
+  const [preparedByPhone, setPreparedByPhone] = useState("")
+  const [profileName, setProfileName] = useState("")
+  const senderNameTouchedRef = useRef(false)
 
   const qs = useMemo(() => new URLSearchParams({ business_id: businessId }).toString(), [businessId])
 
@@ -398,6 +449,33 @@ export function ProposalEditorForm({
     }
   }, [businessId, industryLower])
 
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser()
+        if (!user) return
+        const { data } = await supabase.from("users").select("full_name").eq("id", user.id).maybeSingle()
+        const rowName = typeof data?.full_name === "string" ? data.full_name.trim() : ""
+        const metaName =
+          typeof user.user_metadata?.full_name === "string" ? user.user_metadata.full_name.trim() : ""
+        if (!cancelled) setProfileName(rowName || metaName)
+      } catch {
+        if (!cancelled) setProfileName("")
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!profileName || senderNameTouchedRef.current) return
+    setPreparedByName((current) => (current.trim() ? current : profileName))
+  }, [profileName])
+
   const reloadAssets = useCallback(async () => {
     const res = await fetch(`/api/proposals/${proposalId}/assets?${qs}`, { credentials: "same-origin" })
     const data = await res.json().catch(() => ({}))
@@ -454,6 +532,10 @@ export function ProposalEditorForm({
           : defaultTypographyForTemplate(rowTemplateId)
       )
       setCoverAssetId((p.cover_asset_id as string) || "")
+      setPreparedByName((p.prepared_by_name as string) || "")
+      setPreparedByTitle((p.prepared_by_title as string) || "")
+      setPreparedByEmail((p.prepared_by_email as string) || "")
+      setPreparedByPhone((p.prepared_by_phone as string) || "")
       setWorkflowStatus((p.status as string) || "draft")
       setViewedAt((p.viewed_at as string) || null)
       setSentAt((p.sent_at as string) || null)
@@ -557,6 +639,7 @@ export function ProposalEditorForm({
         if (section.hidden) return false
         if (section.guidance === true) return true
         if (section.type === "paragraph") return isGuidanceText(section.text)
+        if (section.type === "rich_text") return isGuidanceText(richTextDocToPlainText(section.doc))
         if (section.type === "bullet_list") return section.items.some((item) => isGuidanceText(item))
         return false
       }).length,
@@ -716,11 +799,34 @@ export function ProposalEditorForm({
     })
   }
 
-  function updatePairBody(paraIdx: number, text: string) {
+  function updatePairBody(index: number, doc: ProposalRichTextDoc) {
     setSections((prev) => {
       const copy = [...prev]
-      const p = copy[paraIdx]
-      if (p?.type === "paragraph") copy[paraIdx] = { ...p, text, guidance: undefined }
+      const current = copy[index]
+      if (!current) return prev
+      copy[index] = {
+        type: "rich_text",
+        doc,
+        ...(current.id ? { id: current.id } : {}),
+        ...(current.hidden ? { hidden: true } : {}),
+        guidance: undefined,
+      }
+      return copy
+    })
+  }
+
+  function updateRichBlock(index: number, doc: ProposalRichTextDoc) {
+    setSections((prev) => {
+      const copy = [...prev]
+      const current = copy[index]
+      if (!current) return prev
+      copy[index] = {
+        type: "rich_text",
+        doc,
+        ...(current.id ? { id: current.id } : {}),
+        ...(current.hidden ? { hidden: true } : {}),
+        guidance: undefined,
+      }
       return copy
     })
   }
@@ -746,6 +852,9 @@ export function ProposalEditorForm({
         break
       case "paragraph":
         b = { type: "paragraph", text: "", id }
+        break
+      case "rich_text":
+        b = { type: "rich_text", doc: emptyRichTextDoc(), id }
         break
       case "bullet_list":
         b = { type: "bullet_list", items: ["First item"], id }
@@ -811,6 +920,10 @@ export function ProposalEditorForm({
           brand_accent_color: accentColor.trim() || null,
           typography,
           cover_asset_id: coverAssetId || null,
+          prepared_by_name: preparedByName.trim() || null,
+          prepared_by_title: preparedByTitle.trim() || null,
+          prepared_by_email: preparedByEmail.trim() || null,
+          prepared_by_phone: preparedByPhone.trim() || null,
           sections: cleanedSections,
           pricing_mode: pricingMode,
           pricing_payload: pricingPayload,
@@ -1471,6 +1584,74 @@ export function ProposalEditorForm({
               <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
+                    <p className="text-sm font-semibold text-slate-900">Prepared by</p>
+                    <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                      Shown on the cover and PDF. The business remains the official issuer. Leave optional contact
+                      fields blank to keep them private.
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <label className="block text-xs sm:col-span-2">
+                    <span className="font-medium text-slate-700">Full name</span>
+                    <input
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm shadow-sm"
+                      value={preparedByName}
+                      maxLength={200}
+                      placeholder="e.g. Collins"
+                      disabled={contentLocked}
+                      onChange={(event) => {
+                        senderNameTouchedRef.current = true
+                        setPreparedByName(event.target.value)
+                      }}
+                    />
+                  </label>
+                  <label className="block text-xs">
+                    <span className="font-medium text-slate-700">Position / job title (optional)</span>
+                    <input
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm shadow-sm"
+                      value={preparedByTitle}
+                      maxLength={160}
+                      placeholder="e.g. Business Representative"
+                      disabled={contentLocked}
+                      onChange={(event) => setPreparedByTitle(event.target.value)}
+                    />
+                  </label>
+                  <label className="block text-xs">
+                    <span className="font-medium text-slate-700">Email on cover (optional)</span>
+                    <input
+                      type="email"
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm shadow-sm"
+                      value={preparedByEmail}
+                      maxLength={254}
+                      placeholder="Leave blank to hide"
+                      disabled={contentLocked}
+                      onChange={(event) => setPreparedByEmail(event.target.value)}
+                    />
+                  </label>
+                  <label className="block text-xs">
+                    <span className="font-medium text-slate-700">Phone on cover (optional)</span>
+                    <input
+                      type="tel"
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm shadow-sm"
+                      value={preparedByPhone}
+                      maxLength={50}
+                      placeholder="Leave blank to hide"
+                      disabled={contentLocked}
+                      onChange={(event) => setPreparedByPhone(event.target.value)}
+                    />
+                  </label>
+                </div>
+                {!preparedByName.trim() ? (
+                  <p className="mt-3 text-xs text-slate-500">
+                    No sender name yet. The proposal will use the business name as prepared by.
+                  </p>
+                ) : null}
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
                     <p className="text-sm font-semibold text-slate-900">Company details used in this proposal</p>
                     <p className="mt-1 text-xs leading-relaxed text-slate-500">
                       Loaded from Business Profile. The reader and PDF use these saved values; proposal overrides
@@ -1690,7 +1871,7 @@ export function ProposalEditorForm({
 
           <SectionCard
             title="Content"
-            subtitle="Executive summary, scope, timeline, terms, and other narrative blocks - each section is a heading plus body copy."
+            subtitle="Executive summary, scope, timeline, terms, and other narrative blocks. Select text inside a section to apply bold, italic, underline, headings, lists or links."
           >
             <div className={`space-y-6 ${contentLocked ? "pointer-events-none opacity-60" : ""}`}>
               {draftGuidanceCount > 0 ? (
@@ -1760,7 +1941,7 @@ export function ProposalEditorForm({
                   if (seg.kind === "pair") {
                     const head = sections[seg.headIdx]
                     const para = sections[seg.paraIdx]
-                    if (head?.type !== "heading" || para?.type !== "paragraph") return null
+                    if (head?.type !== "heading" || (para?.type !== "paragraph" && para?.type !== "rich_text")) return null
                     return (
                       <div
                         key={`pair-${seg.headIdx}-${seg.paraIdx}-${si}`}
@@ -1811,20 +1992,20 @@ export function ProposalEditorForm({
                             </button>
                           </div>
                         </div>
-                        {head.guidance === true || para.guidance === true || isGuidanceText(head.text) || isGuidanceText(para.text) ? (
+                        {head.guidance === true || para.guidance === true || isGuidanceText(head.text) || isGuidanceText(bodyPlainText(para)) ? (
                           <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900">
                             Draft guidance — hidden from client documents until replaced.
                           </p>
                         ) : null}
-                        <label className="block text-sm">
-                          <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Content</span>
-                          <textarea
-                            className="mt-2 min-h-[128px] w-full rounded-lg border border-slate-200 px-3 py-3 text-sm leading-relaxed text-slate-800"
-                            value={para.text}
-                            onChange={(e) => updatePairBody(seg.paraIdx, e.target.value)}
-                            placeholder="What the client should know for this part of the proposal."
+                        <div className="block text-sm">
+                          <span className="mb-2 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">Content</span>
+                          <RichTextEditor
+                            value={bodyDocFromSection(para)}
+                            onChange={(doc) => updatePairBody(seg.paraIdx, doc)}
+                            disabled={contentLocked}
+                            ariaLabel={`Content for ${head.text.trim() || "this section"}`}
                           />
-                        </label>
+                        </div>
                       </div>
                     )
                   }
@@ -1876,6 +2057,7 @@ export function ProposalEditorForm({
                       </div>
                       {block.guidance === true ||
                       (block.type === "paragraph" && isGuidanceText(block.text)) ||
+                      (block.type === "rich_text" && isGuidanceText(richTextDocToPlainText(block.doc))) ||
                       (block.type === "bullet_list" && block.items.some((item) => isGuidanceText(item))) ? (
                         <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900">
                           Draft guidance — hidden from client documents until replaced.
@@ -1907,30 +2089,18 @@ export function ProposalEditorForm({
                             </label>
                           </div>
                         ) : null}
-                        {block.type === "paragraph" ? (
-                          <label className="block text-xs">
-                            <span className="text-slate-600">Paragraph</span>
-                            <textarea
-                              className="mt-1 min-h-[100px] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm leading-relaxed"
-                              value={block.text}
-                              onChange={(e) => updateBlock(idx, { ...block, text: e.target.value })}
-                            />
-                          </label>
-                        ) : null}
-                        {block.type === "bullet_list" ? (
-                          <label className="block text-xs">
-                            <span className="text-slate-600">One bullet per line</span>
-                            <textarea
-                              className="mt-1 min-h-[100px] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm leading-relaxed"
-                              value={block.items.join("\n")}
-                              onChange={(e) =>
-                                updateBlock(idx, {
-                                  ...block,
-                                  items: e.target.value.split("\n").map((l) => l.trim()).filter(Boolean),
-                                })
-                              }
-                            />
-                          </label>
+                        {block.type === "paragraph" || block.type === "rich_text" || block.type === "bullet_list" ? (
+                          <div className="block text-xs">
+                            <span className="text-slate-600">Rich text</span>
+                            <div className="mt-1">
+                              <RichTextEditor
+                                value={bodyDocFromSection(block)}
+                                onChange={(doc) => updateRichBlock(idx, doc)}
+                                disabled={contentLocked}
+                                ariaLabel={`${BLOCK_LABEL[block.type]} block`}
+                              />
+                            </div>
+                          </div>
                         ) : null}
                         {block.type === "image" ? (
                           <div className="space-y-2">
@@ -2031,6 +2201,7 @@ export function ProposalEditorForm({
                   <option value="image">Inline image</option>
                   <option value="gallery">Image gallery</option>
                   <option value="divider">Divider line</option>
+                  <option value="rich_text">Rich text block</option>
                   <option value="heading">Extra heading (advanced)</option>
                   <option value="paragraph">Extra paragraph (advanced)</option>
                 </select>

@@ -50,6 +50,7 @@ describe("PDF / document logo opaque backing (transparent PNG regression)", () =
         logo_url: "https://cdn.example/logo.png",
       },
       customer: { name: "Buyer" },
+      sender: null,
       sections: [{ type: "paragraph", text: "Hello." }],
       pricing: { mode: "none" },
       attachments: [],

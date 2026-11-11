@@ -42,7 +42,7 @@ export async function GET(
     const { data: proposal, error: pErr } = await admin
       .from("proposals")
       .select(
-        "id, business_id, customer_id, title, proposal_number, status, template_id, brand_accent_color, cover_asset_id, typography, sections, pricing_mode, pricing_payload, currency_code, public_token, expires_at, viewed_at, sent_at, accepted_at, rejected_at, rejected_reason, created_at"
+        "id, business_id, customer_id, title, proposal_number, status, template_id, brand_accent_color, cover_asset_id, typography, prepared_by_name, prepared_by_title, prepared_by_email, prepared_by_phone, sections, pricing_mode, pricing_payload, currency_code, public_token, expires_at, viewed_at, sent_at, accepted_at, rejected_at, rejected_reason, created_at"
       )
       .eq("public_token", token)
       .is("deleted_at", null)
@@ -69,7 +69,7 @@ export async function GET(
     const { data: fresh } = await admin
       .from("proposals")
       .select(
-        "status, viewed_at, sent_at, accepted_at, rejected_at, rejected_reason, title, proposal_number, template_id, brand_accent_color, cover_asset_id, typography, sections, pricing_mode, pricing_payload, currency_code, public_token, created_at, expires_at"
+        "status, viewed_at, sent_at, accepted_at, rejected_at, rejected_reason, title, proposal_number, template_id, brand_accent_color, cover_asset_id, typography, prepared_by_name, prepared_by_title, prepared_by_email, prepared_by_phone, sections, pricing_mode, pricing_payload, currency_code, public_token, created_at, expires_at"
       )
       .eq("id", p.id)
       .single()

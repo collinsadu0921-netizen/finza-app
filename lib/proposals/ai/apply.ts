@@ -246,6 +246,11 @@ export function applyProposalAiChanges(
           if (chapterBlocks(change.chapter).length === 0) {
             throw new Error(`Chapter "${chapterTitle}" would be left empty.`)
           }
+          if (sections.slice(range.start, range.end).some((block) => block.type === "rich_text")) {
+            warnings.push(
+              `Chapter "${chapterTitle}" contains manual formatting. Replacing it with AI text will reset formatting in that chapter; unaffected chapters are preserved.`
+            )
+          }
           sections = replaceChapter(sections, range, change.chapter)
           changed.add(change.chapter.title.trim())
           break
@@ -273,6 +278,11 @@ export function applyProposalAiChanges(
           }
           if (ACCEPTANCE_TITLE.test(range.title)) {
             throw new Error("The Acceptance chapter cannot be removed.")
+          }
+          if (sections.slice(range.start, range.end).some((block) => block.type === "rich_text")) {
+            warnings.push(
+              `Chapter "${chapterTitle}" contains manual formatting and will be removed entirely.`
+            )
           }
           sections = [...sections.slice(0, range.start), ...sections.slice(range.end)]
           changed.add(chapterTitle)
