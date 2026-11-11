@@ -13,6 +13,10 @@ export default function NewProposalPage() {
   const [businessId, setBusinessId] = useState<string | null>(null)
   const [title, setTitle] = useState("")
   const [templateId, setTemplateId] = useState<ProposalTemplateId>("premium_v1")
+  const [preparedByName, setPreparedByName] = useState("")
+  const [preparedByTitle, setPreparedByTitle] = useState("")
+  const [preparedByEmail, setPreparedByEmail] = useState("")
+  const [preparedByPhone, setPreparedByPhone] = useState("")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
 
@@ -24,6 +28,11 @@ export default function NewProposalPage() {
       if (!user) return
       const business = await getCurrentBusiness(supabase, user.id)
       if (business) setBusinessId(business.id)
+      const { data } = await supabase.from("users").select("full_name").eq("id", user.id).maybeSingle()
+      const rowName = typeof data?.full_name === "string" ? data.full_name.trim() : ""
+      const metaName =
+        typeof user.user_metadata?.full_name === "string" ? user.user_metadata.full_name.trim() : ""
+      if (rowName || metaName) setPreparedByName(rowName || metaName)
     })()
   }, [])
 
@@ -53,6 +62,10 @@ export default function NewProposalPage() {
           business_id: business.id,
           title: title.trim() || "Untitled proposal",
           template_id: templateId,
+          prepared_by_name: preparedByName.trim() || null,
+          prepared_by_title: preparedByTitle.trim() || null,
+          prepared_by_email: preparedByEmail.trim() || null,
+          prepared_by_phone: preparedByPhone.trim() || null,
         }),
       })
       const data = await res.json().catch(() => ({}))
@@ -90,6 +103,58 @@ export default function NewProposalPage() {
             placeholder="e.g. Website redesign"
           />
         </label>
+
+        <fieldset className="mt-6 rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+          <legend className="px-1 text-sm font-medium text-slate-700">Prepared by (optional)</legend>
+          <p className="mt-1 text-xs leading-relaxed text-slate-500">
+            The business remains the official issuer. Leave optional contact fields blank to keep them private; you can
+            edit these details later in the proposal editor.
+          </p>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <label className="block text-xs">
+              <span className="font-medium text-slate-700">Full name</span>
+              <input
+                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                value={preparedByName}
+                maxLength={200}
+                placeholder="e.g. Collins"
+                onChange={(event) => setPreparedByName(event.target.value)}
+              />
+            </label>
+            <label className="block text-xs">
+              <span className="font-medium text-slate-700">Position / job title (optional)</span>
+              <input
+                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                value={preparedByTitle}
+                maxLength={160}
+                placeholder="e.g. Business Representative"
+                onChange={(event) => setPreparedByTitle(event.target.value)}
+              />
+            </label>
+            <label className="block text-xs">
+              <span className="font-medium text-slate-700">Email on cover (optional)</span>
+              <input
+                type="email"
+                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                value={preparedByEmail}
+                maxLength={254}
+                placeholder="Leave blank to hide"
+                onChange={(event) => setPreparedByEmail(event.target.value)}
+              />
+            </label>
+            <label className="block text-xs">
+              <span className="font-medium text-slate-700">Phone on cover (optional)</span>
+              <input
+                type="tel"
+                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                value={preparedByPhone}
+                maxLength={50}
+                placeholder="Leave blank to hide"
+                onChange={(event) => setPreparedByPhone(event.target.value)}
+              />
+            </label>
+          </div>
+        </fieldset>
 
         <fieldset className="mt-6">
           <legend className="text-sm font-medium text-slate-700">Design</legend>

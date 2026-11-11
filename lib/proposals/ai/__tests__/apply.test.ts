@@ -292,4 +292,47 @@ describe("applyProposalAiChanges", () => {
     })
     expect(acceptance.ok).toBe(false)
   })
+
+  it("preserves unaffected formatting and warns when AI replaces a formatted chapter", () => {
+    const richText = {
+      version: 1 as const,
+      blocks: [
+        {
+          type: "paragraph" as const,
+          runs: [{ type: "text" as const, text: "Bold scope", marks: [{ type: "bold" as const }] }],
+        },
+      ],
+    }
+    const result = applyProposalAiChanges(
+      snapshot({
+        sections: [
+          { type: "heading", level: 2, text: "Introduction" },
+          { type: "rich_text", doc: richText },
+          { type: "heading", level: 2, text: "Scope of work" },
+          { type: "rich_text", doc: richText },
+          { type: "heading", level: 2, text: "Acceptance" },
+          { type: "paragraph", text: "Accept online." },
+        ],
+      }),
+      {
+        summary: "Refine scope only.",
+        changes: [
+          {
+            op: "replace_chapter",
+            title: null,
+            chapter_title: "Scope of work",
+            chapter: { title: "Scope of work", paragraphs: ["Plain AI scope."], bullets: [] },
+            pricing: null,
+            after_chapter: null,
+          },
+        ],
+      }
+    )
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.preview.sections.some((section) => section.type === "rich_text")).toBe(true)
+    expect(result.preview.changed_chapters).toEqual(["Scope of work"])
+    expect(result.preview.warnings.join(" ")).toContain("manual formatting")
+    expect(JSON.stringify(result.preview.sections)).toContain("Bold scope")
+  })
 })

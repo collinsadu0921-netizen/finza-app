@@ -14,6 +14,22 @@ const bodySchema = z.object({
   template_id: z.string().max(120).optional(),
   brand_accent_color: z.string().max(7).nullable().optional(),
   typography: z.enum(["sans", "serif", "editorial"]).optional(),
+  prepared_by_name: z.string().trim().max(200).nullable().optional(),
+  prepared_by_title: z.string().trim().max(160).nullable().optional(),
+  prepared_by_email: z
+    .string()
+    .trim()
+    .max(254)
+    .refine((value) => !value || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value), "Invalid sender email")
+    .nullable()
+    .optional(),
+  prepared_by_phone: z
+    .string()
+    .trim()
+    .max(50)
+    .refine((value) => !value || /^[0-9+()\-\s.]+$/.test(value), "Invalid sender phone")
+    .nullable()
+    .optional(),
   pricing_mode: z.enum(["none", "fixed", "line_items", "custom"]).optional(),
   pricing_payload: z.unknown().optional(),
   currency_code: z.string().max(8).nullable().optional(),
@@ -78,6 +94,10 @@ export async function POST(request: NextRequest) {
         template_id: templateId,
         brand_accent_color: accentColor || null,
         typography,
+        prepared_by_name: body.data.prepared_by_name?.trim() || null,
+        prepared_by_title: body.data.prepared_by_title?.trim() || null,
+        prepared_by_email: body.data.prepared_by_email?.trim() || null,
+        prepared_by_phone: body.data.prepared_by_phone?.trim() || null,
         sections,
         pricing_mode,
         pricing_payload,
