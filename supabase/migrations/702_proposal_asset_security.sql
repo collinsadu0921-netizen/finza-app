@@ -285,6 +285,10 @@ CREATE POLICY "proposal_assets_bucket_delete"
     AND public.finza_user_can_access_proposal_storage_path(name)
   );
 
+-- The legacy policy allowed authenticated overwrites anywhere under the
+-- business prefix. Signed uploads use upsert=false; remove this path entirely.
+DROP POLICY IF EXISTS "proposal_assets_bucket_update" ON storage.objects;
+
 COMMIT;
 
 -- ----------------------------------------------------------------------------

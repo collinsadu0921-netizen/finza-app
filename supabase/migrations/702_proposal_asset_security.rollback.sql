@@ -11,6 +11,7 @@ BEGIN;
 DROP POLICY IF EXISTS "proposal_assets_bucket_delete" ON storage.objects;
 DROP POLICY IF EXISTS "proposal_assets_bucket_select" ON storage.objects;
 DROP POLICY IF EXISTS "proposal_assets_bucket_insert" ON storage.objects;
+DROP POLICY IF EXISTS "proposal_assets_bucket_update" ON storage.objects;
 
 DROP FUNCTION IF EXISTS public.finza_user_can_access_proposal_storage_path(TEXT);
 
