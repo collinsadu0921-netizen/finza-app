@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, type KeyboardEvent, type TextareaHTMLAttributes } from "react"
+import { InlineFormattedText } from "@/components/proposals/InlineFormattedText"
 import { toggleBoldSelection } from "@/lib/proposals/inlineFormatting"
 
 type BoldTextareaProps = Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, "value" | "onChange"> & {
@@ -72,6 +73,12 @@ export function BoldTextarea({
         onChange={(event) => onValueChange(event.target.value)}
         onKeyDown={handleKeyDown}
       />
+      {value.includes("**") ? (
+        <div className="mt-1.5 rounded-md border border-slate-100 bg-slate-50 px-2.5 py-1.5 text-xs leading-relaxed text-slate-700">
+          <span className="mr-1.5 font-semibold uppercase tracking-wide text-slate-400">Preview</span>
+          <InlineFormattedText text={value} />
+        </div>
+      ) : null}
     </div>
   )
 }
