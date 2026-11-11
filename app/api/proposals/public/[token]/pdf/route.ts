@@ -3,7 +3,7 @@ import { getSupabaseServiceRoleClient } from "@/lib/supabaseServiceRole"
 import { assembleProposalRenderModel, type ProposalAssetRow, type ProposalRow } from "@/lib/proposals/assembleRenderModel"
 import type { ProposalRenderBusiness, ProposalRenderCustomer } from "@/lib/proposals/renderModel"
 import { buildProposalHtmlForPdf, proposalPdfFooterTemplate } from "@/lib/proposals/buildProposalHtmlForPdf"
-import { fetchCoverImageDataUri } from "@/lib/proposals/coverImageData"
+import { fetchCoverImageDataUri, fetchStoredCoverImageDataUri } from "@/lib/proposals/coverImageData"
 import { renderHtmlToPdfBuffer } from "@/lib/pdf/renderHtmlToPdf"
 import { buildFinancialDocumentPdfDisposition } from "@/lib/documents/financialDocumentPdfDisposition"
 import { normalizeProposalStatus } from "@/lib/proposals/proposalState"
@@ -110,7 +110,18 @@ export async function GET(
       includePublicToken: false,
     })
 
-    const coverImageDataUri = await fetchCoverImageDataUri(model.presentation.coverImageUrl)
+    const coverImageDataUri = model.presentation.coverImageUrl
+      ? (await fetchStoredCoverImageDataUri(
+          admin,
+          assets.find(
+            (asset) =>
+              asset.id === p.cover_asset_id &&
+              asset.visible_on_public &&
+              !asset.internal_only &&
+              (!asset.upload_state || asset.upload_state === "ready")
+          )
+        )) ?? (await fetchCoverImageDataUri(model.presentation.coverImageUrl))
+      : undefined
     const html = buildProposalHtmlForPdf(model, { coverImageDataUri })
     const pdfBuffer = await renderHtmlToPdfBuffer(html, {
       mediaType: "print",
