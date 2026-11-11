@@ -5,9 +5,11 @@
 | Item | Value |
 |---|---|
 | Branch | `release/proposal-security-06` |
+| Candidate HEAD | `3f7ff156a1c07513e6ba79bb847ef2d1cfe459a3` |
 | Production baseline | `ef29c70d164d8e988c5134ca45e66614c8213442` (`origin/main`) |
 | Proposal source | `2a40c90bb5d06a36a198c28cc8add8f80b7a610b` (Stage 04) |
 | Security remediation | `feat/proposal-security-release06` |
+| Verified Preview | `https://finza-r1qh2q3oq-collins-projects-f49524b8.vercel.app` |
 | Deployment target | Authorised Vercel Preview only; no production deployment |
 
 The release candidate is based directly on the current `origin/main` production baseline. It is **not** a promotion of `origin/staging`.
@@ -21,10 +23,10 @@ The release candidate is based directly on the current `origin/main` production 
 
 ## Scope audit
 
-`git diff --shortstat origin/main..HEAD` (before documentation-only commits):
+`git diff --shortstat origin/main..HEAD` (final candidate):
 
 ```text
-77 files changed, 10533 insertions(+), 656 deletions(-)
+80 files changed, 10673 insertions(+), 656 deletions(-)
 ```
 
 Non-proposal paths are limited to required support code:
