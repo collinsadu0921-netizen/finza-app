@@ -72,6 +72,13 @@ export async function POST(request: NextRequest) {
 
     const sections = defaultSectionsForTemplate(templateId)
 
+    if (body.data.cover_background_color && !normalizeCoverColor(body.data.cover_background_color)) {
+      return NextResponse.json(
+        { error: "Cover background colour must be a 6-digit HEX value such as #1d4ed8." },
+        { status: 400 }
+      )
+    }
+
     const { data: businessDefaults } = await supabase
       .from("businesses")
       .select("proposal_cover_color")
