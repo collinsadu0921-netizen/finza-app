@@ -510,6 +510,7 @@ const BASE_CSS = `
   .pdf-cover--classic .pdf-cover-art { opacity: 0; }
   .pdf-cover--classic.pdf-cover--custom .pdf-cover-art { opacity: 0; background-image: none; }
   .pdf-cover--custom:not(.pdf-cover--with-image) .pdf-cover-art { background-image: var(--pdf-cover-overlay); opacity: 1; }
+  .pdf-cover--custom:not(.pdf-cover--with-image) .pdf-cover-art::after { content: none; }
   .pdf-cover--minimal.pdf-cover--with-image .pdf-cover-art { opacity: 1; border: 0; inset: 0; }
   .pdf-cover--custom.pdf-cover--with-image .pdf-cover-image-shade { background: var(--pdf-cover-overlay); }
   .pdf-cover--custom.pdf-cover--with-image .pdf-cover-image-panel { background: rgba(0,0,0,0.56); }
@@ -532,7 +533,7 @@ const BASE_CSS = `
   .pdf-cover-business { font-size: 11pt; font-weight: 600; letter-spacing: 0.04em; }
   .pdf-cover-copy { margin-top: auto; padding: 18mm 0; max-width: 150mm; }
   .pdf-eyebrow { font-family: var(--pdf-eyebrow-font); font-size: 7.5pt; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; color: var(--pdf-accent); }
-  .pdf-cover .pdf-eyebrow { color: var(--pdf-accent-contrast); opacity: 0.82; }
+  .pdf-cover .pdf-eyebrow { color: var(--pdf-cover-muted); opacity: 1; }
   .pdf-cover h1 { margin: 5mm 0 8mm; font-family: var(--pdf-heading-font); font-size: calc(40pt * var(--pdf-cover-title-scale, 1)); line-height: 1.02; font-weight: 600; letter-spacing: -0.035em; }
   .pdf-cover--modern h1 { font-size: calc(43pt * var(--pdf-cover-title-scale, 1)); font-weight: 800; text-transform: none; }
   .pdf-cover--premium h1 { font-size: calc(42pt * var(--pdf-cover-title-scale, 1)); font-weight: 400; }
