@@ -159,6 +159,32 @@ describe("rich text safety and conversion", () => {
     expect(parseProposalSections(sections)).toHaveLength(3)
     expect(proposalRichTextDocSchema.safeParse({ version: 1, blocks: [] }).success).toBe(true)
   })
+
+  it("sanitises a malformed stored link without discarding the section list", () => {
+    const parsed = parseProposalSections([
+      {
+        type: "rich_text",
+        doc: {
+          version: 1,
+          blocks: [
+            {
+              type: "paragraph",
+              runs: [
+                text("Safe content "),
+                { type: "text", text: "bad link", marks: [{ type: "link", href: "javascript:alert(1)" }] },
+              ],
+            },
+          ],
+        },
+      },
+    ])
+    expect(parsed).toHaveLength(1)
+    expect(parsed[0].type).toBe("rich_text")
+    if (parsed[0].type === "rich_text") {
+      expect(richTextDocToPlainText(parsed[0].doc)).toBe("Safe content bad link")
+      expect(richTextDocToHtml(parsed[0].doc)).not.toContain("javascript")
+    }
+  })
 })
 
 describe("render model rich text and sender", () => {

@@ -1,5 +1,5 @@
 import { z } from "zod"
-import { proposalRichTextDocSchema } from "./richText"
+import { normalizeRichTextDoc, proposalRichTextDocSchema } from "./richText"
 
 /** Structured section blocks stored on `proposals.sections` (JSONB). */
 export const proposalSectionBlockSchema = z.discriminatedUnion("type", [
@@ -142,7 +142,17 @@ export function parsePricingFromRow(pricingMode: string, pricingPayload: unknown
 }
 
 export function parseProposalSections(value: unknown): ProposalSectionBlock[] {
-  const parsed = proposalSectionsSchema.safeParse(value)
+  // Stored rich text is sanitised before validation so one malformed legacy
+  // link/mark can never discard an entire proposal section list.
+  const lenient = Array.isArray(value)
+    ? value.map((block) => {
+        if (!block || typeof block !== "object") return block
+        const record = block as Record<string, unknown>
+        if (record.type !== "rich_text") return block
+        return { ...record, doc: normalizeRichTextDoc(record.doc) }
+      })
+    : value
+  const parsed = proposalSectionsSchema.safeParse(lenient)
   if (!parsed.success) {
     return []
   }
