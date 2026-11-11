@@ -112,6 +112,7 @@ function coverHtml(book: ProposalBook, coverImageDataUri?: string): string {
     `--pdf-cover-rule:${coverStyle.rule}`,
     `--pdf-cover-overlay:${coverStyle.overlay}`,
     `--pdf-cover-image-position:${coverStyle.imagePosition}`,
+    `--pdf-cover-title-scale:${coverStyle.titleScale}`,
     ...(coverStyle.scrim ? [`--pdf-cover-scrim:${coverStyle.scrim}`] : []),
   ].join(";")
 
@@ -532,9 +533,9 @@ const BASE_CSS = `
   .pdf-cover-copy { margin-top: auto; padding: 18mm 0; max-width: 150mm; }
   .pdf-eyebrow { font-family: var(--pdf-eyebrow-font); font-size: 7.5pt; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; color: var(--pdf-accent); }
   .pdf-cover .pdf-eyebrow { color: var(--pdf-accent-contrast); opacity: 0.82; }
-  .pdf-cover h1 { margin: 5mm 0 8mm; font-family: var(--pdf-heading-font); font-size: 40pt; line-height: 1.02; font-weight: 600; letter-spacing: -0.035em; }
-  .pdf-cover--modern h1 { font-size: 43pt; font-weight: 800; text-transform: none; }
-  .pdf-cover--premium h1 { font-size: 42pt; font-weight: 400; }
+  .pdf-cover h1 { margin: 5mm 0 8mm; font-family: var(--pdf-heading-font); font-size: calc(40pt * var(--pdf-cover-title-scale, 1)); line-height: 1.02; font-weight: 600; letter-spacing: -0.035em; }
+  .pdf-cover--modern h1 { font-size: calc(43pt * var(--pdf-cover-title-scale, 1)); font-weight: 800; text-transform: none; }
+  .pdf-cover--premium h1 { font-size: calc(42pt * var(--pdf-cover-title-scale, 1)); font-weight: 400; }
   .pdf-cover-client { display: flex; flex-direction: column; gap: 1.5mm; border-left: 2px solid var(--pdf-accent); padding-left: 6mm; }
   .pdf-cover-client span, .pdf-cover-meta-row span { font-family: var(--pdf-eyebrow-font); font-size: 7pt; text-transform: uppercase; letter-spacing: 0.14em; color: var(--pdf-cover-muted); }
   .pdf-cover-client strong { font-size: 14pt; font-weight: 600; }

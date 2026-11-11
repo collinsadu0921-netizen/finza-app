@@ -247,6 +247,7 @@ export function composeProposalBook(model: ProposalRenderModel): ProposalBook {
     backgroundColor: model.presentation.coverBackgroundColor,
     imagePosition: model.presentation.coverImagePosition,
     hasImage: Boolean(model.presentation.coverImageUrl),
+    title: model.title,
   })
 
   return {

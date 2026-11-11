@@ -73,8 +73,14 @@ describe("buildProposalHtmlForPdf", () => {
     expect(html).toContain("--pdf-cover-bg:#1d4ed8")
     expect(html).toContain("--pdf-cover-overlay:")
     expect(html).toContain("--pdf-cover-image-position:top")
+    expect(html).toContain("--pdf-cover-title-scale:1")
     expect(html).toContain("pdf-cover-image-shade")
     expect(html).toContain("pdf-cover-image-panel")
+  })
+
+  it("scales long cover titles consistently in the PDF", () => {
+    const html = buildProposalHtmlForPdf(model({ title: "A".repeat(185) }))
+    expect(html).toContain("--pdf-cover-title-scale:0.55")
   })
 
   it("renders a cover, chapter pages, pricing total, attachments and acceptance", () => {

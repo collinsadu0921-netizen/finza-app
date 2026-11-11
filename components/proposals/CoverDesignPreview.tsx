@@ -39,6 +39,7 @@ export function CoverDesignPreview({
     backgroundColor: backgroundColor || null,
     imagePosition,
     hasImage: Boolean(imageUrl),
+    title,
   })
 
   return (

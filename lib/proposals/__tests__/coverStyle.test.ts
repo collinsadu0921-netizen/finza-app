@@ -1,5 +1,6 @@
 import {
   contrastRatio,
+  coverTitleMetrics,
   normalizeCoverColor,
   normalizeCoverImagePosition,
   proposalCoverCssVariables,
@@ -100,5 +101,24 @@ describe("resolveProposalCoverStyle", () => {
     })
     expect(noImage.isCustom).toBe(false)
     expect(noImage.imagePosition).toBe("center")
+  })
+
+  it("scales long cover titles and widens the measure without changing short titles", () => {
+    expect(coverTitleMetrics("Short proposal title")).toEqual({ scale: 1, maxCh: 13 })
+
+    const longTitle = "A".repeat(185)
+    const metrics = coverTitleMetrics(longTitle)
+    expect(metrics.scale).toBeLessThan(1)
+    expect(metrics.maxCh).toBeGreaterThan(13)
+
+    const cover = resolveProposalCoverStyle({
+      templateId: "premium_v1",
+      backgroundColor: "#0b1f3a",
+      title: longTitle,
+    })
+    expect(cover.titleScale).toBe(metrics.scale)
+    expect(cover.titleMaxCh).toBe(metrics.maxCh)
+    expect(proposalCoverCssVariables(cover)["--pp-cover-title-scale"]).toBe(String(metrics.scale))
+    expect(proposalCoverCssVariables(cover)["--pp-cover-title-max"]).toBe(`${metrics.maxCh}ch`)
   })
 })

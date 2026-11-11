@@ -72,6 +72,29 @@ export type ProposalCoverStyle = {
   /** Optional readability panel behind cover text for low-contrast custom colours. */
   scrim: string | null
   isLightBackground: boolean
+  /** Long titles get a smaller type scale and a wider measure so metadata stays on the cover. */
+  titleScale: number
+  titleMaxCh: number
+}
+
+export type CoverTitleMetrics = {
+  scale: number
+  maxCh: number
+}
+
+/**
+ * Length-aware cover typography. Reader and PDF both consume this so long
+ * titles shrink predictably instead of pushing the client/meta blocks off
+ * the cover. The outer bounds keep every title readable.
+ */
+export function coverTitleMetrics(title: string | null | undefined): CoverTitleMetrics {
+  const length = (title ?? "").trim().length
+  if (length <= 48) return { scale: 1, maxCh: 13 }
+  if (length <= 72) return { scale: 0.9, maxCh: 15 }
+  if (length <= 100) return { scale: 0.8, maxCh: 17 }
+  if (length <= 135) return { scale: 0.7, maxCh: 19 }
+  if (length <= 175) return { scale: 0.61, maxCh: 21 }
+  return { scale: 0.55, maxCh: 22 }
 }
 
 function isLightColor(hex: string): boolean {
@@ -101,6 +124,7 @@ export function resolveProposalCoverStyle(input: {
   backgroundColor?: string | null
   imagePosition?: string | null
   hasImage?: boolean
+  title?: string | null
 }): ProposalCoverStyle {
   const theme = getProposalTheme(input.templateId, {
     accentColor: input.accentColor,
@@ -110,6 +134,7 @@ export function resolveProposalCoverStyle(input: {
   const color = normalizeCoverColor(input.backgroundColor)
   const position = normalizeCoverImagePosition(input.imagePosition) ?? "center"
   const hasImage = Boolean(input.hasImage)
+  const titleMetrics = coverTitleMetrics(input.title)
   const isCustom = Boolean(color) || (hasImage && Boolean(normalizeCoverImagePosition(input.imagePosition)))
 
   if (!isCustom) {
@@ -127,6 +152,8 @@ export function resolveProposalCoverStyle(input: {
       overlay: "",
       scrim: null,
       isLightBackground: isLightColor(theme.coverBg),
+      titleScale: titleMetrics.scale,
+      titleMaxCh: titleMetrics.maxCh,
     }
   }
 
@@ -145,6 +172,8 @@ export function resolveProposalCoverStyle(input: {
       overlay: IMAGE_OVERLAY,
       scrim: null,
       isLightBackground: false,
+      titleScale: titleMetrics.scale,
+      titleMaxCh: titleMetrics.maxCh,
     }
   }
 
@@ -165,6 +194,8 @@ export function resolveProposalCoverStyle(input: {
     overlay: colorOverlay(templateId, theme.accent),
     scrim: readable.needsScrim ? (isLight ? "rgba(255,255,255,0.72)" : "rgba(0,0,0,0.42)") : null,
     isLightBackground: isLight,
+    titleScale: titleMetrics.scale,
+    titleMaxCh: titleMetrics.maxCh,
   }
 }
 
@@ -175,6 +206,8 @@ export function proposalCoverCssVariables(style: ProposalCoverStyle): Record<str
     "--pp-cover-muted": style.muted,
     "--pp-cover-rule": style.rule,
     "--pp-cover-overlay": style.overlay,
+    "--pp-cover-title-scale": String(style.titleScale),
+    "--pp-cover-title-max": `${style.titleMaxCh}ch`,
     ...(style.scrim ? { "--pp-cover-scrim": style.scrim } : {}),
   }
 }

@@ -593,7 +593,7 @@ const READER_CSS = `
   .proposal-cover-copy { margin-top: auto; padding: 42px 0 30px; }
   .proposal-eyebrow { margin: 0; font-family: var(--pp-eyebrow-font); font-size: 10px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; color: var(--pp-accent); }
   .proposal-cover .proposal-eyebrow { color: var(--pp-cover-muted); }
-  .proposal-cover h1 { margin: 12px 0 22px; max-width: 13ch; font-family: var(--pp-heading-font); font-size: clamp(34px, 6vw, 66px); line-height: 0.98; font-weight: 600; letter-spacing: -0.04em; }
+  .proposal-cover h1 { margin: 12px 0 22px; max-width: var(--pp-cover-title-max, 13ch); font-family: var(--pp-heading-font); font-size: calc(clamp(34px, 6vw, 66px) * var(--pp-cover-title-scale, 1)); line-height: 0.98; font-weight: 600; letter-spacing: -0.04em; }
   .proposal-cover-client { display: flex; flex-direction: column; gap: 4px; border-left: 2px solid var(--pp-accent); padding-left: 14px; }
   .proposal-cover-client span, .proposal-cover-meta span { font-family: var(--pp-eyebrow-font); font-size: 9px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--pp-cover-muted); }
   .proposal-cover-client strong { font-size: 17px; }
@@ -712,7 +712,7 @@ const READER_CSS = `
     .proposal-cover-brand .proposal-brand-mark { max-height: 40px; max-width: 130px; padding: 5px; }
     .proposal-cover-media { opacity: 0.3; filter: blur(1px); }
     .proposal-cover-shade { background: linear-gradient(180deg, rgba(0,0,0,0.42), rgba(0,0,0,0.86)); }
-    .proposal-cover h1 { font-size: clamp(32px, 10.5vw, 46px); }
+    .proposal-cover h1 { font-size: calc(clamp(32px, 10.5vw, 46px) * var(--pp-cover-title-scale, 1)); }
     .proposal-cover-meta { gap: 12px 20px; }
     .proposal-cover-footer { left: 20px; right: 20px; }
     .proposal-body-text, .proposal-bullet-list { font-size: 15px; }
