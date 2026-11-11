@@ -6,6 +6,7 @@ import { createAuditLog } from "@/lib/auditLog"
 import { defaultSectionsForTemplate, normalizeTemplateId } from "@/lib/proposals/templates"
 import { defaultTypographyForTemplate, normalizeAccentColor, normalizeTypography } from "@/lib/proposals/design"
 import { validateAndNormalizePricingForDb } from "@/lib/proposals/pricingForDb"
+import { normalizeCoverColor, normalizeCoverImagePosition } from "@/lib/proposals/coverStyle"
 
 const bodySchema = z.object({
   business_id: z.string().uuid(),
@@ -14,6 +15,8 @@ const bodySchema = z.object({
   template_id: z.string().max(120).optional(),
   brand_accent_color: z.string().max(7).nullable().optional(),
   typography: z.enum(["sans", "serif", "editorial"]).optional(),
+  cover_background_color: z.string().max(7).nullable().optional(),
+  cover_image_position: z.enum(["center", "top", "bottom", "left", "right"]).nullable().optional(),
   pricing_mode: z.enum(["none", "fixed", "line_items", "custom"]).optional(),
   pricing_payload: z.unknown().optional(),
   currency_code: z.string().max(8).nullable().optional(),
@@ -69,6 +72,17 @@ export async function POST(request: NextRequest) {
 
     const sections = defaultSectionsForTemplate(templateId)
 
+    const { data: businessDefaults } = await supabase
+      .from("businesses")
+      .select("proposal_cover_color")
+      .eq("id", businessId)
+      .maybeSingle()
+    const businessCoverColor = normalizeCoverColor(
+      (businessDefaults as { proposal_cover_color?: string | null } | null)?.proposal_cover_color
+    )
+    const requestedCoverColor = normalizeCoverColor(body.data.cover_background_color)
+    const coverImagePosition = normalizeCoverImagePosition(body.data.cover_image_position)
+
     const { data: row, error } = await supabase
       .from("proposals")
       .insert({
@@ -78,6 +92,8 @@ export async function POST(request: NextRequest) {
         template_id: templateId,
         brand_accent_color: accentColor || null,
         typography,
+        cover_background_color: requestedCoverColor ?? businessCoverColor,
+        cover_image_position: coverImagePosition,
         sections,
         pricing_mode,
         pricing_payload,

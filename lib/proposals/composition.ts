@@ -1,5 +1,6 @@
 import type { ProposalRenderAttachment, ProposalRenderModel, ProposalRenderSection } from "./renderModel"
 import { getProposalTheme, type ProposalTheme } from "./design"
+import { resolveProposalCoverStyle, type ProposalCoverStyle } from "./coverStyle"
 import { stripGuidance } from "./guidance"
 import type { ProposalTemplateId } from "./templates"
 
@@ -18,6 +19,7 @@ export type ProposalCover = {
   createdAt: string | null
   expiresAt: string | null
   accent: string
+  style: ProposalCoverStyle
 }
 
 export type ProposalChapter = {
@@ -238,6 +240,15 @@ export function composeProposalBook(model: ProposalRenderModel): ProposalBook {
   const businessName =
     model.business.trading_name || model.business.legal_name || model.business.name
 
+  const coverStyle = resolveProposalCoverStyle({
+    templateId: model.presentation.templateId,
+    accentColor: model.presentation.accentColor,
+    typography: model.presentation.typography,
+    backgroundColor: model.presentation.coverBackgroundColor,
+    imagePosition: model.presentation.coverImagePosition,
+    hasImage: Boolean(model.presentation.coverImageUrl),
+  })
+
   return {
     templateId: theme.id,
     theme,
@@ -254,6 +265,7 @@ export function composeProposalBook(model: ProposalRenderModel): ProposalBook {
       createdAt: model.created_at ?? null,
       expiresAt: model.expires_at ?? null,
       accent: theme.accent,
+      style: coverStyle,
     },
     chapters,
   }

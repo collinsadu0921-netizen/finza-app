@@ -104,9 +104,22 @@ function coverHtml(book: ProposalBook, coverImageDataUri?: string): string {
       )
     : null
 
+  const coverStyle = cover.style
+  const coverStyleAttr = [
+    `--pdf-cover-bg:${coverStyle.backgroundColor}`,
+    `--pdf-cover-ink:${coverStyle.ink}`,
+    `--pdf-cover-muted:${coverStyle.muted}`,
+    `--pdf-cover-rule:${coverStyle.rule}`,
+    `--pdf-cover-overlay:${coverStyle.overlay}`,
+    `--pdf-cover-image-position:${coverStyle.imagePosition}`,
+    ...(coverStyle.scrim ? [`--pdf-cover-scrim:${coverStyle.scrim}`] : []),
+  ].join(";")
+
   return `<section class="pdf-cover pdf-cover--${book.theme.coverStyle}${
     coverImage ? " pdf-cover--with-image" : ""
-  }">
+  }${coverStyle.isCustom ? " pdf-cover--custom" : ""}${
+    coverStyle.scrim ? " pdf-cover--scrim" : ""
+  }" style="${coverStyleAttr}">
     <div class="pdf-cover-art" aria-hidden="true">${
       coverImage
         ? `<img class="pdf-cover-image" src="${coverImage}" alt="" onerror="this.style.display='none'" /><div class="pdf-cover-image-shade"></div><div class="pdf-cover-image-panel"></div>`
@@ -440,7 +453,7 @@ const BASE_CSS = `
     width: 100%;
     height: 100%;
     object-fit: cover;
-    object-position: center;
+    object-position: var(--pdf-cover-image-position, center);
   }
   .pdf-cover-image-shade {
     position: absolute;
@@ -494,6 +507,17 @@ const BASE_CSS = `
     background: rgba(250,247,242,0.24);
   }
   .pdf-cover--classic .pdf-cover-art { opacity: 0; }
+  .pdf-cover--classic.pdf-cover--custom .pdf-cover-art { opacity: 0; background-image: none; }
+  .pdf-cover--custom:not(.pdf-cover--with-image) .pdf-cover-art { background-image: var(--pdf-cover-overlay); opacity: 1; }
+  .pdf-cover--minimal.pdf-cover--with-image .pdf-cover-art { opacity: 1; border: 0; inset: 0; }
+  .pdf-cover--custom.pdf-cover--with-image .pdf-cover-image-shade { background: var(--pdf-cover-overlay); }
+  .pdf-cover--custom.pdf-cover--with-image .pdf-cover-image-panel { background: rgba(0,0,0,0.56); }
+  .pdf-cover--scrim .pdf-cover-copy,
+  .pdf-cover--scrim .pdf-cover-meta {
+    background: var(--pdf-cover-scrim);
+    border-radius: 2mm;
+    padding: 5mm;
+  }
   .pdf-cover-inner { position: relative; z-index: 1; display: flex; flex-direction: column; min-height: 222mm; }
   .pdf-cover-brand { display: flex; align-items: center; gap: 10mm; }
   /* finza-regression:pdf-logo-white-backing — same Chromium transparent-PNG issue as financial documents */
@@ -515,8 +539,8 @@ const BASE_CSS = `
   .pdf-cover-client span, .pdf-cover-meta-row span { font-family: var(--pdf-eyebrow-font); font-size: 7pt; text-transform: uppercase; letter-spacing: 0.14em; color: var(--pdf-cover-muted); }
   .pdf-cover-client strong { font-size: 14pt; font-weight: 600; }
   .pdf-cover-client em { font-style: normal; font-size: 9pt; color: var(--pdf-cover-muted); }
-  .pdf-cover-meta { display: flex; flex-wrap: wrap; gap: 6mm 16mm; border-top: 1px solid rgba(255,255,255,0.18); padding-top: 6mm; }
-  .pdf-cover--minimal .pdf-cover-meta { border-color: var(--pdf-rule); }
+  .pdf-cover-meta { display: flex; flex-wrap: wrap; gap: 6mm 16mm; border-top: 1px solid var(--pdf-cover-rule); padding-top: 6mm; }
+  .pdf-cover--minimal .pdf-cover-meta { border-color: var(--pdf-cover-rule); }
   .pdf-cover-meta-row { display: flex; flex-direction: column; gap: 1mm; }
   .pdf-cover-meta-row strong { font-size: 9pt; font-weight: 600; }
   .pdf-chapter {

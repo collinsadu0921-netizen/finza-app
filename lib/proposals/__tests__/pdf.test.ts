@@ -14,6 +14,10 @@ function model(overrides: Partial<ProposalRenderModel> = {}): ProposalRenderMode
       typography: "editorial",
       coverAssetId: null,
       coverImageUrl: null,
+
+      coverBackgroundColor: null,
+
+      coverImagePosition: null,
     },
     currency_code: "GHS",
     business: {
@@ -53,6 +57,26 @@ function model(overrides: Partial<ProposalRenderModel> = {}): ProposalRenderMode
 }
 
 describe("buildProposalHtmlForPdf", () => {
+  it("renders a custom cover colour, overlay and image position", () => {
+    const base = model()
+    const html = buildProposalHtmlForPdf({
+      ...base,
+      presentation: {
+        ...base.presentation,
+        coverAssetId: "asset-1",
+        coverImageUrl: "https://example.com/cover.jpg",
+        coverBackgroundColor: "#1d4ed8",
+        coverImagePosition: "top",
+      },
+    })
+    expect(html).toContain("pdf-cover--custom")
+    expect(html).toContain("--pdf-cover-bg:#1d4ed8")
+    expect(html).toContain("--pdf-cover-overlay:")
+    expect(html).toContain("--pdf-cover-image-position:top")
+    expect(html).toContain("pdf-cover-image-shade")
+    expect(html).toContain("pdf-cover-image-panel")
+  })
+
   it("renders a cover, chapter pages, pricing total, attachments and acceptance", () => {
     const html = buildProposalHtmlForPdf(model())
     expect(html).toContain("pdf-cover")
@@ -97,6 +121,10 @@ describe("buildProposalHtmlForPdf", () => {
           typography: "sans",
           coverAssetId: null,
           coverImageUrl: null,
+
+          coverBackgroundColor: null,
+
+          coverImagePosition: null,
         },
       })
     )
@@ -117,6 +145,10 @@ describe("buildProposalHtmlForPdf", () => {
             typography: "sans",
             coverAssetId: null,
             coverImageUrl: null,
+
+            coverBackgroundColor: null,
+
+            coverImagePosition: null,
           },
         })
       )
@@ -226,6 +258,10 @@ describe("buildProposalHtmlForPdf", () => {
           typography: "editorial",
           coverAssetId: "asset-1",
           coverImageUrl: "https://example.com/cover.jpg",
+
+          coverBackgroundColor: null,
+
+          coverImagePosition: null,
         },
       }),
       { coverImageDataUri: "data:image/jpeg;base64,AAAA" }
@@ -281,6 +317,10 @@ describe("buildProposalHtmlForPdf", () => {
           typography: "sans",
           coverAssetId: null,
           coverImageUrl: null,
+
+          coverBackgroundColor: null,
+
+          coverImagePosition: null,
         },
       })
     )

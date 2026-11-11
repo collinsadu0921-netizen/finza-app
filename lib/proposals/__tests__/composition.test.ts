@@ -14,6 +14,10 @@ function baseModel(overrides: Partial<ProposalRenderModel> = {}): ProposalRender
       typography: "editorial",
       coverAssetId: null,
       coverImageUrl: null,
+
+      coverBackgroundColor: null,
+
+      coverImagePosition: null,
     },
     currency_code: "GHS",
     business: {

@@ -7,6 +7,7 @@ import {
   type ProposalTypography,
 } from "./design"
 import { normalizeTemplateId, type ProposalTemplateId } from "./templates"
+import { normalizeCoverColor, normalizeCoverImagePosition, type CoverImagePosition } from "./coverStyle"
 
 export type ProposalRenderBusiness = {
   name: string
@@ -49,6 +50,8 @@ export type ProposalPresentation = {
   typography: ProposalTypography
   coverAssetId: string | null
   coverImageUrl: string | null
+  coverBackgroundColor: string | null
+  coverImagePosition: CoverImagePosition | null
 }
 
 export type ProposalRenderModel = {
@@ -111,6 +114,8 @@ export function normalizeProposalForRender(input: {
   template_id: string
   brand_accent_color?: string | null
   cover_asset_id?: string | null
+  cover_background_color?: string | null
+  cover_image_position?: string | null
   typography?: string | null
   currency_code?: string | null
   business: ProposalRenderBusiness
@@ -250,6 +255,10 @@ export function normalizeProposalForRender(input: {
         : defaultTypographyForTemplate(templateId),
       coverAssetId,
       coverImageUrl,
+      coverBackgroundColor: normalizeCoverColor(input.cover_background_color),
+      coverImagePosition: coverAssetId
+        ? normalizeCoverImagePosition(input.cover_image_position)
+        : null,
     },
     currency_code: resolveProposalDisplayCurrency(input.currency_code, input.business),
     business: input.business,

@@ -10,6 +10,7 @@ import { NativeSelect } from "@/components/ui/NativeSelect"
 import BusinessLogoDisplay from "@/components/BusinessLogoDisplay"
 import { dispatchBusinessBrandingUpdated } from "@/lib/business/businessBrandingEvents"
 import { tryBusinessAssetsLogoStoragePath } from "@/lib/business/businessLogoStorage"
+import { normalizeCoverColor } from "@/lib/proposals/coverStyle"
 
 function trimStr(v: unknown): string {
   if (v === undefined || v === null) return ""
@@ -30,6 +31,7 @@ function formStateFromProfileBusiness(b: Record<string, unknown>) {
     website: trimStr(b.website),
     tin: trimStr(b.tin),
     logo_url: trimStr(b.logo_url),
+    proposal_cover_color: trimStr(b.proposal_cover_color),
     default_currency: trimStr(b.default_currency),
     start_date: b.start_date ? new Date(String(b.start_date)).toISOString().split("T")[0] : "",
     cit_rate_code: (b.cit_rate_code as string) || "standard_25",
@@ -68,6 +70,7 @@ export default function ServiceBusinessProfilePage() {
     website: "",
     tin: "",
     logo_url: "",
+    proposal_cover_color: "",
     default_currency: "",
     start_date: "",
     cit_rate_code: "standard_25",
@@ -311,8 +314,15 @@ export default function ServiceBusinessProfilePage() {
       }
     }
 
+    const proposalCoverColor = trimStr(formData.proposal_cover_color)
+    if (proposalCoverColor && !normalizeCoverColor(proposalCoverColor)) {
+      setError("Proposal cover colour must be a 6-digit HEX value such as #1d4ed8, or blank.")
+      return
+    }
+
     const payload = {
       ...formData,
+      proposal_cover_color: proposalCoverColor ? normalizeCoverColor(proposalCoverColor) : null,
       address_country: tCountry,
       default_currency: tCurrency,
       legal_name: tLegal,
@@ -441,6 +451,38 @@ export default function ServiceBusinessProfilePage() {
                 Remove logo
               </button>
             ) : null}
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-6 space-y-4">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Proposal Cover Default</h2>
+            <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+              Optional. New proposals start with this cover colour; existing proposals keep their saved appearance.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <input
+              type="color"
+              value={formData.proposal_cover_color || "#1c1917"}
+              onChange={(e) => handleChange("proposal_cover_color", e.target.value)}
+              className="h-10 w-14 cursor-pointer rounded-lg border border-gray-300 bg-white p-1"
+              aria-label="Default proposal cover colour"
+            />
+            <input
+              value={formData.proposal_cover_color}
+              onChange={(e) => handleChange("proposal_cover_color", e.target.value.toUpperCase())}
+              placeholder="#1C1917 or blank for template default"
+              maxLength={7}
+              className="min-w-[16rem] flex-1 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 font-mono text-sm dark:bg-gray-700 dark:text-white"
+            />
+            <button
+              type="button"
+              onClick={() => handleChange("proposal_cover_color", "")}
+              className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            >
+              Use template default
+            </button>
           </div>
         </div>
 

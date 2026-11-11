@@ -15,6 +15,8 @@ export type ProposalRow = {
   template_id: string
   brand_accent_color?: string | null
   cover_asset_id?: string | null
+  cover_background_color?: string | null
+  cover_image_position?: string | null
   typography?: string | null
   sections: unknown
   pricing_mode: string
@@ -83,6 +85,8 @@ export async function assembleProposalRenderModel(
     template_id: input.proposal.template_id,
     brand_accent_color: input.proposal.brand_accent_color ?? null,
     cover_asset_id: input.proposal.cover_asset_id ?? null,
+    cover_background_color: input.proposal.cover_background_color ?? null,
+    cover_image_position: input.proposal.cover_image_position ?? null,
     typography: input.proposal.typography ?? null,
     currency_code: input.proposal.currency_code,
     business: input.business,

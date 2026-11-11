@@ -17,6 +17,7 @@ import {
   type ProposalBook,
 } from "@/lib/proposals/composition"
 import { proposalThemeCssVariables } from "@/lib/proposals/design"
+import { proposalCoverCssVariables } from "@/lib/proposals/coverStyle"
 import { getChapterLayout } from "@/lib/proposals/layout"
 import {
   buildReaderSheets,
@@ -308,13 +309,18 @@ function CoverPage({ book }: { book: ProposalBook }) {
   const issued = asDateLabel(cover.createdAt)
   const expires = asDateLabel(cover.expiresAt)
   return (
-    <article className="proposal-page proposal-cover">
+    <article
+      className={`proposal-page proposal-cover${cover.style.isCustom ? " proposal-cover--custom" : ""}${
+        cover.style.scrim ? " proposal-cover--scrim" : ""
+      }`}
+    >
       <div className="proposal-cover-media" aria-hidden>
         {cover.coverImageUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={cover.coverImageUrl}
             alt=""
+            style={{ objectPosition: cover.style.imagePosition }}
             onError={(event) => {
               event.currentTarget.style.display = "none"
             }}
@@ -572,6 +578,15 @@ const READER_CSS = `
   .proposal-cover-pattern.pattern-grid { background-image: linear-gradient(rgba(255,255,255,0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.08) 1px, transparent 1px); background-size: 32px 32px; }
   .proposal-cover-pattern.pattern-orbs { background: radial-gradient(circle at 82% 18%, var(--pp-accent) 0, transparent 34%), radial-gradient(circle at 14% 86%, rgba(255,255,255,0.08) 0, transparent 36%); }
   .proposal-cover-pattern.pattern-rules { background: repeating-linear-gradient(180deg, transparent 0 37px, rgba(0,0,0,0.06) 37px 38px); }
+  .proposal-cover--custom .proposal-cover-pattern { opacity: 0.72; }
+  .proposal-cover--custom .proposal-cover-shade { background: var(--pp-cover-overlay); }
+  .proposal-cover--scrim .proposal-cover-copy,
+  .proposal-cover--scrim .proposal-cover-meta {
+    background: var(--pp-cover-scrim);
+    border-radius: 6px;
+    padding: 18px;
+  }
+  .proposal-cover--scrim .proposal-cover-copy { padding-bottom: 18px; }
   .proposal-cover-inner { position: relative; z-index: 1; display: flex; flex-direction: column; min-height: 72vh; padding: clamp(24px, 5vw, 56px); }
   .proposal-cover-brand { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; font-size: 12px; font-weight: 600; }
   .proposal-cover-brand .proposal-brand-mark { background: #fff; padding: 6px; border-radius: 8px; max-height: 46px; max-width: 160px; overflow: hidden; }
@@ -583,7 +598,7 @@ const READER_CSS = `
   .proposal-cover-client span, .proposal-cover-meta span { font-family: var(--pp-eyebrow-font); font-size: 9px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--pp-cover-muted); }
   .proposal-cover-client strong { font-size: 17px; }
   .proposal-cover-client em { font-style: normal; font-size: 12px; color: var(--pp-cover-muted); }
-  .proposal-cover-meta { display: flex; flex-wrap: wrap; gap: 18px 32px; border-top: 1px solid rgba(255,255,255,0.2); padding-top: 16px; }
+  .proposal-cover-meta { display: flex; flex-wrap: wrap; gap: 18px 32px; border-top: 1px solid var(--pp-cover-rule); padding-top: 16px; }
   .proposal-cover-meta div { display: flex; flex-direction: column; gap: 3px; }
   .proposal-cover-meta strong { font-size: 11px; font-weight: 600; }
   .proposal-cover-footer { position: absolute; z-index: 1; left: clamp(24px, 5vw, 56px); right: clamp(24px, 5vw, 56px); bottom: 18px; display: flex; justify-content: space-between; font-family: var(--pp-eyebrow-font); font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--pp-cover-muted); }
@@ -715,14 +730,16 @@ const READER_CSS = `
   .proposal-reader[data-template="standard_v1"] .proposal-cover-brand .proposal-brand-mark { background: transparent; padding: 0; }
   .proposal-reader[data-template="minimal_v1"] .proposal-chapter-head { border-bottom-width: 1px; }
   .proposal-reader[data-template="minimal_v1"] .proposal-chapter-number { opacity: 0.2; }
-  .proposal-reader[data-template="minimal_v1"] .proposal-cover { color: var(--pp-ink); background: var(--pp-paper); }
+  .proposal-reader[data-template="minimal_v1"] .proposal-cover { color: var(--pp-cover-ink); background: var(--pp-cover-bg); }
   .proposal-reader[data-template="minimal_v1"] .proposal-cover-shade { background: none; }
+  .proposal-reader[data-template="minimal_v1"] .proposal-cover--custom .proposal-cover-shade { background: var(--pp-cover-overlay); }
   .proposal-reader[data-template="minimal_v1"] .proposal-cover-brand .proposal-brand-mark { background: transparent; padding: 0; }
+  .proposal-reader[data-template="minimal_v1"] .proposal-cover--custom .proposal-cover-brand .proposal-brand-mark { background: #fff; padding: 6px; }
   .proposal-reader[data-template="minimal_v1"] .proposal-cover .proposal-eyebrow,
   .proposal-reader[data-template="minimal_v1"] .proposal-cover-client span,
   .proposal-reader[data-template="minimal_v1"] .proposal-cover-meta span,
-  .proposal-reader[data-template="minimal_v1"] .proposal-cover-footer { color: var(--pp-muted); }
-  .proposal-reader[data-template="minimal_v1"] .proposal-cover-meta { border-color: var(--pp-rule); }
+  .proposal-reader[data-template="minimal_v1"] .proposal-cover-footer { color: var(--pp-cover-muted); }
+  .proposal-reader[data-template="minimal_v1"] .proposal-cover-meta { border-color: var(--pp-cover-rule); }
   .proposal-reader[data-template="minimal_v1"] .proposal-section-heading { font-weight: 500; }
   .proposal-reader[data-template="modern_v1"] .proposal-chapter-head { border-bottom: 2px solid var(--pp-accent); }
   .proposal-reader[data-template="modern_v1"] .proposal-chapter-number { opacity: 0.75; }
@@ -910,7 +927,10 @@ export function ProposalReader({
       ? `Pages ${activeSpread.left! + 1}–${activeSpread.right + 1} of ${pages.length}`
       : `Page ${activePage + 1} of ${pages.length}`
   const currentTemplate = book.theme.id
-  const style = proposalThemeCssVariables(book.theme) as CSSProperties
+  const style = {
+    ...proposalThemeCssVariables(book.theme),
+    ...proposalCoverCssVariables(book.cover.style),
+  } as CSSProperties
 
   const renderPage = (page: ReaderPage, pageNumber: number, keySuffix: string) =>
     page.kind === "cover" ? (

@@ -10,6 +10,7 @@ import { assembleProposalRenderModel, type ProposalAssetRow, type ProposalRow } 
 import type { ProposalRenderBusiness, ProposalRenderCustomer } from "@/lib/proposals/renderModel"
 import { normalizeTemplateId } from "@/lib/proposals/templates"
 import { normalizeAccentColor, normalizeTypography } from "@/lib/proposals/design"
+import { normalizeCoverColor, normalizeCoverImagePosition } from "@/lib/proposals/coverStyle"
 import { normalizeProposalStatus, proposalCanBeEditedByStaff } from "@/lib/proposals/proposalState"
 
 export const dynamic = "force-dynamic"
@@ -82,7 +83,7 @@ export async function GET(
     const { data: proposal, error: pErr } = await supabase
       .from("proposals")
       .select(
-        "id, business_id, customer_id, title, proposal_number, status, template_id, brand_accent_color, cover_asset_id, typography, sections, pricing_mode, pricing_payload, currency_code, public_token, expires_at, sent_at, viewed_at, accepted_at, rejected_at, rejected_reason, converted_estimate_id, converted_invoice_id, converted_at, converted_invoice_at, created_at, updated_at"
+        "id, business_id, customer_id, title, proposal_number, status, template_id, brand_accent_color, cover_asset_id, cover_background_color, cover_image_position, typography, sections, pricing_mode, pricing_payload, currency_code, public_token, expires_at, sent_at, viewed_at, accepted_at, rejected_at, rejected_reason, converted_estimate_id, converted_invoice_id, converted_at, converted_invoice_at, created_at, updated_at"
       )
       .eq("id", proposalId)
       .eq("business_id", businessId)
@@ -146,6 +147,8 @@ const putSchema = z
     template_id: z.string().max(120).optional(),
     brand_accent_color: z.string().max(7).nullable().optional(),
     cover_asset_id: z.string().uuid().nullable().optional(),
+    cover_background_color: z.string().max(7).nullable().optional(),
+    cover_image_position: z.enum(["center", "top", "bottom", "left", "right"]).nullable().optional(),
     typography: z.enum(["sans", "serif", "editorial"]).optional(),
     pricing_mode: z.enum(["none", "fixed", "line_items", "custom"]).optional(),
     pricing_payload: z.unknown().optional(),
@@ -286,6 +289,19 @@ export async function PUT(
     if (body.data.cover_asset_id !== undefined) {
       patch.cover_asset_id = body.data.cover_asset_id
     }
+    if (body.data.cover_background_color !== undefined) {
+      const color = normalizeCoverColor(body.data.cover_background_color)
+      if (body.data.cover_background_color && !color) {
+        return NextResponse.json(
+          { error: "Cover background colour must be a 6-digit HEX value such as #1d4ed8." },
+          { status: 400 }
+        )
+      }
+      patch.cover_background_color = color
+    }
+    if (body.data.cover_image_position !== undefined) {
+      patch.cover_image_position = normalizeCoverImagePosition(body.data.cover_image_position)
+    }
     if (body.data.typography !== undefined) {
       patch.typography = normalizeTypography(body.data.typography)
     }
@@ -311,7 +327,7 @@ export async function PUT(
       .update(patch)
       .eq("id", proposalId)
       .eq("business_id", businessId)
-      .select("id, title, status, template_id, brand_accent_color, cover_asset_id, typography, customer_id, sections, pricing_mode, pricing_payload, currency_code, updated_at")
+      .select("id, title, status, template_id, brand_accent_color, cover_asset_id, cover_background_color, cover_image_position, typography, customer_id, sections, pricing_mode, pricing_payload, currency_code, updated_at")
       .single()
 
     if (error || !row) {

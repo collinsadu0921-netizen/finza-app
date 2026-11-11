@@ -6,6 +6,7 @@ import { canEditBusinessWideSensitiveSettings } from "@/lib/retail/retailSensiti
 import { normalizeCountry } from "@/lib/payments/eligibility"
 import { assertCountryCurrency } from "@/lib/countryCurrency"
 import { resolveAuthenticatedApiUser } from "@/lib/server/resolveAuthenticatedApiUser"
+import { normalizeCoverColor } from "@/lib/proposals/coverStyle"
 import { createRouteDiag, supabaseErrorDiag, timedStepMs } from "@/lib/server/routeDiagnostics"
 
 /** Trim; empty / whitespace-only becomes "". */
@@ -105,6 +106,7 @@ export async function GET(request: NextRequest) {
         website: business.website || null,
         tin: business.tin || null,
         logo_url: business.logo_url || null,
+        proposal_cover_color: (business as { proposal_cover_color?: string | null }).proposal_cover_color || null,
         default_currency: business.default_currency || null,
         start_date: (business as any).start_date || null,
         cit_rate_code: (business as any).cit_rate_code || "standard_25",
@@ -166,6 +168,7 @@ export async function PUT(request: NextRequest) {
       website,
       tin,
       logo_url,
+      proposal_cover_color,
       default_currency,
       start_date,
       cit_rate_code,
@@ -188,6 +191,21 @@ export async function PUT(request: NextRequest) {
         { error: "Default currency is required. Please select your business currency." },
         { status: 400 }
       )
+    }
+
+    let normalizedProposalCoverColor: string | null | undefined
+    if (proposal_cover_color !== undefined) {
+      if (proposal_cover_color === null || normStr(proposal_cover_color) === "") {
+        normalizedProposalCoverColor = null
+      } else {
+        normalizedProposalCoverColor = normalizeCoverColor(proposal_cover_color)
+        if (!normalizedProposalCoverColor) {
+          return NextResponse.json(
+            { error: "Proposal cover colour must be a 6-digit HEX value such as #1d4ed8." },
+            { status: 400 }
+          )
+        }
+      }
     }
 
     const trimmedCountry =
@@ -319,6 +337,9 @@ export async function PUT(request: NextRequest) {
     if (logo_url !== undefined) {
       updateData.logo_url =
         logo_url === null || (typeof logo_url === "string" && logo_url.trim() === "") ? null : logo_url
+    }
+    if (normalizedProposalCoverColor !== undefined) {
+      updateData.proposal_cover_color = normalizedProposalCoverColor
     }
     if (default_currency !== undefined) {
       updateData.default_currency = trimmedCurrency || null

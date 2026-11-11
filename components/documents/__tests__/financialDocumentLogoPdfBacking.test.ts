@@ -43,6 +43,10 @@ describe("PDF / document logo opaque backing (transparent PNG regression)", () =
         typography: "editorial",
         coverAssetId: null,
         coverImageUrl: null,
+
+        coverBackgroundColor: null,
+
+        coverImagePosition: null,
       },
       currency_code: "GHS",
       business: {

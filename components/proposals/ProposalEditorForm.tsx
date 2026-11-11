@@ -17,6 +17,14 @@ import {
   proposalStaffOutboundChannelsAllowed,
 } from "@/lib/proposals/proposalState"
 import { formatMoney } from "@/lib/money"
+import { CoverDesignPreview } from "@/components/proposals/CoverDesignPreview"
+import {
+  PROPOSAL_COVER_COLOR_PRESETS,
+  normalizeCoverColor,
+  normalizeCoverImagePosition,
+  type CoverImagePosition,
+} from "@/lib/proposals/coverStyle"
+import { getProposalTheme } from "@/lib/proposals/design"
 import { ExportLink } from "@/components/ui/ExportButton"
 import {
   PROPOSAL_TEMPLATE_META,
@@ -51,6 +59,7 @@ type CompanyProfile = {
   website: string | null
   tin: string | null
   logo_url: string | null
+  proposal_cover_color?: string | null
 }
 
 type AssetRow = {
@@ -248,6 +257,8 @@ export function ProposalEditorForm({
   const [accentColor, setAccentColor] = useState("")
   const [typography, setTypography] = useState<ProposalTypography>("sans")
   const [coverAssetId, setCoverAssetId] = useState("")
+  const [coverBackgroundColor, setCoverBackgroundColor] = useState("")
+  const [coverImagePosition, setCoverImagePosition] = useState<CoverImagePosition>("center")
   const [workflowStatus, setWorkflowStatus] = useState("draft")
   const [viewedAt, setViewedAt] = useState<string | null>(null)
   const [sentAt, setSentAt] = useState<string | null>(null)
@@ -454,6 +465,8 @@ export function ProposalEditorForm({
           : defaultTypographyForTemplate(rowTemplateId)
       )
       setCoverAssetId((p.cover_asset_id as string) || "")
+      setCoverBackgroundColor(normalizeCoverColor(p.cover_background_color) || "")
+      setCoverImagePosition(normalizeCoverImagePosition(p.cover_image_position) || "center")
       setWorkflowStatus((p.status as string) || "draft")
       setViewedAt((p.viewed_at as string) || null)
       setSentAt((p.sent_at as string) || null)
@@ -547,6 +560,9 @@ export function ProposalEditorForm({
   }, [pricingMode, lineRows.length])
 
   const imageAssets = assets.filter((a) => a.kind === "image")
+  const coverAsset = assets.find((a) => a.id === coverAssetId)
+  const templateDefaultCoverColor = getProposalTheme(templateId).coverBg
+  const effectiveCoverColor = normalizeCoverColor(coverBackgroundColor) || templateDefaultCoverColor
 
   const contentSegments = useMemo(() => segmentsFromSections(sections), [sections])
   const contentChapters = useMemo(() => chapterRangesFromSections(sections), [sections])
@@ -802,6 +818,10 @@ export function ProposalEditorForm({
         })
 
         const currencyOut = currencyOverride ? currencyCode.trim().toUpperCase() || null : null
+        const normalizedCoverColor = normalizeCoverColor(coverBackgroundColor)
+        if (coverBackgroundColor.trim() && !normalizedCoverColor) {
+          throw new Error("Cover background colour must be a 6-digit HEX value such as #1d4ed8.")
+        }
 
         body = {
           business_id: businessId,
@@ -811,6 +831,8 @@ export function ProposalEditorForm({
           brand_accent_color: accentColor.trim() || null,
           typography,
           cover_asset_id: coverAssetId || null,
+          cover_background_color: normalizedCoverColor,
+          cover_image_position: coverAssetId ? coverImagePosition : null,
           sections: cleanedSections,
           pricing_mode: pricingMode,
           pricing_payload: pricingPayload,
@@ -1620,14 +1642,14 @@ export function ProposalEditorForm({
 
               <div className="grid gap-5 sm:grid-cols-2">
                 <label className="block text-sm">
-                  <span className="font-medium text-slate-700">Accent colour</span>
+                  <span className="font-medium text-slate-700">Brand colour</span>
                   <div className="mt-2 flex items-center gap-3">
                     <input
                       type="color"
                       value={accentColor || "#0f766e"}
                       onChange={(event) => setAccentColor(event.target.value)}
                       className="h-10 w-14 cursor-pointer rounded-lg border border-slate-300 bg-white p-1"
-                      aria-label="Proposal accent colour"
+                      aria-label="Proposal brand colour"
                     />
                     <input
                       className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm uppercase shadow-sm"
@@ -1662,28 +1684,169 @@ export function ProposalEditorForm({
                 </label>
               </div>
 
-              <label className="block text-sm">
-                <span className="font-medium text-slate-700">Cover image</span>
-                <select
-                  className="mt-2 w-full max-w-xl rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm shadow-sm"
-                  value={coverAssetId}
-                  onChange={(event) => setCoverAssetId(event.target.value)}
-                >
-                  <option value="">Use the template cover</option>
-                  {imageAssets.map((asset) => (
-                    <option key={asset.id} value={asset.id}>
-                      {asset.file_name}
-                    </option>
-                  ))}
-                </select>
-                <span className="mt-1 block text-xs text-slate-500">
-                  Upload images in Media first. The cover image is only shown when it is client-visible.
-                </span>
-              </label>
-
               <div className="rounded-xl border border-slate-100 bg-slate-50/80 px-4 py-3 text-xs leading-relaxed text-slate-600">
                 <span className="font-semibold text-slate-800">Live document:</span> use Preview to open the digital book.
                 Existing proposals remain on Classic (legacy) unless you choose a new template.
+              </div>
+            </div>
+          </SectionCard>
+
+          <SectionCard
+            title="Cover Design"
+            subtitle="Customise the cover background and image framing without changing the template's typography, spacing or layout. The business remains the official issuer."
+          >
+            <div className={`grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px] ${contentLocked ? "pointer-events-none opacity-60" : ""}`}>
+              <div className="space-y-5">
+                <div>
+                  <div className="flex flex-wrap items-end justify-between gap-3">
+                    <label className="block text-sm">
+                      <span className="font-medium text-slate-700">Background colour</span>
+                      <div className="mt-2 flex items-center gap-3">
+                        <input
+                          type="color"
+                          value={effectiveCoverColor}
+                          onChange={(event) => setCoverBackgroundColor(event.target.value)}
+                          className="h-10 w-14 cursor-pointer rounded-lg border border-slate-300 bg-white p-1"
+                          aria-label="Cover background colour"
+                        />
+                        <input
+                          className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm uppercase shadow-sm"
+                          value={coverBackgroundColor}
+                          onChange={(event) => setCoverBackgroundColor(event.target.value.toUpperCase())}
+                          placeholder="Template default"
+                          maxLength={7}
+                          aria-label="Cover background HEX colour"
+                        />
+                        <button
+                          type="button"
+                          className="text-xs font-semibold text-slate-600 hover:text-slate-900"
+                          onClick={() => setCoverBackgroundColor("")}
+                        >
+                          Reset
+                        </button>
+                      </div>
+                    </label>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setCoverBackgroundColor("")}
+                      className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium ${
+                        !coverBackgroundColor
+                          ? "border-slate-900 bg-slate-900 text-white"
+                          : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                      }`}
+                    >
+                      Template default
+                    </button>
+                    {companyProfile?.proposal_cover_color ? (
+                      <button
+                        type="button"
+                        onClick={() => setCoverBackgroundColor(companyProfile.proposal_cover_color || "")}
+                        className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:border-slate-300"
+                      >
+                        Business default
+                        <span
+                          className="h-3 w-3 rounded-full border border-black/10"
+                          style={{ backgroundColor: companyProfile.proposal_cover_color }}
+                        />
+                      </button>
+                    ) : null}
+                    {PROPOSAL_COVER_COLOR_PRESETS.map((preset) => (
+                      <button
+                        key={preset.value}
+                        type="button"
+                        onClick={() => setCoverBackgroundColor(preset.value)}
+                        className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium ${
+                          coverBackgroundColor.toLowerCase() === preset.value
+                            ? "border-slate-900 bg-slate-900 text-white"
+                            : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                        }`}
+                      >
+                        <span className="h-3 w-3 rounded-full border border-black/10" style={{ backgroundColor: preset.value }} />
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
+                  {coverBackgroundColor.trim() && !normalizeCoverColor(coverBackgroundColor) ? (
+                    <p className="mt-2 text-xs font-medium text-red-700">
+                      Use a 6-digit HEX value such as #1d4ed8, or reset to the template default.
+                    </p>
+                  ) : (
+                    <p className="mt-2 text-xs leading-relaxed text-slate-500">
+                      Text colour and overlay are adjusted automatically for readable contrast. The saved colour is a
+                      snapshot on this proposal; existing proposals do not change when the business default changes.
+                    </p>
+                  )}
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="block text-sm">
+                    <span className="font-medium text-slate-700">Cover image</span>
+                    <select
+                      className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm shadow-sm"
+                      value={coverAssetId}
+                      onChange={(event) => setCoverAssetId(event.target.value)}
+                    >
+                      <option value="">Use the template cover</option>
+                      {imageAssets.map((asset) => (
+                        <option key={asset.id} value={asset.id}>
+                          {asset.file_name}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="mt-1 block text-xs text-slate-500">
+                      Upload images in Media first. JPEG, PNG and WebP are supported.
+                    </span>
+                  </label>
+                  <label className="block text-sm">
+                    <span className="font-medium text-slate-700">Image position</span>
+                    <select
+                      className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm shadow-sm disabled:opacity-50"
+                      value={coverImagePosition}
+                      onChange={(event) => setCoverImagePosition(event.target.value as CoverImagePosition)}
+                      disabled={!coverAssetId}
+                    >
+                      <option value="center">Center</option>
+                      <option value="top">Top</option>
+                      <option value="bottom">Bottom</option>
+                      <option value="left">Left</option>
+                      <option value="right">Right</option>
+                    </select>
+                    <span className="mt-1 block text-xs text-slate-500">
+                      Changes how the cover image is cropped when it fills the cover.
+                    </span>
+                  </label>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCoverBackgroundColor("")
+                    setCoverAssetId("")
+                    setCoverImagePosition("center")
+                  }}
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+                >
+                  Reset to template default
+                </button>
+              </div>
+
+              <div>
+                <CoverDesignPreview
+                  templateId={templateId}
+                  accentColor={accentColor}
+                  typography={typography}
+                  backgroundColor={coverBackgroundColor}
+                  imageUrl={coverAsset?.signed_url || null}
+                  imagePosition={coverImagePosition}
+                  title={title}
+                  businessName={
+                    companyProfile?.trading_name || companyProfile?.legal_name || companyProfile?.name || "Your business"
+                  }
+                  logoUrl={companyProfile?.logo_url || null}
+                  customerName={selectedCustomer?.name || null}
+                />
               </div>
             </div>
           </SectionCard>
