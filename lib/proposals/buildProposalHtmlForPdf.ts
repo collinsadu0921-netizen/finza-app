@@ -580,6 +580,7 @@ const BASE_CSS = `
   .pdf-chapter-body { max-width: 100%; }
   .pdf-section-heading { font-family: var(--pdf-heading-font); margin: 5mm 0 1.5mm; font-size: 12.5pt; line-height: 1.2; font-weight: 600; color: var(--pdf-ink); break-after: avoid; page-break-after: avoid; }
   .pdf-paragraph { margin: 0 0 3.2mm; font-size: 10.5pt; color: var(--pdf-ink); orphans: 3; widows: 3; }
+  .pdf-paragraph strong, .pdf-list strong, .pdf-caption strong { font-weight: 600; }
   .pdf-paragraph--short { break-inside: avoid; page-break-inside: avoid; }
   .pdf-chapter--lead .pdf-paragraph:first-of-type { font-size: 13pt; line-height: 1.55; color: var(--pdf-ink); }
   .pdf-list { margin: 2mm 0 4mm 5mm; padding: 0; }
