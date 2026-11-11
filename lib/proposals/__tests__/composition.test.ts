@@ -28,6 +28,7 @@ function baseModel(overrides: Partial<ProposalRenderModel> = {}): ProposalRender
       default_currency: "GHS",
     },
     customer: { name: "Example Client", email: "client@example.com" },
+    prepared_by_name: null,
     sections: [
       { type: "heading", level: 1, text: "Proposal" },
       { type: "paragraph", text: "Thank you for the opportunity." },

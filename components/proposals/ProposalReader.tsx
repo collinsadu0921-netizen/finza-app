@@ -12,6 +12,7 @@ import {
   type TouchEvent,
 } from "react"
 import BusinessLogoDisplay from "@/components/BusinessLogoDisplay"
+import { InlineFormattedText } from "@/components/proposals/InlineFormattedText"
 import {
   composeProposalBook,
   type ProposalBook,
@@ -92,8 +93,8 @@ function CustomPricingView({ notes }: { notes: string }) {
             <div key={`rate-${index}`} className="proposal-rate-group">
               {chunk.rows.map((row, rowIndex) => (
                 <div key={`row-${rowIndex}`} className="proposal-rate-row">
-                  <span className="proposal-rate-label">{row.label}</span>
-                  <span className="proposal-rate-value">{row.value}</span>
+                  <span className="proposal-rate-label"><InlineFormattedText text={row.label} /></span>
+                  <span className="proposal-rate-value"><InlineFormattedText text={row.value} /></span>
                 </div>
               ))}
             </div>
@@ -103,14 +104,14 @@ function CustomPricingView({ notes }: { notes: string }) {
           return (
             <ul key={`bullets-${index}`} className="proposal-bullet-list">
               {chunk.items.map((item, itemIndex) => (
-                <li key={itemIndex}>{item}</li>
+                <li key={itemIndex}><InlineFormattedText text={item} /></li>
               ))}
             </ul>
           )
         }
         const block = chunk.block
-        if (block.type === "heading") return <p key={`h-${index}`} className="proposal-rate-heading">{block.text}</p>
-        if (block.type === "paragraph") return <p key={`p-${index}`} className="proposal-body-text">{block.text}</p>
+        if (block.type === "heading") return <p key={`h-${index}`} className="proposal-rate-heading"><InlineFormattedText text={block.text} /></p>
+        if (block.type === "paragraph") return <p key={`p-${index}`} className="proposal-body-text"><InlineFormattedText text={block.text} /></p>
         if (block.type === "spacer") return <div key={`sp-${index}`} className="proposal-spacer" aria-hidden />
         return null
       })}
@@ -136,7 +137,7 @@ function PricingView({
       <div className="proposal-pricing proposal-pricing-fixed">
         <p className="proposal-eyebrow">Investment</p>
         <div className="proposal-fixed-row">
-          <span>{pricing.label?.trim() || "Total investment"}</span>
+          <span><InlineFormattedText text={pricing.label?.trim() || "Total investment"} /></span>
           <strong>{formatProposalMoney(Number(pricing.amount) || 0, currency)}</strong>
         </div>
         <PricingNote />
@@ -166,7 +167,7 @@ function PricingView({
                 const discount = Number(item.discount_amount ?? 0)
                 return (
                   <tr key={`${item.description}-${index}`}>
-                    <td>{item.description}</td>
+                    <td><InlineFormattedText text={item.description} /></td>
                     <td className="num qty">{item.quantity != null ? item.quantity : "—"}</td>
                     {showDiscount ? <td className="num discount">{discount > 0 ? formatProposalMoney(discount, currency) : "—"}</td> : null}
                     <td className="num strong amount">{formatProposalMoney(lineItemAmount(item), currency)}</td>
@@ -253,15 +254,15 @@ function BlockView({ block }: { block: ProposalRenderSection }) {
   switch (block.type) {
     case "heading": {
       const Tag = (block.level <= 3 ? "h3" : "h4") as "h3" | "h4"
-      return <Tag className="proposal-section-heading">{block.text}</Tag>
+      return <Tag className="proposal-section-heading"><InlineFormattedText text={block.text} /></Tag>
     }
     case "paragraph":
-      return <p className="proposal-body-text">{block.text}</p>
+      return <p className="proposal-body-text"><InlineFormattedText text={block.text} /></p>
     case "bullet_list":
       return (
         <ul className="proposal-bullet-list">
           {block.items.map((item, index) => (
-            <li key={index}>{item}</li>
+            <li key={index}><InlineFormattedText text={item} /></li>
           ))}
         </ul>
       )
@@ -276,7 +277,7 @@ function BlockView({ block }: { block: ProposalRenderSection }) {
             unavailable={block.unavailable}
             className="proposal-image-frame--full"
           />
-          {block.caption ? <figcaption>{block.caption}</figcaption> : null}
+          {block.caption ? <figcaption><InlineFormattedText text={block.caption} /></figcaption> : null}
         </figure>
       )
     case "gallery":
@@ -294,7 +295,7 @@ function BlockView({ block }: { block: ProposalRenderSection }) {
               />
             ))}
           </div>
-          {block.caption ? <p className="proposal-caption">{block.caption}</p> : null}
+          {block.caption ? <p className="proposal-caption"><InlineFormattedText text={block.caption} /></p> : null}
         </div>
       )
     case "divider":
@@ -308,6 +309,8 @@ function CoverPage({ book }: { book: ProposalBook }) {
   const cover = book.cover
   const issued = asDateLabel(cover.createdAt)
   const expires = asDateLabel(cover.expiresAt)
+  const preparedBy =
+    cover.preparedByName || cover.businessTradingName || cover.businessLegalName || cover.businessName
   return (
     <article
       className={`proposal-page proposal-cover${cover.style.isCustom ? " proposal-cover--custom" : ""}${
@@ -351,7 +354,7 @@ function CoverPage({ book }: { book: ProposalBook }) {
         <div className="proposal-cover-meta">
           {issued ? <div><span>Issued</span><strong>{issued}</strong></div> : null}
           {expires ? <div><span>Valid until</span><strong>{expires}</strong></div> : null}
-          <div><span>Prepared by</span><strong>{cover.businessTradingName || cover.businessLegalName || cover.businessName}</strong></div>
+          <div><span>Prepared by</span><strong>{preparedBy}</strong></div>
         </div>
       </div>
     </article>

@@ -28,6 +28,7 @@ function model(overrides: Partial<ProposalRenderModel> = {}): ProposalRenderMode
       default_currency: "GHS",
     },
     customer: { name: "Example Client", email: "client@example.com" },
+    prepared_by_name: null,
     sections: [
       { type: "heading", level: 1, text: "Proposal" },
       { type: "paragraph", text: "Thank you for the opportunity." },
@@ -81,6 +82,22 @@ describe("buildProposalHtmlForPdf", () => {
   it("scales long cover titles consistently in the PDF", () => {
     const html = buildProposalHtmlForPdf(model({ title: "A".repeat(185) }))
     expect(html).toContain("--pdf-cover-title-scale:0.55")
+  })
+
+  it("renders bold content safely and uses the proposal prepared-by byline", () => {
+    const html = buildProposalHtmlForPdf(
+      model({
+        prepared_by_name: "Nana Ama Boateng",
+        sections: [
+          { type: "paragraph", text: "A **bold** word and <script>alert(1)</script>" },
+          { type: "bullet_list", items: ["**First** bullet", "Plain bullet"] },
+        ],
+      })
+    )
+    expect(html).toContain("<strong>bold</strong>")
+    expect(html).toContain("<strong>First</strong>")
+    expect(html).not.toContain("<script>alert(1)</script>")
+    expect(html).toContain("Nana Ama Boateng")
   })
 
   it("renders a cover, chapter pages, pricing total, attachments and acceptance", () => {

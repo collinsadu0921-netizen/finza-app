@@ -44,4 +44,13 @@ describe("customPricingNotesToHtml", () => {
     expect(html).toContain("A")
     expect(html).toContain("B")
   })
+
+  it("renders bold in custom pricing text and escapes injected HTML", () => {
+    const html = customPricingNotesToHtml("**Pricing** Schedule\n\n- **Included** item\n\nLabel: **value** <script>x</script>")
+    expect(html).toContain("<strong>Pricing</strong>")
+    expect(html).toContain("<strong>Included</strong>")
+    expect(html).toContain("<strong>value</strong>")
+    expect(html).toContain("&lt;script&gt;")
+    expect(html).not.toContain("<script>")
+  })
 })

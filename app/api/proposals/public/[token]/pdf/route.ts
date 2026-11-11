@@ -42,7 +42,7 @@ export async function GET(
     const { data: proposal, error: pErr } = await admin
       .from("proposals")
       .select(
-        "id, business_id, customer_id, title, proposal_number, status, template_id, brand_accent_color, cover_asset_id, cover_background_color, cover_image_position, typography, sections, pricing_mode, pricing_payload, currency_code, public_token, expires_at, created_at, accepted_at, rejected_at, rejected_reason"
+        "id, business_id, customer_id, title, proposal_number, status, template_id, brand_accent_color, cover_asset_id, cover_background_color, cover_image_position, prepared_by_name, typography, sections, pricing_mode, pricing_payload, currency_code, public_token, expires_at, created_at, accepted_at, rejected_at, rejected_reason"
       )
       .eq("public_token", token)
       .is("deleted_at", null)

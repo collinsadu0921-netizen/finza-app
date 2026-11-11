@@ -83,7 +83,7 @@ export async function GET(
     const { data: proposal, error: pErr } = await supabase
       .from("proposals")
       .select(
-        "id, business_id, customer_id, title, proposal_number, status, template_id, brand_accent_color, cover_asset_id, cover_background_color, cover_image_position, typography, sections, pricing_mode, pricing_payload, currency_code, public_token, expires_at, sent_at, viewed_at, accepted_at, rejected_at, rejected_reason, converted_estimate_id, converted_invoice_id, converted_at, converted_invoice_at, created_at, updated_at"
+        "id, business_id, customer_id, title, proposal_number, status, template_id, brand_accent_color, cover_asset_id, cover_background_color, cover_image_position, prepared_by_name, typography, sections, pricing_mode, pricing_payload, currency_code, public_token, expires_at, sent_at, viewed_at, accepted_at, rejected_at, rejected_reason, converted_estimate_id, converted_invoice_id, converted_at, converted_invoice_at, created_at, updated_at"
       )
       .eq("id", proposalId)
       .eq("business_id", businessId)
@@ -149,6 +149,7 @@ const putSchema = z
     cover_asset_id: z.string().uuid().nullable().optional(),
     cover_background_color: z.string().max(7).nullable().optional(),
     cover_image_position: z.enum(["center", "top", "bottom", "left", "right"]).nullable().optional(),
+    prepared_by_name: z.string().max(200).nullable().optional(),
     typography: z.enum(["sans", "serif", "editorial"]).optional(),
     pricing_mode: z.enum(["none", "fixed", "line_items", "custom"]).optional(),
     pricing_payload: z.unknown().optional(),
@@ -302,6 +303,11 @@ export async function PUT(
     if (body.data.cover_image_position !== undefined) {
       patch.cover_image_position = normalizeCoverImagePosition(body.data.cover_image_position)
     }
+    if (body.data.prepared_by_name !== undefined) {
+      const preparedBy =
+        typeof body.data.prepared_by_name === "string" ? body.data.prepared_by_name.trim() : ""
+      patch.prepared_by_name = preparedBy || null
+    }
     if (body.data.typography !== undefined) {
       patch.typography = normalizeTypography(body.data.typography)
     }
@@ -327,7 +333,7 @@ export async function PUT(
       .update(patch)
       .eq("id", proposalId)
       .eq("business_id", businessId)
-      .select("id, title, status, template_id, brand_accent_color, cover_asset_id, cover_background_color, cover_image_position, typography, customer_id, sections, pricing_mode, pricing_payload, currency_code, updated_at")
+      .select("id, title, status, template_id, brand_accent_color, cover_asset_id, cover_background_color, cover_image_position, prepared_by_name, typography, customer_id, sections, pricing_mode, pricing_payload, currency_code, updated_at")
       .single()
 
     if (error || !row) {

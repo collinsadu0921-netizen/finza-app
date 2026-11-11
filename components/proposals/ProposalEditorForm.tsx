@@ -18,6 +18,7 @@ import {
 } from "@/lib/proposals/proposalState"
 import { formatMoney } from "@/lib/money"
 import { CoverDesignPreview } from "@/components/proposals/CoverDesignPreview"
+import { BoldTextarea } from "@/components/proposals/BoldTextarea"
 import {
   PROPOSAL_COVER_COLOR_PRESETS,
   normalizeCoverColor,
@@ -259,6 +260,7 @@ export function ProposalEditorForm({
   const [coverAssetId, setCoverAssetId] = useState("")
   const [coverBackgroundColor, setCoverBackgroundColor] = useState("")
   const [coverImagePosition, setCoverImagePosition] = useState<CoverImagePosition>("center")
+  const [preparedByName, setPreparedByName] = useState("")
   const [workflowStatus, setWorkflowStatus] = useState("draft")
   const [viewedAt, setViewedAt] = useState<string | null>(null)
   const [sentAt, setSentAt] = useState<string | null>(null)
@@ -467,6 +469,7 @@ export function ProposalEditorForm({
       setCoverAssetId((p.cover_asset_id as string) || "")
       setCoverBackgroundColor(normalizeCoverColor(p.cover_background_color) || "")
       setCoverImagePosition(normalizeCoverImagePosition(p.cover_image_position) || "center")
+      setPreparedByName(typeof p.prepared_by_name === "string" ? p.prepared_by_name : "")
       setWorkflowStatus((p.status as string) || "draft")
       setViewedAt((p.viewed_at as string) || null)
       setSentAt((p.sent_at as string) || null)
@@ -833,6 +836,7 @@ export function ProposalEditorForm({
           cover_asset_id: coverAssetId || null,
           cover_background_color: normalizedCoverColor,
           cover_image_position: coverAssetId ? coverImagePosition : null,
+          prepared_by_name: preparedByName.trim() || null,
           sections: cleanedSections,
           pricing_mode: pricingMode,
           pricing_payload: pricingPayload,
@@ -1819,6 +1823,25 @@ export function ProposalEditorForm({
                   </label>
                 </div>
 
+                <label className="block text-sm">
+                  <span className="font-medium text-slate-700">Prepared by</span>
+                  <input
+                    className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm shadow-sm"
+                    value={preparedByName}
+                    onChange={(event) => setPreparedByName(event.target.value)}
+                    placeholder={
+                      companyProfile?.trading_name ||
+                      companyProfile?.legal_name ||
+                      companyProfile?.name ||
+                      "Name shown on the cover"
+                    }
+                    maxLength={200}
+                  />
+                  <span className="mt-1 block text-xs text-slate-500">
+                    Saved on this proposal and used in the reader and PDF. Leave blank to use the business profile name.
+                  </span>
+                </label>
+
                 <button
                   type="button"
                   onClick={() => {
@@ -1846,6 +1869,13 @@ export function ProposalEditorForm({
                   }
                   logoUrl={companyProfile?.logo_url || null}
                   customerName={selectedCustomer?.name || null}
+                  preparedByName={
+                    preparedByName.trim() ||
+                    companyProfile?.trading_name ||
+                    companyProfile?.legal_name ||
+                    companyProfile?.name ||
+                    null
+                  }
                 />
               </div>
             </div>
@@ -1853,7 +1883,7 @@ export function ProposalEditorForm({
 
           <SectionCard
             title="Content"
-            subtitle="Executive summary, scope, timeline, terms, and other narrative blocks - each section is a heading plus body copy."
+            subtitle="Executive summary, scope, timeline, terms, and other narrative blocks - each section is a heading plus body copy. Select text and click Bold or press Ctrl+B; bold appears in the reader and PDF."
           >
             <div className={`space-y-6 ${contentLocked ? "pointer-events-none opacity-60" : ""}`}>
               {draftGuidanceCount > 0 ? (
@@ -1981,10 +2011,10 @@ export function ProposalEditorForm({
                         ) : null}
                         <label className="block text-sm">
                           <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Content</span>
-                          <textarea
-                            className="mt-2 min-h-[128px] w-full rounded-lg border border-slate-200 px-3 py-3 text-sm leading-relaxed text-slate-800"
+                          <BoldTextarea
+                            className="mt-1 min-h-[128px] w-full rounded-lg border border-slate-200 px-3 py-3 text-sm leading-relaxed text-slate-800"
                             value={para.text}
-                            onChange={(e) => updatePairBody(seg.paraIdx, e.target.value)}
+                            onValueChange={(value) => updatePairBody(seg.paraIdx, value)}
                             placeholder="What the client should know for this part of the proposal."
                           />
                         </label>
@@ -2073,23 +2103,24 @@ export function ProposalEditorForm({
                         {block.type === "paragraph" ? (
                           <label className="block text-xs">
                             <span className="text-slate-600">Paragraph</span>
-                            <textarea
+                            <BoldTextarea
                               className="mt-1 min-h-[100px] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm leading-relaxed"
                               value={block.text}
-                              onChange={(e) => updateBlock(idx, { ...block, text: e.target.value })}
+                              onValueChange={(value) => updateBlock(idx, { ...block, text: value })}
                             />
                           </label>
                         ) : null}
                         {block.type === "bullet_list" ? (
                           <label className="block text-xs">
                             <span className="text-slate-600">One bullet per line</span>
-                            <textarea
+                            <BoldTextarea
+                              perLine
                               className="mt-1 min-h-[100px] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm leading-relaxed"
                               value={block.items.join("\n")}
-                              onChange={(e) =>
+                              onValueChange={(value) =>
                                 updateBlock(idx, {
                                   ...block,
-                                  items: e.target.value.split("\n").map((l) => l.trim()).filter(Boolean),
+                                  items: value.split("\n").map((l) => l.trim()).filter(Boolean),
                                 })
                               }
                             />
@@ -2402,10 +2433,10 @@ export function ProposalEditorForm({
                 <div className="space-y-2">
                   <label className="block text-sm">
                     <span className="font-medium text-slate-700">Rate schedule / custom pricing</span>
-                    <textarea
-                      className="mt-2 min-h-[200px] w-full rounded-lg border border-slate-300 px-3 py-3 text-sm leading-relaxed shadow-sm"
+                    <BoldTextarea
+                      className="mt-1 min-h-[200px] w-full rounded-lg border border-slate-300 px-3 py-3 text-sm leading-relaxed shadow-sm"
                       value={customNotes}
-                      onChange={(e) => setCustomNotes(e.target.value)}
+                      onValueChange={setCustomNotes}
                       placeholder={`Pricing Schedule\n\n2 Bedroom / 3 Bathroom apartment turnover cleaning: GHS 1,250 per apartment per turnover\n\n1 Bedroom / 1 Bathroom apartment turnover cleaning: GHS 950 per apartment per turnover\n\n- Optional add-on example line\n\nHeavy reset or deep cleaning: priced after assessment`}
                     />
                   </label>

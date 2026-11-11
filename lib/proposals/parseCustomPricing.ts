@@ -1,4 +1,4 @@
-import { escapeHtml } from "./htmlEscape"
+import { inlineFormattingToHtml } from "./inlineFormatting"
 
 export type CustomPricingBlock =
   | { type: "spacer" }
@@ -132,14 +132,14 @@ export function customPricingNotesToHtml(raw: string | null | undefined): string
       const inner = chunk.rows
         .map(
           (r) =>
-            `<div class="cp-rate-row"><span class="cp-label">${escapeHtml(r.label)}</span><span class="cp-value">${escapeHtml(r.value)}</span></div>`
+            `<div class="cp-rate-row"><span class="cp-label">${inlineFormattingToHtml(r.label)}</span><span class="cp-value">${inlineFormattingToHtml(r.value)}</span></div>`
         )
         .join("")
       parts.push(`<div class="cp-rate-group">${inner}</div>`)
       continue
     }
     if (chunk.kind === "bullet_group") {
-      const lis = chunk.items.map((t) => `<li class="cp-li">${escapeHtml(t)}</li>`).join("")
+      const lis = chunk.items.map((t) => `<li class="cp-li">${inlineFormattingToHtml(t)}</li>`).join("")
       parts.push(`<ul class="cp-ul">${lis}</ul>`)
       continue
     }
@@ -150,10 +150,10 @@ export function customPricingNotesToHtml(raw: string | null | undefined): string
         parts.push(`<div class="cp-spacer" aria-hidden="true"></div>`)
         break
       case "heading":
-        parts.push(`<p class="cp-h">${escapeHtml(b.text)}</p>`)
+        parts.push(`<p class="cp-h">${inlineFormattingToHtml(b.text)}</p>`)
         break
       case "paragraph":
-        parts.push(`<p class="cp-p">${escapeHtml(b.text)}</p>`)
+        parts.push(`<p class="cp-p">${inlineFormattingToHtml(b.text)}</p>`)
         break
       default:
         break

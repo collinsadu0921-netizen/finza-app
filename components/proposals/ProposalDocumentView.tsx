@@ -12,6 +12,7 @@ import {
 } from "@/lib/proposals/pricingSectionCopy"
 import { formatMoney } from "@/lib/money"
 import BusinessLogoDisplay from "@/components/BusinessLogoDisplay"
+import { InlineFormattedText } from "@/components/proposals/InlineFormattedText"
 
 function CustomPricingBlocks({ notes }: { notes: string }) {
   const chunks = useMemo(() => chunkCustomPricingForDisplay(parseCustomPricingNotes(notes)), [notes])
@@ -30,9 +31,9 @@ function CustomPricingBlocks({ notes }: { notes: string }) {
               key={ri}
               className="grid grid-cols-1 gap-1 border-b border-slate-200/80 px-3 py-2.5 last:border-b-0 sm:grid-cols-[minmax(0,1fr)_minmax(10.5rem,38%)] sm:items-start sm:gap-x-5 sm:px-3.5 sm:py-2.5"
             >
-              <span className="min-w-0 text-[14px] font-medium leading-snug text-slate-700 [overflow-wrap:anywhere]">{r.label}</span>
+              <span className="min-w-0 text-[14px] font-medium leading-snug text-slate-700 [overflow-wrap:anywhere]"><InlineFormattedText text={r.label} /></span>
               <span className="text-[14px] font-semibold leading-snug text-slate-900 sm:text-right tabular-nums [overflow-wrap:anywhere]">
-                {r.value}
+                <InlineFormattedText text={r.value} />
               </span>
             </div>
           ))}
@@ -47,7 +48,7 @@ function CustomPricingBlocks({ notes }: { notes: string }) {
           className="mt-2 list-disc space-y-1 pl-5 text-[14px] leading-snug text-slate-700 marker:text-slate-400"
         >
           {chunk.items.map((t, j) => (
-            <li key={j}>{t}</li>
+            <li key={j}><InlineFormattedText text={t} /></li>
           ))}
         </ul>
       )
@@ -62,14 +63,14 @@ function CustomPricingBlocks({ notes }: { notes: string }) {
       case "heading":
         nodes.push(
           <p key={`cp-h-${key++}`} className="mb-1.5 mt-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500 first:mt-0">
-            {b.text}
+            <InlineFormattedText text={b.text} />
           </p>
         )
         break
       case "paragraph":
         nodes.push(
           <p key={`cp-p-${key++}`} className="mt-1.5 text-[14px] leading-relaxed text-slate-700">
-            {b.text}
+            <InlineFormattedText text={b.text} />
           </p>
         )
         break
@@ -90,7 +91,7 @@ function PricingPanel({ pricing, currencyCode }: { pricing: PricingPayload; curr
     return (
       <div className="rounded-2xl border border-slate-200/90 bg-gradient-to-br from-slate-50 to-white p-8 shadow-sm">
         {pricing.label ? (
-          <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">{pricing.label}</p>
+          <p className="text-xs font-semibold uppercase tracking-wider text-slate-500"><InlineFormattedText text={pricing.label} /></p>
         ) : null}
         <p className="mt-1 text-4xl font-bold tracking-tight text-slate-900 tabular-nums">{formatMoney(pricing.amount, code)}</p>
       </div>
@@ -123,7 +124,7 @@ function PricingPanel({ pricing, currencyCode }: { pricing: PricingPayload; curr
                     : it.unit_price ?? 0
               return (
                 <tr key={i} className="border-t border-slate-100">
-                  <td className="px-5 py-3.5 align-top text-slate-800">{it.description}</td>
+                  <td className="px-5 py-3.5 align-top text-slate-800"><InlineFormattedText text={it.description} /></td>
                   <td className="px-5 py-3.5 text-right tabular-nums text-slate-600">{it.quantity != null ? it.quantity : "—"}</td>
                   {showDisc ? (
                     <td className="px-5 py-3.5 text-right tabular-nums text-slate-600">
@@ -176,20 +177,20 @@ function renderSectionBlock(s: ProposalRenderSection, key: string, doc: boolean)
           key,
           className: `font-bold text-slate-900 first:mt-0 ${doc ? `mt-10 ${size}` : "mt-6"}`,
         },
-        s.text
+        <InlineFormattedText key={`${key}-text`} text={s.text} />
       )
     }
     case "paragraph":
       return (
         <p key={key} className={`whitespace-pre-wrap leading-relaxed ${doc ? "mt-4 text-[15px] text-slate-700" : "text-sm"}`}>
-          {s.text}
+          <InlineFormattedText text={s.text} />
         </p>
       )
     case "bullet_list":
       return (
         <ul key={key} className={`list-disc pl-5 ${doc ? "mt-4 space-y-2 text-[15px] text-slate-700" : "space-y-1 text-sm"}`}>
           {s.items.map((it, i) => (
-            <li key={i}>{it}</li>
+            <li key={i}><InlineFormattedText text={it} /></li>
           ))}
         </ul>
       )
@@ -198,7 +199,7 @@ function renderSectionBlock(s: ProposalRenderSection, key: string, doc: boolean)
         <figure key={key} className="space-y-2">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={s.src} alt="" className="max-h-[480px] w-full rounded-lg border border-slate-200 object-contain" />
-          {s.caption ? <figcaption className="text-center text-xs text-slate-500">{s.caption}</figcaption> : null}
+          {s.caption ? <figcaption className="text-center text-xs text-slate-500"><InlineFormattedText text={s.caption} /></figcaption> : null}
         </figure>
       )
     case "gallery":
@@ -215,7 +216,7 @@ function renderSectionBlock(s: ProposalRenderSection, key: string, doc: boolean)
               />
             ))}
           </div>
-          {s.caption ? <p className="text-center text-xs text-slate-500">{s.caption}</p> : null}
+          {s.caption ? <p className="text-center text-xs text-slate-500"><InlineFormattedText text={s.caption} /></p> : null}
         </div>
       )
     case "divider":
@@ -323,6 +324,7 @@ export function ProposalDocumentView({
         : "p-4 sm:p-6"
 
   const bizLabel = model.business.trading_name || model.business.legal_name || model.business.name
+  const preparedByLabel = model.prepared_by_name || bizLabel
   const printSurface =
     unifiedDocument
       ? "proposal-print-document print:max-w-none print:shadow-none print:rounded-md print:border print:border-slate-300"
@@ -351,7 +353,7 @@ export function ProposalDocumentView({
               <div className="sm:pt-0.5">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Prepared by</p>
                 <p className="mt-1 text-lg font-semibold leading-snug tracking-tight text-slate-900 sm:text-xl lg:whitespace-nowrap">
-                  {bizLabel}
+                  {preparedByLabel}
                 </p>
               </div>
             </div>

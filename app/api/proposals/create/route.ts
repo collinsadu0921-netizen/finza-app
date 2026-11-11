@@ -17,6 +17,7 @@ const bodySchema = z.object({
   typography: z.enum(["sans", "serif", "editorial"]).optional(),
   cover_background_color: z.string().max(7).nullable().optional(),
   cover_image_position: z.enum(["center", "top", "bottom", "left", "right"]).nullable().optional(),
+  prepared_by_name: z.string().max(200).nullable().optional(),
   pricing_mode: z.enum(["none", "fixed", "line_items", "custom"]).optional(),
   pricing_payload: z.unknown().optional(),
   currency_code: z.string().max(8).nullable().optional(),
@@ -81,14 +82,25 @@ export async function POST(request: NextRequest) {
 
     const { data: businessDefaults } = await supabase
       .from("businesses")
-      .select("proposal_cover_color")
+      .select("name, legal_name, trading_name, proposal_cover_color")
       .eq("id", businessId)
       .maybeSingle()
-    const businessCoverColor = normalizeCoverColor(
-      (businessDefaults as { proposal_cover_color?: string | null } | null)?.proposal_cover_color
-    )
+    const businessRow = businessDefaults as {
+      name?: string | null
+      legal_name?: string | null
+      trading_name?: string | null
+      proposal_cover_color?: string | null
+    } | null
+    const businessCoverColor = normalizeCoverColor(businessRow?.proposal_cover_color)
+    const businessDisplayName =
+      businessRow?.trading_name?.trim() ||
+      businessRow?.legal_name?.trim() ||
+      businessRow?.name?.trim() ||
+      null
     const requestedCoverColor = normalizeCoverColor(body.data.cover_background_color)
     const coverImagePosition = normalizeCoverImagePosition(body.data.cover_image_position)
+    const requestedPreparedBy =
+      typeof body.data.prepared_by_name === "string" ? body.data.prepared_by_name.trim() : ""
 
     const { data: row, error } = await supabase
       .from("proposals")
@@ -101,6 +113,7 @@ export async function POST(request: NextRequest) {
         typography,
         cover_background_color: requestedCoverColor ?? businessCoverColor,
         cover_image_position: coverImagePosition,
+        prepared_by_name: requestedPreparedBy || businessDisplayName,
         sections,
         pricing_mode,
         pricing_payload,

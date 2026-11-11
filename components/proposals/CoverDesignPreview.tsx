@@ -16,6 +16,7 @@ export function CoverDesignPreview({
   businessName,
   logoUrl,
   customerName,
+  preparedByName,
 }: {
   templateId: ProposalTemplateId
   accentColor: string
@@ -27,6 +28,7 @@ export function CoverDesignPreview({
   businessName: string
   logoUrl: string | null
   customerName: string | null
+  preparedByName: string | null
 }) {
   const theme = getProposalTheme(templateId, {
     accentColor: accentColor || null,
@@ -113,6 +115,11 @@ export function CoverDesignPreview({
             {customerName ? (
               <p className="mt-3 text-[11px]" style={{ color: style.muted }}>
                 Prepared for <strong style={{ color: style.ink }}>{customerName}</strong>
+              </p>
+            ) : null}
+            {preparedByName ? (
+              <p className="mt-1 text-[10px]" style={{ color: style.muted }}>
+                Prepared by <strong style={{ color: style.ink }}>{preparedByName}</strong>
               </p>
             ) : null}
           </div>

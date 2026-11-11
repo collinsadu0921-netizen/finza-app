@@ -64,6 +64,8 @@ export type ProposalRenderModel = {
   currency_code: string
   business: ProposalRenderBusiness
   customer: ProposalRenderCustomer | null
+  /** Per-proposal cover byline. NULL keeps the legacy business-profile fallback. */
+  prepared_by_name: string | null
   sections: ProposalRenderSection[]
   pricing: PricingPayload
   attachments: ProposalRenderAttachment[]
@@ -95,6 +97,11 @@ function blockId(b: ProposalSectionBlock): string | undefined {
   return "id" in b && typeof b.id === "string" ? b.id : undefined
 }
 
+function normalizePreparedByName(value: unknown): string | null {
+  const text = typeof value === "string" ? value.trim() : ""
+  return text || null
+}
+
 /** ISO code for display: explicit proposal override, else business default, else GHS. */
 function resolveProposalDisplayCurrency(
   proposalCurrency: string | null | undefined,
@@ -116,6 +123,7 @@ export function normalizeProposalForRender(input: {
   cover_asset_id?: string | null
   cover_background_color?: string | null
   cover_image_position?: string | null
+  prepared_by_name?: string | null
   typography?: string | null
   currency_code?: string | null
   business: ProposalRenderBusiness
@@ -263,6 +271,7 @@ export function normalizeProposalForRender(input: {
     currency_code: resolveProposalDisplayCurrency(input.currency_code, input.business),
     business: input.business,
     customer: input.customer,
+    prepared_by_name: normalizePreparedByName(input.prepared_by_name),
     sections,
     pricing: input.pricing,
     attachments,

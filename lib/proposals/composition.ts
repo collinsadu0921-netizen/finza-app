@@ -12,6 +12,7 @@ export type ProposalCover = {
   businessName: string
   businessLegalName: string | null
   businessTradingName: string | null
+  preparedByName: string | null
   businessLogoUrl: string | null
   coverImageUrl: string | null
   customerName: string | null
@@ -259,6 +260,7 @@ export function composeProposalBook(model: ProposalRenderModel): ProposalBook {
       businessName,
       businessLegalName: model.business.legal_name ?? null,
       businessTradingName: model.business.trading_name ?? null,
+      preparedByName: model.prepared_by_name ?? null,
       businessLogoUrl: model.business.logo_url ?? null,
       coverImageUrl: model.presentation.coverImageUrl ?? null,
       customerName: model.customer?.name ?? null,

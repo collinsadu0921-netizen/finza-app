@@ -17,6 +17,7 @@ export type ProposalRow = {
   cover_asset_id?: string | null
   cover_background_color?: string | null
   cover_image_position?: string | null
+  prepared_by_name?: string | null
   typography?: string | null
   sections: unknown
   pricing_mode: string
@@ -87,6 +88,7 @@ export async function assembleProposalRenderModel(
     cover_asset_id: input.proposal.cover_asset_id ?? null,
     cover_background_color: input.proposal.cover_background_color ?? null,
     cover_image_position: input.proposal.cover_image_position ?? null,
+    prepared_by_name: input.proposal.prepared_by_name ?? null,
     typography: input.proposal.typography ?? null,
     currency_code: input.proposal.currency_code,
     business: input.business,

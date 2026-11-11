@@ -7,6 +7,7 @@ import { composeProposalBook, type ProposalBook, type ProposalChapter } from "./
 import { getChapterLayout } from "./layout"
 import type { ProposalTheme } from "./design"
 import { customPricingNotesToHtml } from "./parseCustomPricing"
+import { inlineFormattingToHtml } from "./inlineFormatting"
 import { escapeHtml } from "./htmlEscape"
 import { GELASIO_400, GELASIO_400_ITALIC, GELASIO_600 } from "./gelasioFontData"
 
@@ -145,7 +146,7 @@ function coverHtml(book: ProposalBook, coverImageDataUri?: string): string {
       <div class="pdf-cover-meta">
         ${coverMetaRow("Issued", dateLabel)}
         ${coverMetaRow("Valid until", expiresLabel)}
-        ${coverMetaRow("Prepared by", cover.businessTradingName || cover.businessLegalName || cover.businessName)}
+        ${coverMetaRow("Prepared by", cover.preparedByName || cover.businessTradingName || cover.businessLegalName || cover.businessName)}
       </div>
     </div>
   </section>`
@@ -161,28 +162,28 @@ function sectionHtml(section: ProposalRenderSection): string {
   switch (section.type) {
     case "heading": {
       const level = Math.min(6, Math.max(2, section.level))
-      return `<h${level} class="pdf-section-heading">${escapeHtml(section.text)}</h${level}>`
+      return `<h${level} class="pdf-section-heading">${inlineFormattingToHtml(section.text)}</h${level}>`
     }
     case "paragraph":
-      return `<p class="pdf-paragraph${section.text.length <= 600 ? " pdf-paragraph--short" : ""}">${escapeHtml(
+      return `<p class="pdf-paragraph${section.text.length <= 600 ? " pdf-paragraph--short" : ""}">${inlineFormattingToHtml(
         section.text
       ).replace(/\n/g, "<br/>")}</p>`
     case "bullet_list":
       return `<ul class="pdf-list${section.items.length <= 8 ? " pdf-list--short" : ""}">${section.items
-        .map((item) => `<li>${escapeHtml(item)}</li>`)
+        .map((item) => `<li>${inlineFormattingToHtml(item)}</li>`)
         .join("")}</ul>`
     case "image": {
       const src = safeAttrUrl(section.src)
       if (!src || section.unavailable) {
         return `<figure class="pdf-figure is-missing">${
-          section.caption ? `<figcaption>${escapeHtml(section.caption)}</figcaption>` : ""
+          section.caption ? `<figcaption>${inlineFormattingToHtml(section.caption)}</figcaption>` : ""
         }</figure>`
       }
       return `<figure class="pdf-figure"><img src="${src}" alt=""${imageSizeAttrs(
         section.width,
         section.height
       )} onerror="this.style.display='none';this.parentElement.classList.add('is-missing')" />${
-        section.caption ? `<figcaption>${escapeHtml(section.caption)}</figcaption>` : ""
+        section.caption ? `<figcaption>${inlineFormattingToHtml(section.caption)}</figcaption>` : ""
       }</figure>`
     }
     case "gallery": {
@@ -202,7 +203,7 @@ function sectionHtml(section: ProposalRenderSection): string {
         .join("")
       if (!images) return ""
       return `<div class="pdf-gallery">${images}</div>${
-        section.caption ? `<p class="pdf-caption">${escapeHtml(section.caption)}</p>` : ""
+        section.caption ? `<p class="pdf-caption">${inlineFormattingToHtml(section.caption)}</p>` : ""
       }`
     }
     case "divider":
@@ -223,7 +224,7 @@ function pricingHtml(book: ProposalBook, model: ProposalRenderModel): string {
 
   if (pricing.mode === "fixed") {
     body = `<div class="pdf-price-fixed">
-      <span>${escapeHtml(pricing.label?.trim() || "Total investment")}</span>
+      <span>${inlineFormattingToHtml(pricing.label?.trim() || "Total investment")}</span>
       <strong>${formatMoney(Number(pricing.amount) || 0, currency)}</strong>
     </div>`
   } else if (pricing.mode === "line_items") {
@@ -236,7 +237,7 @@ function pricingHtml(book: ProposalBook, model: ProposalRenderModel): string {
         .map((item, index) => {
           const discount = Number(item.discount_amount ?? 0)
           return `<tr data-line-item="${index}">
-            <td class="desc">${escapeHtml(item.description)}</td>
+            <td class="desc">${inlineFormattingToHtml(item.description)}</td>
             <td class="num">${item.quantity != null ? escapeHtml(String(item.quantity)) : "—"}</td>
             ${showDiscount ? `<td class="num">${discount > 0 ? formatMoney(discount, currency) : "—"}</td>` : ""}
             <td class="num strong">${formatMoney(lineItemAmount(item), currency)}</td>
