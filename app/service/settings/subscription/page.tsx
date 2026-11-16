@@ -141,6 +141,12 @@ const TIER_FEATURES: Record<ServiceSubscriptionTier, TierConfig> = {
     inheritText: "Everything in Professional, plus:",
     sections: [
       {
+        section: "Payments",
+        items: [
+          "Paystack integration",
+        ],
+      },
+      {
         section: "Core Accounting Infrastructure",
         items: [
           "General Ledger (system-generated and continuously updated)",
@@ -195,6 +201,12 @@ const TIER_BADGE: Record<ServiceSubscriptionTier, string> = {
 
 const BILLING_CYCLES: BillingCycle[] = ["monthly", "quarterly", "annual"]
 const TIER_ORDER: ServiceSubscriptionTier[] = ["starter", "professional", "business"]
+
+/**
+ * Feature bullets rendered with a subtle "don't miss" highlight inside a plan card.
+ * Purely presentational — it has no effect on pricing, entitlement, or billing.
+ */
+const HIGHLIGHTED_FEATURES = new Set<string>(["Paystack integration"])
 
 function formatGHS(amount: number): string {
   return formatMoney(amount, "GHS")
@@ -1314,20 +1326,37 @@ function SubscriptionPageInner() {
                       {group.section}
                     </p>
                     <ul className="space-y-1">
-                      {group.items.map((item) => (
-                        <li key={item} className="flex items-start gap-2 text-sm text-slate-700">
-                          <svg
-                            className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-500"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                            strokeWidth={2.5}
+                      {group.items.map((item) => {
+                        const highlighted = HIGHLIGHTED_FEATURES.has(item)
+                        return (
+                          <li
+                            key={item}
+                            className={`flex items-start gap-2 text-sm ${
+                              highlighted
+                                ? "-mx-2 rounded-lg bg-emerald-50 px-2 py-1.5 font-medium text-slate-900 ring-1 ring-inset ring-emerald-200/70"
+                                : "text-slate-700"
+                            }`}
                           >
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                          </svg>
-                          {item}
-                        </li>
-                      ))}
+                            <svg
+                              className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${
+                                highlighted ? "text-emerald-600" : "text-emerald-500"
+                              }`}
+                              fill="none"
+                              viewBox="0 0 24 24"
+                              stroke="currentColor"
+                              strokeWidth={2.5}
+                            >
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                            </svg>
+                            <span className="flex-1">{item}</span>
+                            {highlighted && (
+                              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold leading-none text-emerald-700">
+                                Included
+                              </span>
+                            )}
+                          </li>
+                        )
+                      })}
                     </ul>
                   </div>
                 ))}
