@@ -81,6 +81,7 @@ export default function CreateBillPage() {
   const [materials, setMaterials] = useState<Material[]>([])
   const [selectedSupplierId, setSelectedSupplierId] = useState("")
   const [applyTaxes, setApplyTaxes] = useState(true)
+  const [taxPricingMode, setTaxPricingMode] = useState<"inclusive" | "exclusive">("inclusive")
   const [applyWHT, setApplyWHT] = useState(false)
   const [whtRateCode, setWhtRateCode] = useState("GH_SVC_75")
 
@@ -524,7 +525,7 @@ export default function CreateBillPage() {
   }
 
   // Calculate totals
-  // For bills, line items represent amounts that INCLUDE taxes (like expenses)
+  // Standard bill line items may be net (exclusive) or gross (inclusive).
   const subtotalIncludingTaxes = items.reduce((sum, item) => {
     const lineTotal = (Number(item.qty) || 0) * (Number(item.unit_price) || 0)
     const discount = getDiscountAmount(item)
@@ -534,7 +535,25 @@ export default function CreateBillPage() {
 
   const taxResult = applyTaxes
     ? (() => {
-        // Reverse-calculate: total includes taxes, so extract base amount
+        if (taxPricingMode === "exclusive") {
+          // Net line prices: add taxes on top (forward).
+          const lineItems = items.map((item) => ({
+            quantity: Number(item.qty) || 0,
+            unit_price: Number(item.unit_price) || 0,
+            discount_amount: getDiscountAmount(item),
+          }))
+          const r = calculateGhanaTaxesFromLineItems(lineItems, true, issueDate)
+          return {
+            subtotalBeforeTax: subtotalIncludingTaxes,
+            nhil: r.nhil,
+            getfund: r.getfund,
+            covid: r.covid,
+            vat: r.vat,
+            totalTax: r.totalTax,
+            grandTotal: r.grandTotal, // net + tax
+          }
+        }
+        // Inclusive: reverse-calculate, extract base amount.
         const { baseAmount, taxBreakdown } = calculateBaseFromTotalIncludingTaxes(
           subtotalIncludingTaxes,
           true
@@ -687,6 +706,7 @@ export default function CreateBillPage() {
           due_date: dueDate || null,
           notes: notes.trim() || null,
           apply_taxes: applyTaxes,
+          tax_pricing_mode: taxPricingMode,
           apply_wht: applyWHT,
           wht_rate_code: applyWHT ? whtRateCode : null,
           wht_rate: applyWHT ? selectedWHTRate.rate : null,
@@ -1546,7 +1566,9 @@ export default function CreateBillPage() {
                     <p className="text-xs text-slate-500 mt-1">
                       {isImportBill
                         ? "Apply NHIL (2.5%), GETFund (2.5%) and VAT (15%) on the VAT base"
-                        : "Include NHIL, GETFund, and VAT (extracted from the tax-inclusive total)"}
+                        : taxPricingMode === "exclusive"
+                          ? "Include NHIL, GETFund, and VAT (added on top of net prices)"
+                          : "Include NHIL, GETFund, and VAT (extracted from the tax-inclusive total)"}
                     </p>
                   </div>
                   <button
@@ -1560,6 +1582,33 @@ export default function CreateBillPage() {
                   </button>
                 </div>
               </div>
+
+              {applyTaxes && !isImportBill && (
+                <div className="mt-4 pt-4 border-t border-slate-100">
+                  <p className="text-sm font-medium text-slate-900 mb-2">Prices</p>
+                  <div className="grid grid-cols-2 gap-1 rounded-md bg-slate-100 p-1">
+                    <button
+                      type="button"
+                      onClick={() => setTaxPricingMode("exclusive")}
+                      className={`rounded px-2 py-1.5 text-xs font-medium transition-colors ${taxPricingMode === "exclusive" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+                    >
+                      Exclude tax
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTaxPricingMode("inclusive")}
+                      className={`rounded px-2 py-1.5 text-xs font-medium transition-colors ${taxPricingMode === "inclusive" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+                    >
+                      Include tax
+                    </button>
+                  </div>
+                  <p className="mt-1.5 text-[11px] leading-snug text-slate-500">
+                    {taxPricingMode === "exclusive"
+                      ? "Your line prices are net — taxes are added on top. The total will increase."
+                      : "Your line prices are gross — taxes are extracted from the total."}
+                  </p>
+                </div>
+              )}
 
               {/* WHT Toggle */}
               <div className="mt-4 pt-4 border-t border-slate-100">

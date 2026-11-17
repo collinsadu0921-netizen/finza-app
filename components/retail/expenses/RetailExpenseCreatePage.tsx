@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 import { retailPaths, retailExpenseApi } from "@/lib/retail/routes"
 import { calculateBaseFromTotalIncludingTaxes } from "@/lib/ghanaTaxEngine"
+import { computeExpenseTax } from "@/lib/expenses/computeExpenseTax"
 import { useBusinessCurrency } from "@/lib/hooks/useBusinessCurrency"
 import {
   RetailBackofficeAlert,
@@ -55,6 +56,7 @@ export default function RetailExpenseCreatePage() {
   const [amount, setAmount] = useState("")
   const [date, setDate] = useState(() => new Date().toISOString().split("T")[0])
   const [applyTaxes, setApplyTaxes] = useState(true)
+  const [taxPricingMode, setTaxPricingMode] = useState<"inclusive" | "exclusive">("inclusive")
   const [paymentMethod, setPaymentMethod] = useState("cash")
   const [note, setNote] = useState("")
   const [receiptFile, setReceiptFile] = useState<File | null>(null)
@@ -140,19 +142,8 @@ export default function RetailExpenseCreatePage() {
         return
       }
 
-      let base = totalIncl
-      let nhil = 0,
-        getfund = 0,
-        covid = 0,
-        vat = 0
-      if (applyTaxes) {
-        const r = calculateBaseFromTotalIncludingTaxes(totalIncl, true, date)
-        base = r.baseAmount
-        nhil = r.taxBreakdown.nhil
-        getfund = r.taxBreakdown.getfund
-        covid = r.taxBreakdown.covid
-        vat = r.taxBreakdown.vat
-      }
+      const enteredAmount = Number(amount)
+      const computed = computeExpenseTax(enteredAmount, applyTaxes, taxPricingMode, date)
 
       const receiptPath = await uploadReceipt(business.id)
       const notes = composeNotes(paymentMethod, note)
@@ -163,12 +154,9 @@ export default function RetailExpenseCreatePage() {
         body: JSON.stringify({
           supplier: payee.trim(),
           category_id: categoryId || null,
-          amount: base,
-          nhil,
-          getfund,
-          covid,
-          vat,
-          total: totalIncl,
+          amount: enteredAmount,
+          apply_taxes: applyTaxes,
+          tax_pricing_mode: taxPricingMode,
           date,
           notes,
           receipt_path: receiptPath,
@@ -192,10 +180,13 @@ export default function RetailExpenseCreatePage() {
   }
 
   const totalPreview = Number(amount) || 0
-  let taxPreview = { nhil: 0, getfund: 0, covid: 0, vat: 0, totalTax: 0 }
-  if (applyTaxes && totalPreview > 0) {
-    const r = calculateBaseFromTotalIncludingTaxes(totalPreview, true, date)
-    taxPreview = r.taxBreakdown
+  const previewComputed = computeExpenseTax(totalPreview, applyTaxes, taxPricingMode, date)
+  const taxPreview = {
+    nhil: previewComputed.nhil,
+    getfund: previewComputed.getfund,
+    covid: previewComputed.covid,
+    vat: previewComputed.vat,
+    totalTax: previewComputed.totalTax,
   }
 
   return (
@@ -276,8 +267,7 @@ export default function RetailExpenseCreatePage() {
                   {applyTaxes ? (
                     <>
                       Estimated VAT/GetFund/NHIL split for this date — net base ≈{" "}
-                      {format(calculateBaseFromTotalIncludingTaxes(totalPreview, true, date).baseAmount)} (total{" "}
-                      {format(totalPreview)})
+                      {format(previewComputed.baseAmount)} (total {format(previewComputed.total)})
                     </>
                   ) : (
                     <>No VAT split — full amount posts as the expense.</>
@@ -298,6 +288,25 @@ export default function RetailExpenseCreatePage() {
                 Apply Ghana levies / VAT from total (same as other Finza expenses)
               </label>
             </div>
+
+            {applyTaxes && (
+              <div className="rounded-md bg-slate-100 p-1 grid grid-cols-2 gap-1">
+                <button
+                  type="button"
+                  onClick={() => setTaxPricingMode("exclusive")}
+                  className={`rounded px-2 py-1.5 text-xs font-medium transition-colors ${taxPricingMode === "exclusive" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+                >
+                  Exclude tax
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTaxPricingMode("inclusive")}
+                  className={`rounded px-2 py-1.5 text-xs font-medium transition-colors ${taxPricingMode === "inclusive" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+                >
+                  Include tax
+                </button>
+              </div>
+            )}
 
             {applyTaxes && totalPreview > 0 ? (
               <p className="text-xs text-slate-500">

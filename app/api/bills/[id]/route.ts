@@ -161,7 +161,7 @@ export async function PUT(
 
     const { data: existingBill, error: billLookupError } = await supabase
       .from("bills")
-      .select("id, status, total, subtotal, total_tax, issue_date, material_id, bill_type, cif_value, import_duty_rate, import_duty_amount, ecowas_levy, au_levy, exim_levy, sil_levy, examination_fee, clearing_agent_fee, landed_cost_account_code, wht_applicable, wht_rate_code, wht_rate, wht_amount, currency_code, fx_rate, business_id")
+      .select("id, status, total, subtotal, total_tax, issue_date, material_id, bill_type, tax_pricing_mode, cif_value, import_duty_rate, import_duty_amount, ecowas_levy, au_levy, exim_levy, sil_levy, examination_fee, clearing_agent_fee, landed_cost_account_code, wht_applicable, wht_rate_code, wht_rate, wht_amount, currency_code, fx_rate, business_id")
       .eq("id", billId)
       .is("deleted_at", null)
       .maybeSingle()
@@ -192,6 +192,7 @@ export async function PUT(
       notes,
       items,
       apply_taxes,
+      tax_pricing_mode,
       apply_wht,
       wht_rate_code,
       status,
@@ -216,6 +217,16 @@ export async function PUT(
       discount_amount: header_discount_amount,
       bill_discount_amount,
     } = body
+
+    // Resolve pricing mode: explicit body value wins, else preserve existing, else inclusive.
+    const effectivePricingMode =
+      tax_pricing_mode ?? (existingBill as any).tax_pricing_mode ?? "inclusive"
+    if (effectivePricingMode !== "inclusive" && effectivePricingMode !== "exclusive") {
+      return NextResponse.json(
+        { error: "Invalid tax_pricing_mode", message: "tax_pricing_mode must be 'inclusive' or 'exclusive'" },
+        { status: 400 }
+      )
+    }
 
     const headerDiscountRejection = rejectUnsupportedBillLevelDiscount([
       header_discount_amount,
@@ -398,6 +409,7 @@ export async function PUT(
       updateData.tax_engine_code          = "ghana"
       updateData.tax_engine_effective_from = effectiveIssueDate
       updateData.tax_jurisdiction         = "GH"
+      updateData.tax_pricing_mode         = "exclusive"
 
     } else if (!isImportBill && taxItems && taxItems.length > 0) {
       // ── Standard bill: reverse-calculate taxes from tax-inclusive total ───
@@ -421,28 +433,55 @@ export async function PUT(
       let billTaxLines: Record<string, unknown>
 
       if (apply_taxes !== undefined ? apply_taxes : true) {
-        const canonical = ghanaTaxEngineCanonical.reverseCalculate(
-          subtotalIncludingTaxes,
-          {
-            jurisdiction: "GH",
-            effectiveDate: effectiveIssueDate,
-            taxInclusive: true,
-            transactionType: "purchase",
+        if (effectivePricingMode === "exclusive") {
+          // Net line prices: add taxes on top (forward).
+          const standardLineItems = taxItems.map((item: any) => ({
+            quantity: Number(item.qty) || 0,
+            unit_price: Number(item.unit_price) || 0,
+            discount_amount: Number(item.discount_amount) || 0,
+          }))
+          const canonical = ghanaTaxEngineCanonical.calculateFromLineItems(
+            standardLineItems,
+            {
+              jurisdiction: "GH",
+              effectiveDate: effectiveIssueDate,
+              taxInclusive: false,
+              transactionType: "purchase",
+            }
+          )
+          const legacy = deriveLegacyTaxColumnsFromTaxLines(canonical.lines)
+          taxResult = {
+            subtotalBeforeTax: canonical.base_amount,
+            ...legacy,
+            totalTax: canonical.total_tax,
+            grandTotal: canonical.total_amount,
           }
-        )
-        const legacy = deriveLegacyTaxColumnsFromTaxLines(canonical.lines)
-        taxResult = {
-          subtotalBeforeTax: canonical.base_amount,
-          ...legacy,
-          totalTax: canonical.total_tax,
-          grandTotal: subtotalIncludingTaxes,
+          billTaxLines = toBillTaxLinesJsonb(canonical, absorptionAccountCode)
+        } else {
+          // Gross line prices: extract base (reverse).
+          const canonical = ghanaTaxEngineCanonical.reverseCalculate(
+            subtotalIncludingTaxes,
+            {
+              jurisdiction: "GH",
+              effectiveDate: effectiveIssueDate,
+              taxInclusive: true,
+              transactionType: "purchase",
+            }
+          )
+          const legacy = deriveLegacyTaxColumnsFromTaxLines(canonical.lines)
+          taxResult = {
+            subtotalBeforeTax: canonical.base_amount,
+            ...legacy,
+            totalTax: canonical.total_tax,
+            grandTotal: subtotalIncludingTaxes,
+          }
+          billTaxLines = toBillTaxLinesJsonb(canonical, absorptionAccountCode)
         }
-        billTaxLines = toBillTaxLinesJsonb(canonical, absorptionAccountCode)
       } else {
         const canonical = emptyBillTaxResult({
           baseAmount: subtotalIncludingTaxes,
           effectiveDate: effectiveIssueDate,
-          pricingMode: "inclusive",
+          pricingMode: effectivePricingMode === "exclusive" ? "exclusive" : "inclusive",
         })
         taxResult = {
           subtotalBeforeTax: subtotalIncludingTaxes,
@@ -467,6 +506,7 @@ export async function PUT(
       updateData.tax_engine_code = "ghana"
       updateData.tax_engine_effective_from = effectiveIssueDate
       updateData.tax_jurisdiction = "GH"
+      updateData.tax_pricing_mode = effectivePricingMode
       if (items !== undefined) {
         updateData.material_id = null
         updateData.quantity = null

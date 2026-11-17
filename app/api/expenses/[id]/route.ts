@@ -5,6 +5,10 @@ import { createAuditLog } from "@/lib/auditLog"
 import { handleFilePersistence } from "@/lib/fileHandlingServer"
 import { getCurrencySymbol } from "@/lib/currency"
 import { enforceServiceIndustryFinancialWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryFinancialWrite"
+import {
+  computeExpenseTax,
+  normalizeExpensePricingMode,
+} from "@/lib/expenses/computeExpenseTax"
 
 export async function GET(
   request: NextRequest,
@@ -119,22 +123,19 @@ export async function PUT(
       supplier,
       category_id,
       amount,
-      nhil,
-      getfund,
-      covid,
-      vat,
-      total,
       date,
       notes,
       receipt_path,
       currency_code: body_currency_code,
       fx_rate: body_fx_rate,
+      apply_taxes,
+      tax_pricing_mode,
     } = body
 
     // Fetch existing expense with receipt_path to preserve it if not updated
     const { data: existingExpense } = await supabase
       .from("expenses")
-      .select("id, receipt_path, total, currency_code, fx_rate")
+      .select("id, receipt_path, total, date, tax_pricing_mode, currency_code, fx_rate")
       .eq("id", expenseId)
       .eq("business_id", business.id)
       .maybeSingle()
@@ -167,12 +168,23 @@ export async function PUT(
     if (category_id !== undefined) updateData.category_id = category_id
     if (date) updateData.date = date
     if (amount !== undefined) {
-      updateData.amount = Number(amount)
-      updateData.nhil = Number(nhil || 0)
-      updateData.getfund = Number(getfund || 0)
-      updateData.covid = Number(covid || 0)
-      updateData.vat = Number(vat || 0)
-      updateData.total = Number(total || amount)
+      const pricingMode = normalizeExpensePricingMode(
+        tax_pricing_mode ?? (existingExpense as any).tax_pricing_mode
+      )
+      const effectiveDate = date || (existingExpense as any).date || new Date().toISOString().split("T")[0]
+      const computed = computeExpenseTax(
+        Number(amount),
+        apply_taxes !== false,
+        pricingMode,
+        effectiveDate
+      )
+      updateData.amount = computed.baseAmount
+      updateData.nhil = computed.nhil
+      updateData.getfund = computed.getfund
+      updateData.covid = computed.covid
+      updateData.vat = computed.vat
+      updateData.total = computed.total
+      updateData.tax_pricing_mode = pricingMode
     }
     if (notes !== undefined) updateData.notes = notes
     // Always set receipt_path to the determined value (preserved or updated)
