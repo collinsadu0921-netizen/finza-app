@@ -37,6 +37,19 @@ describe("computeExpenseTax", () => {
     expect(r.vat).toBe(0)
   })
 
+  it("mode switch preserves entered price and reinterprets it", () => {
+    // Same entered value 70,000, different modes → different net/gross.
+    const excl = computeExpenseTax(70000, true, "exclusive", "2026-11-09")
+    const incl = computeExpenseTax(70000, true, "inclusive", "2026-11-09")
+
+    expect(excl.baseAmount).toBe(70000)       // 70k is the net
+    expect(excl.total).toBe(84000)            // gross 84k
+    expect(incl.baseAmount).toBe(58333.34)    // 70k is now gross → net 58,333.34 (legacy rounding balance)
+    expect(incl.total).toBe(70000)            // gross stays 70k
+    // persisted components stay consistent with the gross total (posting balances)
+    expect(incl.baseAmount + incl.nhil + incl.getfund + incl.vat).toBe(70000)
+  })
+
   it("pre-2026 compound exclusive: COVID + compound VAT", () => {
     const r = computeExpenseTax(70000, true, "exclusive", "2025-12-01")
     expect(r.baseAmount).toBe(70000)
