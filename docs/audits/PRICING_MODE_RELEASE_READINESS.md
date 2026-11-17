@@ -10,7 +10,8 @@
 |---|---|---|
 | Engine fix (GH respects `taxInclusive`) | Jest `pricingMode.test.ts` | ✅ exclusive 70k → net 70k + NHIL 1,750 + GETFund 1,750 + VAT 10,500 = 84k; inclusive 84k → identical |
 | Server-authoritative expense tax | Jest `computeExpenseTax.test.ts` | ✅ exclusive/inclusive/taxes-off/pre-2026-compound/mode-switch/self-consistent-rounding (8 cases) |
-| Regression suites | Jest (tax engine + bills + expenses + GH) | ✅ **121/121 pass** |
+| Rounding invariants (varied amounts, both regimes) | Jest `computeExpenseTax.invariants.test.ts` | ✅ 76/76 — small/fractional/70,000/70,001, inclusive+exclusive, post/pre-2026 |
+| Regression suites | Jest (tax engine + bills + expenses + GH) | ✅ **197/197 pass** |
 | Type check | `tsc --noEmit` | ✅ 0 errors |
 | Migration 628 (invoices) | applied to staging earlier + local | ✅ column + CHECK verified |
 | Migration 629 (bills/expenses) | applied to local Docker Postgres | ✅ column + CHECK verified on all three tables |
@@ -107,18 +108,24 @@ Pre-2026 supplier bills/expenses post NHIL/GETFund/COVID as **recoverable** inpu
 - **Order:** apply `628_invoice_tax_pricing_mode.sql`, then `629_bill_expense_tax_pricing_mode.sql` (both additive; 628 already on staging).
 - **No historical amounts are rewritten** — legacy records fall back to `'inclusive'`.
 
-### Rollback safeguards for exclusive documents
+### Rollback safeguards for exclusive documents (revised)
 
-The `tax_pricing_mode` column records whether stored line prices/amounts are net or gross. **Retaining the column alone
+The `tax_pricing_mode` column records whether stored prices/amounts are net or gross. **Retaining the column alone
 does not protect exclusive documents if the application code is reverted** — older code ignores the column and would
-re-interpret a net `unit_price`/`amount` as gross, silently understating tax and total. Therefore, a safe rollback is:
+re-interpret a net `unit_price`/`amount` as gross, silently understating tax and total.
 
-1. **Convert before revert (preferred).** If any exclusive documents exist, first re-interpret them to inclusive —
-   gross up the entered `unit_price` (invoices/bills) or `amount` (expenses) to the inclusive figure, recompute
-   `subtotal`/`total`/`tax_lines`, and set `tax_pricing_mode = 'inclusive'`. Only then revert the application code.
-2. **Or keep a compatibility layer.** Retain the interpretation code (or a read-only shim that respects the column)
-   rather than a full revert, so exclusive documents remain correctly interpreted.
-3. **Never drop the column while exclusive records exist** — that destroys the only signal distinguishing net from gross.
-   Only drop after confirming zero exclusive records, and only as a last resort.
+**Do NOT bulk-convert or recompute existing exclusive documents.** Re-interpreting/recomputing them would rewrite
+historical amounts, change their tax treatment, and potentially invalidate already-posted journals. The safe rollback is:
 
-These steps ensure older code never silently misinterprets an exclusive document's amounts.
+1. **Prefer a compatibility patch.** Keep a minimal read path that reads `tax_pricing_mode` and interprets exclusive
+   documents correctly (the `computeExpenseTax` / engine logic), even while reverting the rest of the feature. This lets
+   existing exclusive documents be read and edited correctly without rewriting anything.
+2. **Or block edits while fixing forward.** Temporarily make documents with `tax_pricing_mode = 'exclusive'` read-only
+   (a guard in the edit route, or a DB trigger raising on UPDATE when the interpreting code is absent), so older code
+   cannot silently recompute those amounts incorrectly.
+3. **Retain the additive columns.** Never drop `tax_pricing_mode` while any exclusive record exists — it is the only
+   signal distinguishing net from gross. Only drop after confirming zero exclusive records, and only as a last resort.
+
+**Mechanism preventing mis-editing:** the edit/save path must either (a) call the pricing-mode-aware calculation, or
+(b) be gated so exclusive records are read-only until (a) is restored. No historical amount, tax line, or journal is
+touched by any rollback path.
