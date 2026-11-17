@@ -23,8 +23,15 @@ export type ComputedExpenseTax = {
  * - exclusive: `enteredAmount` is the net; taxes are added on top (forward).
  * - taxes disabled: base = total = enteredAmount, no tax.
  *
- * Uses the legacy Ghana engine (the same functions the expense UI and posting
- * path already rely on) so rounding and historical-date behaviour are preserved.
+ * Invariant (self-consistent rounding): `totalTax = nhil + getfund + covid + vat`
+ * and `baseAmount + totalTax = total` exactly. This guarantees the persisted
+ * columns (`amount`, `nhil/getfund/covid/vat`, `total`) are internally consistent,
+ * so the ledger posting (which derives `base = total − tax components`) balances
+ * and matches the stored `amount` without a one-cent drift.
+ *
+ * The legacy engine's `taxBreakdown.totalTax` rounds the *unrounded* sum, which
+ * can differ from the sum of its individually-rounded components by ±0.01; we
+ * deliberately recompute the total from the rounded components instead.
  */
 export function computeExpenseTax(
   enteredAmount: number,
@@ -33,39 +40,48 @@ export function computeExpenseTax(
   effectiveDate: string
 ): ComputedExpenseTax {
   const amount = Number(enteredAmount) || 0
-  const zero = { baseAmount: amount, nhil: 0, getfund: 0, covid: 0, vat: 0, totalTax: 0, total: amount }
 
   if (!applyTaxes || amount <= 0) {
-    return zero
-  }
-
-  if (pricingMode === "exclusive") {
-    const r = calculateGhanaTaxes(amount, true, effectiveDate)
     return {
       baseAmount: round2(amount),
-      nhil: round2(r.nhil),
-      getfund: round2(r.getfund),
-      covid: round2(r.covid),
-      vat: round2(r.vat),
-      totalTax: round2(r.totalTax),
-      total: round2(r.grandTotal),
+      nhil: 0,
+      getfund: 0,
+      covid: 0,
+      vat: 0,
+      totalTax: 0,
+      total: round2(amount),
     }
   }
 
-  const { baseAmount, taxBreakdown } = calculateBaseFromTotalIncludingTaxes(
-    amount,
-    true,
-    effectiveDate
-  )
-  return {
-    baseAmount: round2(baseAmount),
-    nhil: round2(taxBreakdown.nhil),
-    getfund: round2(taxBreakdown.getfund),
-    covid: round2(taxBreakdown.covid),
-    vat: round2(taxBreakdown.vat),
-    totalTax: round2(taxBreakdown.totalTax),
-    total: round2(amount),
+  let nhil: number
+  let getfund: number
+  let covid: number
+  let vat: number
+
+  if (pricingMode === "exclusive") {
+    const r = calculateGhanaTaxes(amount, true, effectiveDate)
+    nhil = round2(r.nhil)
+    getfund = round2(r.getfund)
+    covid = round2(r.covid)
+    vat = round2(r.vat)
+  } else {
+    const { taxBreakdown } = calculateBaseFromTotalIncludingTaxes(
+      amount,
+      true,
+      effectiveDate
+    )
+    nhil = round2(taxBreakdown.nhil)
+    getfund = round2(taxBreakdown.getfund)
+    covid = round2(taxBreakdown.covid)
+    vat = round2(taxBreakdown.vat)
   }
+
+  const totalTax = round2(nhil + getfund + covid + vat)
+  const baseAmount =
+    pricingMode === "exclusive" ? round2(amount) : round2(amount - totalTax)
+  const total = round2(baseAmount + totalTax)
+
+  return { baseAmount, nhil, getfund, covid, vat, totalTax, total }
 }
 
 export function normalizeExpensePricingMode(
