@@ -513,7 +513,7 @@ export async function POST(request: NextRequest) {
         tax_engine_code: "ghana",
         tax_engine_effective_from: issue_date,
         tax_jurisdiction: "GH",
-        tax_pricing_mode,
+        tax_pricing_mode: bill_type === "import" ? "exclusive" : tax_pricing_mode,
         vat_classification: billClassification.classification,
         wht_applicable: apply_wht,
         wht_rate_code: apply_wht ? whtCode : null,
