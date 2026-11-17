@@ -22,6 +22,7 @@ export async function POST(request: NextRequest) {
       footer_message,
       payment_terms,
       apply_taxes,
+      tax_pricing_mode = "inclusive",
       items,
       currency_symbol, // No default - must come from business
       currency_code, // No default - must come from business
@@ -116,7 +117,7 @@ export async function POST(request: NextRequest) {
         lineItems,
         businessRow?.address_country,
         issue_date, // Use issue_date for preview (invoice hasn't been sent yet)
-        true // tax-inclusive pricing
+        tax_pricing_mode === "inclusive"
       )
       
       subtotal = taxCalculationResult.subtotal_excl_tax

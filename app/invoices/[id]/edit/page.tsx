@@ -181,6 +181,9 @@ function InvoiceEditPageContent() {
   const [creatingCustomer, setCreatingCustomer] = useState(false)
   const [customerError, setCustomerError] = useState("")
   const [applyGhanaTax, setApplyGhanaTax] = useState(true)
+  // Pricing mode: "exclusive" = entered prices are net (tax added on top);
+  // "inclusive" = entered prices are gross (tax extracted). Preserved from the saved invoice.
+  const [taxPricingMode, setTaxPricingMode] = useState<"inclusive" | "exclusive">("inclusive")
   const [invoice, setInvoice] = useState<Invoice | null>(null)
   const [showSendModal, setShowSendModal] = useState(false)
 
@@ -287,6 +290,9 @@ function InvoiceEditPageContent() {
       setNotes(invoiceData.notes || "")
       setFooterMessage(invoiceData.footer_message || "")
       setApplyGhanaTax(invoiceData.apply_taxes !== false)
+      setTaxPricingMode(
+        invoiceData.tax_pricing_mode === "exclusive" ? "exclusive" : "inclusive"
+      )
 
       // Load products/services FIRST (needed for description fallback)
       // Note: products_services table uses unit_price, not price
@@ -830,12 +836,11 @@ function InvoiceEditPageContent() {
   let legacyTaxAmounts: ReturnType<typeof getLegacyTaxAmounts> | null = null
 
   if (applyGhanaTax && items.length > 0 && subtotal > 0) {
-    // Always treat entered prices as tax-inclusive
     const taxCalculationResult = calculateTaxes(
       lineItems,
       businessCountry,
       effectiveDate,
-      true // tax-inclusive pricing
+      taxPricingMode === "inclusive"
     )
     
     baseSubtotal = taxCalculationResult.subtotal_excl_tax || 0
@@ -915,6 +920,7 @@ function InvoiceEditPageContent() {
         notes: notes || null,
         footer_message: footerMessage || null,
         apply_taxes: applyGhanaTax,
+        tax_pricing_mode: taxPricingMode,
         items: items.map(item => {
           const qty = Number(item.quantity) || 0
           const unitPrice = Number(item.price) || 0
@@ -1514,23 +1520,45 @@ function InvoiceEditPageContent() {
                 </button>
               </div>
 
+              {applyGhanaTax && (
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                  <p className="mb-1.5 text-xs font-semibold text-gray-700">Prices</p>
+                  <div className="grid grid-cols-2 gap-1 rounded-md bg-gray-100 p-1">
+                    <button
+                      type="button"
+                      onClick={() => setTaxPricingMode("exclusive")}
+                      className={`rounded px-2 py-1.5 text-xs font-medium transition-colors ${taxPricingMode === "exclusive" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}
+                    >
+                      Exclude tax
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTaxPricingMode("inclusive")}
+                      className={`rounded px-2 py-1.5 text-xs font-medium transition-colors ${taxPricingMode === "inclusive" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}
+                    >
+                      Include tax
+                    </button>
+                  </div>
+                  <p className="mt-1.5 text-[11px] leading-snug text-gray-500">
+                    {taxPricingMode === "exclusive"
+                      ? "Your entered prices are net — taxes are added on top."
+                      : "Your entered prices are gross — taxes are extracted from the total."}
+                  </p>
+                </div>
+              )}
+
               <div className="flex justify-between items-center">
                 <span className="text-gray-700 font-medium">
-                  {applyGhanaTax ? "Subtotal (tax inclusive):" : "Subtotal:"}
+                  {applyGhanaTax ? "Amount before taxes:" : "Subtotal:"}
                 </span>
                 <span className="font-semibold text-gray-900 text-lg">
-                  {currency}{applyGhanaTax ? total.toFixed(2) : baseSubtotal.toFixed(2)}
+                  {currency}{baseSubtotal.toFixed(2)}
                 </span>
               </div>
               {totalDiscount > 0 && (
                 <div className="flex justify-between items-center text-sm">
                   <span className="text-gray-600">Discounts</span>
                   <span className="font-medium text-rose-600 tabular-nums">−{currency}{totalDiscount.toFixed(2)}</span>
-                </div>
-              )}
-              {applyGhanaTax && (
-                <div className="text-xs text-gray-500 italic -mt-1">
-                  Base amount: {currency}{baseSubtotal.toFixed(2)}
                 </div>
               )}
               {applyGhanaTax && legacyTaxAmounts && subtotal > 0 && (() => {

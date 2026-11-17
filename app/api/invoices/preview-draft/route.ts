@@ -51,6 +51,7 @@ export async function POST(request: NextRequest) {
       footer_message,
       payment_terms,
       apply_taxes,
+      tax_pricing_mode = "inclusive",
       items,
       currency_symbol,
       currency_code,
@@ -147,7 +148,7 @@ export async function POST(request: NextRequest) {
         lineItems,
         businessDetails?.address_country ?? null,
         effectiveDate,
-        true
+        tax_pricing_mode === "inclusive"
       )
       subtotal = taxCalculationResult.subtotal_excl_tax
       totalTax = taxCalculationResult.tax_total

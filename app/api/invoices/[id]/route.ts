@@ -503,12 +503,13 @@ export async function PUT(
       footer_message,
       items,
       apply_taxes,
+      tax_pricing_mode,
       status,
     } = body
 
     const { data: existingInvoice } = await supabase
       .from("invoices")
-      .select("id, business_id, status, sent_at, paid_at, apply_taxes, invoice_number, issue_date")
+      .select("id, business_id, status, sent_at, paid_at, apply_taxes, tax_pricing_mode, invoice_number, issue_date")
       .eq("id", invoiceId)
       .eq("business_id", scopedBusinessId)
       .single()
@@ -535,9 +536,26 @@ export async function PUT(
 
     const businessId = existingInvoice.business_id
 
+    // Resolve the pricing mode. An explicit body value wins; otherwise preserve the
+    // existing mode. Legacy records with no stored mode fall back to "inclusive".
+    if (
+      tax_pricing_mode !== undefined &&
+      tax_pricing_mode !== "inclusive" &&
+      tax_pricing_mode !== "exclusive"
+    ) {
+      return NextResponse.json(
+        { error: "Invalid tax_pricing_mode", message: "tax_pricing_mode must be 'inclusive' or 'exclusive'" },
+        { status: 400 }
+      )
+    }
+    const effectivePricingMode =
+      tax_pricing_mode ?? (existingInvoice as any).tax_pricing_mode ?? "inclusive"
+    const taxInclusive = effectivePricingMode === "inclusive"
+
     // If updating items, recalculate taxes
     let updateData: any = {
       updated_at: new Date().toISOString(),
+      tax_pricing_mode: effectivePricingMode,
     }
 
     let materialValidationForItems: Awaited<ReturnType<typeof validateInvoiceLineMaterials>> | null =
@@ -613,12 +631,12 @@ export async function PUT(
       let taxCalculationResult: ReturnType<typeof calculateTaxes> | null = null
 
       if (shouldApplyTaxes) {
-        // Calculate taxes using shared tax engine (tax-inclusive mode)
+        // Calculate taxes using shared tax engine (inclusive or exclusive mode)
         taxCalculationResult = calculateTaxes(
           lineItems,
           business?.address_country,
           effectiveDateStr,
-          true // tax-inclusive pricing
+          taxInclusive
         )
 
         baseSubtotal = taxCalculationResult.subtotal_excl_tax
@@ -638,7 +656,7 @@ export async function PUT(
           {
             jurisdiction: countryCode,
             effectiveDate: effectiveDateStr,
-            taxInclusive: true,
+            taxInclusive,
           },
           getGhanaEngineVersion
         )
