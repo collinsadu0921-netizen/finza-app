@@ -90,6 +90,7 @@ export async function POST(request: NextRequest) {
       notes,
       items,
       apply_taxes = true,
+      tax_pricing_mode = "inclusive", // "inclusive" (gross, tax extracted) | "exclusive" (net, tax added on top)
       apply_wht = false,
       wht_rate_code = null,
       vat_classification,
@@ -346,7 +347,12 @@ export async function POST(request: NextRequest) {
         billTaxLines = toBillTaxLinesJsonb(canonical, absorptionAccountCode)
       }
     } else {
-      // Standard bill: line items come in tax-inclusive, extract base.
+      // Standard bill: line items may be tax-inclusive (gross) or tax-exclusive (net).
+      const standardLineItems = (items ?? []).map((item: any) => ({
+        quantity: Number(item.qty) || 0,
+        unit_price: Number(item.unit_price) || 0,
+        discount_amount: Number(item.discount_amount) || 0,
+      }))
       // Round each line contribution before accumulating to prevent float noise.
       const subtotalIncludingTaxes = Math.round((items ?? []).reduce((sum: number, item: any) => {
         const lineTotal = (Number(item.qty) || 0) * (Number(item.unit_price) || 0)
@@ -355,28 +361,50 @@ export async function POST(request: NextRequest) {
       }, 0) * 100) / 100
 
       if (apply_taxes) {
-        const canonical = ghanaTaxEngineCanonical.reverseCalculate(
-          subtotalIncludingTaxes,
-          {
-            jurisdiction: "GH",
-            effectiveDate: issue_date,
-            taxInclusive: true,
-            transactionType: "purchase",
+        if (tax_pricing_mode === "exclusive") {
+          // Net line prices: add taxes on top (forward).
+          const canonical = ghanaTaxEngineCanonical.calculateFromLineItems(
+            standardLineItems,
+            {
+              jurisdiction: "GH",
+              effectiveDate: issue_date,
+              taxInclusive: false,
+              transactionType: "purchase",
+            }
+          )
+          const legacy = deriveLegacyTaxColumnsFromTaxLines(canonical.lines)
+          taxResult = {
+            subtotalBeforeTax: canonical.base_amount,
+            ...legacy,
+            totalTax: canonical.total_tax,
+            grandTotal: canonical.total_amount,
           }
-        )
-        const legacy = deriveLegacyTaxColumnsFromTaxLines(canonical.lines)
-        taxResult = {
-          subtotalBeforeTax: canonical.base_amount,
-          ...legacy,
-          totalTax: canonical.total_tax,
-          grandTotal: subtotalIncludingTaxes,
+          billTaxLines = toBillTaxLinesJsonb(canonical, absorptionAccountCode)
+        } else {
+          // Gross line prices: extract base (reverse).
+          const canonical = ghanaTaxEngineCanonical.reverseCalculate(
+            subtotalIncludingTaxes,
+            {
+              jurisdiction: "GH",
+              effectiveDate: issue_date,
+              taxInclusive: true,
+              transactionType: "purchase",
+            }
+          )
+          const legacy = deriveLegacyTaxColumnsFromTaxLines(canonical.lines)
+          taxResult = {
+            subtotalBeforeTax: canonical.base_amount,
+            ...legacy,
+            totalTax: canonical.total_tax,
+            grandTotal: subtotalIncludingTaxes,
+          }
+          billTaxLines = toBillTaxLinesJsonb(canonical, absorptionAccountCode)
         }
-        billTaxLines = toBillTaxLinesJsonb(canonical, absorptionAccountCode)
       } else {
         const canonical = emptyBillTaxResult({
           baseAmount: subtotalIncludingTaxes,
           effectiveDate: issue_date,
-          pricingMode: "inclusive",
+          pricingMode: tax_pricing_mode === "exclusive" ? "exclusive" : "inclusive",
         })
         taxResult = {
           subtotalBeforeTax: subtotalIncludingTaxes,
@@ -474,6 +502,7 @@ export async function POST(request: NextRequest) {
         tax_engine_code: "ghana",
         tax_engine_effective_from: issue_date,
         tax_jurisdiction: "GH",
+        tax_pricing_mode,
         vat_classification: billClassification.classification,
         wht_applicable: apply_wht,
         wht_rate_code: apply_wht ? whtCode : null,

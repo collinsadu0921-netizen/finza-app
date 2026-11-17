@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useRouter, useParams, usePathname } from "next/navigation"
-import { calculateGhanaTaxes, calculateBaseFromTotalIncludingTaxes } from "@/lib/ghanaTaxEngine"
+import { calculateGhanaTaxes, calculateGhanaTaxesFromLineItems, calculateBaseFromTotalIncludingTaxes } from "@/lib/ghanaTaxEngine"
 import { getCurrencySymbol } from "@/lib/currency"
 import { resolveCurrencyDisplay } from "@/lib/currency/resolveCurrencyDisplay"
 import { normalizeCountry } from "@/lib/payments/eligibility"
@@ -79,6 +79,7 @@ function EditBillPageContent() {
   const [notes, setNotes] = useState("")
   const [items, setItems] = useState<LineItem[]>([])
   const [applyTaxes, setApplyTaxes] = useState(true)
+  const [taxPricingMode, setTaxPricingMode] = useState<"inclusive" | "exclusive">("inclusive")
   const [status, setStatus] = useState<string>("draft")
   const [businessCountry, setBusinessCountry] = useState<string | null>(null)
   const [currencyCode, setCurrencyCode] = useState<string>("")
@@ -153,6 +154,9 @@ function EditBillPageContent() {
       setNotes(bill.notes || "")
       setStatus(bill.status || "draft")
       setApplyTaxes(bill.nhil > 0 || bill.vat > 0 || bill.getfund > 0)
+      setTaxPricingMode(
+        (bill as any).tax_pricing_mode === "exclusive" ? "exclusive" : "inclusive"
+      )
 
       // Detect import bill
       const importBill = bill.bill_type === "import"
@@ -335,6 +339,24 @@ function EditBillPageContent() {
 
   const taxResult = applyTaxes
     ? (() => {
+        if (taxPricingMode === "exclusive") {
+          // Net line prices: add taxes on top (forward).
+          const lineItems = items.map((item) => ({
+            quantity: Number(item.qty) || 0,
+            unit_price: Number(item.unit_price) || 0,
+            discount_amount: getDiscountAmount(item),
+          }))
+          const r = calculateGhanaTaxesFromLineItems(lineItems, true, issueDate)
+          return {
+            subtotalBeforeTax: subtotalIncludingTaxes,
+            nhil: r.nhil,
+            getfund: r.getfund,
+            covid: r.covid,
+            vat: r.vat,
+            totalTax: r.totalTax,
+            grandTotal: r.grandTotal,
+          }
+        }
         const { baseAmount, taxBreakdown } = calculateBaseFromTotalIncludingTaxes(
           subtotalIncludingTaxes,
           true
@@ -429,6 +451,7 @@ function EditBillPageContent() {
         due_date: dueDate || null,
         notes: notes.trim() || null,
         apply_taxes: applyTaxes,
+        tax_pricing_mode: taxPricingMode,
         status,
         bill_type: isImportBill ? "import" : "standard",
         currency_code: isDocForeign ? fxCurrencyCode : null,
@@ -1218,7 +1241,9 @@ function EditBillPageContent() {
                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                       {isImportBill
                         ? "Apply NHIL (2.5%), GETFund (2.5%) and VAT (15%) on the VAT base"
-                        : "Include NHIL, GETFund, and VAT (extracted from the tax-inclusive total)"}
+                        : taxPricingMode === "exclusive"
+                          ? "Include NHIL, GETFund, and VAT (added on top of net prices)"
+                          : "Include NHIL, GETFund, and VAT (extracted from the tax-inclusive total)"}
                     </p>
                   </div>
                   <button
@@ -1232,6 +1257,33 @@ function EditBillPageContent() {
                   </button>
                 </div>
               </div>
+
+              {applyTaxes && !isImportBill && (
+                <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-2">Prices</p>
+                  <div className="grid grid-cols-2 gap-1 rounded-md bg-gray-100 dark:bg-gray-800 p-1">
+                    <button
+                      type="button"
+                      onClick={() => setTaxPricingMode("exclusive")}
+                      className={`rounded px-2 py-1.5 text-xs font-medium transition-colors ${taxPricingMode === "exclusive" ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}
+                    >
+                      Exclude tax
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTaxPricingMode("inclusive")}
+                      className={`rounded px-2 py-1.5 text-xs font-medium transition-colors ${taxPricingMode === "inclusive" ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}
+                    >
+                      Include tax
+                    </button>
+                  </div>
+                  <p className="mt-1.5 text-[11px] leading-snug text-gray-500 dark:text-gray-400">
+                    {taxPricingMode === "exclusive"
+                      ? "Your line prices are net — taxes are added on top. The total will increase."
+                      : "Your line prices are gross — taxes are extracted from the total."}
+                  </p>
+                </div>
+              )}
 
               {/* Totals Preview */}
               <div className="mt-6 pt-6 border-t-2 border-gray-300 dark:border-gray-600">

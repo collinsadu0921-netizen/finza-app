@@ -5,16 +5,25 @@ import { assertBusinessNotArchived } from "@/lib/archivedBusiness"
 import { ensureAccountingInitialized } from "@/lib/accountingBootstrap"
 import { getCurrencySymbol } from "@/lib/currency"
 import { resolveDocumentVatClassification } from "@/lib/tax/classification"
+import {
+  computeExpenseTax,
+  normalizeExpensePricingMode,
+} from "@/lib/expenses/computeExpenseTax"
 
 export type InsertExpensePayload = {
   supplier: string
   category_id?: string | null
+  /** Entered amount — net when tax_pricing_mode is "exclusive", gross when "inclusive". */
   amount: number
+  /** Whether taxes apply. Defaults to true when omitted. */
+  apply_taxes?: boolean
+  tax_pricing_mode?: "inclusive" | "exclusive"
+  /** Deprecated: tax components are now computed authoritatively on the server. */
   nhil?: number
   getfund?: number
   covid?: number
   vat?: number
-  total: number
+  total?: number
   date: string
   notes?: string | null
   receipt_path?: string | null
@@ -49,11 +58,6 @@ export async function insertExpenseForBusiness(
     supplier,
     category_id,
     amount,
-    nhil,
-    getfund,
-    covid,
-    vat,
-    total,
     date,
     notes,
     receipt_path,
@@ -61,6 +65,13 @@ export async function insertExpenseForBusiness(
     fx_rate,
     vat_classification,
   } = payload
+
+  // Authoritative server-side tax computation. The client's tax columns (if any)
+  // are ignored; net base / tax / gross total are recomputed from the entered
+  // amount and pricing mode.
+  const applyTaxes = payload.apply_taxes !== false
+  const pricingMode = normalizeExpensePricingMode(payload.tax_pricing_mode)
+  const computed = computeExpenseTax(Number(amount), applyTaxes, pricingMode, date)
 
   if (!supplier?.trim() || !date || amount == null || Number.isNaN(Number(amount))) {
     return { ok: false, status: 400, error: "Missing required fields" }
@@ -112,11 +123,7 @@ export async function insertExpenseForBusiness(
   const expenseClassification = resolveDocumentVatClassification({
     requested: vat_classification,
     taxLines: [],
-    totalTax:
-      Number(vat || 0) +
-      Number(nhil || 0) +
-      Number(getfund || 0) +
-      Number(covid || 0),
+    totalTax: computed.totalTax,
   })
   if (!expenseClassification.ok) {
     return {
@@ -138,12 +145,13 @@ export async function insertExpenseForBusiness(
       business_id: businessId,
       supplier: supplier.trim(),
       category_id: category_id || null,
-      amount: Number(amount),
-      nhil: Number(nhil || 0),
-      getfund: Number(getfund || 0),
-      covid: Number(covid || 0),
-      vat: Number(vat || 0),
-      total: Number(total ?? amount),
+      amount: computed.baseAmount,
+      nhil: computed.nhil,
+      getfund: computed.getfund,
+      covid: computed.covid,
+      vat: computed.vat,
+      total: computed.total,
+      tax_pricing_mode: pricingMode,
       date,
       notes: notes || null,
       receipt_path: receipt_path || null,
@@ -153,7 +161,7 @@ export async function insertExpenseForBusiness(
       home_currency_code: isFxExpense ? homeCurrencyCode : null,
       home_currency_total:
         isFxExpense && parsedFxRate
-          ? Math.round(Number(total ?? amount) * parsedFxRate * 100) / 100
+          ? Math.round(computed.total * parsedFxRate * 100) / 100
           : null,
       vat_classification: expenseClassification.classification,
     })

@@ -8,6 +8,7 @@ import ProtectedLayout from "@/components/ProtectedLayout"
 const FragmentWrapper = ({ children }: { children: React.ReactNode }) => <>{children}</>
 import { getCurrentBusiness } from "@/lib/business"
 import { calculateBaseFromTotalIncludingTaxes } from "@/lib/ghanaTaxEngine"
+import { computeExpenseTax } from "@/lib/expenses/computeExpenseTax"
 import { getCurrencySymbol } from "@/lib/currency"
 import FileAttachment, { FileInput } from "@/components/ui/FileAttachment"
 import { NativeSelect } from "@/components/ui/NativeSelect"
@@ -42,6 +43,7 @@ export default function EditExpensePage() {
   const [date, setDate] = useState(new Date().toISOString().split("T")[0])
   const [notes, setNotes] = useState("")
   const [applyTaxes, setApplyTaxes] = useState(true)
+  const [taxPricingMode, setTaxPricingMode] = useState<"inclusive" | "exclusive">("inclusive")
   const [receiptFile, setReceiptFile] = useState<File | null>(null)
   const [receiptPreview, setReceiptPreview] = useState<string | null>(null)
   const [existingReceiptPath, setExistingReceiptPath] = useState<string | null>(null)
@@ -159,6 +161,9 @@ export default function EditExpensePage() {
       // Check if taxes were applied
       const hasTaxes = Number(expense.nhil || 0) + Number(expense.getfund || 0) + Number(expense.covid || 0) + Number(expense.vat || 0) > 0
       setApplyTaxes(hasTaxes)
+      setTaxPricingMode(
+        (expense as any).tax_pricing_mode === "exclusive" ? "exclusive" : "inclusive"
+      )
 
       const home = business.default_currency || "GHS"
       if (
@@ -312,32 +317,9 @@ export default function EditExpensePage() {
       setLoading(true)
 
       // Calculate taxes if applicable
-      // The amount field represents the TOTAL including taxes
-      const totalIncludingTaxes = Number(amount)
-      
-      let baseAmount = totalIncludingTaxes
-      let taxBreakdown = {
-        nhil: 0,
-        getfund: 0,
-        covid: 0,
-        vat: 0,
-        totalTax: 0,
-      }
-
-      if (applyTaxes) {
-        // Calculate base amount from total including taxes
-        const result = calculateBaseFromTotalIncludingTaxes(totalIncludingTaxes, true)
-        baseAmount = result.baseAmount
-        taxBreakdown = {
-          nhil: result.taxBreakdown.nhil,
-          getfund: result.taxBreakdown.getfund,
-          covid: result.taxBreakdown.covid,
-          vat: result.taxBreakdown.vat,
-          totalTax: result.taxBreakdown.totalTax,
-        }
-      }
-
-      const total = totalIncludingTaxes // Total is what user entered
+      // The amount field is the entered amount (gross if inclusive, net if exclusive).
+      // The server recomputes the authoritative base/tax/total.
+      const enteredAmount = Number(amount)
 
       // Handle receipt upload/removal/preservation
       let receiptPath: string | null | undefined = undefined // undefined = preserve existing, null = remove, string = new path
@@ -362,12 +344,9 @@ export default function EditExpensePage() {
       const requestBody: any = {
         supplier,
         category_id: categoryId || null,
-        amount: baseAmount, // Store base amount (before taxes)
-        nhil: taxBreakdown.nhil,
-        getfund: taxBreakdown.getfund,
-        covid: taxBreakdown.covid,
-        vat: taxBreakdown.vat,
-        total, // Store total (including taxes, what user entered)
+        amount: enteredAmount,
+        apply_taxes: applyTaxes,
+        tax_pricing_mode: taxPricingMode,
         date,
         notes: notes || null,
         currency_code: fxEnabled && fxCurrencyCode ? fxCurrencyCode : null,
@@ -405,33 +384,18 @@ export default function EditExpensePage() {
     }
   }
 
-  // Calculate tax breakdown for display
-  // The amount field represents the TOTAL including taxes
-  const totalIncludingTaxes = Number(amount) || 0
-  
-  let baseAmount = totalIncludingTaxes
-  let taxBreakdown = {
-    nhil: 0,
-    getfund: 0,
-    covid: 0,
-    vat: 0,
-    totalTax: 0,
+  // Calculate tax breakdown for display (mirrors the server's authoritative computation)
+  const enteredAmount = Number(amount) || 0
+  const computed = computeExpenseTax(enteredAmount, applyTaxes, taxPricingMode, date)
+  const baseAmount = computed.baseAmount
+  const taxBreakdown = {
+    nhil: computed.nhil,
+    getfund: computed.getfund,
+    covid: computed.covid,
+    vat: computed.vat,
+    totalTax: computed.totalTax,
   }
-
-  if (applyTaxes && totalIncludingTaxes > 0) {
-    // Calculate base amount from total including taxes
-    const result = calculateBaseFromTotalIncludingTaxes(totalIncludingTaxes, true)
-    baseAmount = result.baseAmount
-    taxBreakdown = {
-      nhil: result.taxBreakdown.nhil,
-      getfund: result.taxBreakdown.getfund,
-      covid: result.taxBreakdown.covid,
-      vat: result.taxBreakdown.vat,
-      totalTax: result.taxBreakdown.totalTax,
-    }
-  }
-
-  const total = totalIncludingTaxes // Total is what user entered
+  const total = computed.total
 
   const homeCurrencyCode = currencyCode || ""
   const documentCurrencyCode = fxEnabled && fxCurrencyCode ? fxCurrencyCode : homeCurrencyCode
@@ -443,7 +407,7 @@ export default function EditExpensePage() {
     fxRateNum > 0 &&
     documentCurrencyCode &&
     documentCurrencyCode !== homeCurrencyCode
-      ? Math.round(totalIncludingTaxes * fxRateNum * 100) / 100
+      ? Math.round(total * fxRateNum * 100) / 100
       : null
 
   if (loadingData) {
@@ -530,7 +494,7 @@ export default function EditExpensePage() {
 
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                    Amount {applyTaxes ? "(including taxes)" : ""}
+                    Amount {applyTaxes ? (taxPricingMode === "exclusive" ? "(excluding taxes)" : "(including taxes)") : ""}
                     {fxEnabled && fxCurrencyCode ? ` (${fxCurrencyCode})` : ""} *
                   </label>
                   <input
@@ -544,7 +508,9 @@ export default function EditExpensePage() {
                   />
                   {applyTaxes && (
                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                      Enter the total amount including all taxes
+                      {taxPricingMode === "exclusive"
+                        ? "Enter the net amount — taxes will be added on top"
+                        : "Enter the total amount including all taxes"}
                     </p>
                   )}
                 </div>
@@ -698,6 +664,33 @@ export default function EditExpensePage() {
                 </div>
               </div>
 
+              {applyTaxes && (
+                <div className="pt-4 border-t border-gray-200">
+                  <p className="text-sm font-medium text-gray-900 mb-2">Prices</p>
+                  <div className="grid grid-cols-2 gap-1 rounded-md bg-gray-100 p-1">
+                    <button
+                      type="button"
+                      onClick={() => setTaxPricingMode("exclusive")}
+                      className={`rounded px-2 py-1.5 text-xs font-medium transition-colors ${taxPricingMode === "exclusive" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}
+                    >
+                      Exclude tax
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTaxPricingMode("inclusive")}
+                      className={`rounded px-2 py-1.5 text-xs font-medium transition-colors ${taxPricingMode === "inclusive" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}
+                    >
+                      Include tax
+                    </button>
+                  </div>
+                  <p className="mt-1.5 text-[11px] leading-snug text-gray-500">
+                    {taxPricingMode === "exclusive"
+                      ? "Your entered amount is net — taxes are added on top. The total will increase."
+                      : "Your entered amount is gross — taxes are extracted from the total."}
+                  </p>
+                </div>
+              )}
+
               <div className="border-t border-gray-200 dark:border-gray-600 pt-4">
                 <div className="flex items-center justify-between">
                   <div className="flex-1">
@@ -768,7 +761,7 @@ export default function EditExpensePage() {
             </div>
 
             {/* Tax Breakdown */}
-            {applyTaxes && totalIncludingTaxes > 0 && (
+            {applyTaxes && enteredAmount > 0 && (
               <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
                 <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4">Tax Breakdown</h3>
                 <div className="space-y-3">
@@ -819,13 +812,13 @@ export default function EditExpensePage() {
               </div>
             )}
 
-            {!applyTaxes && totalIncludingTaxes > 0 && (
+            {!applyTaxes && enteredAmount > 0 && (
               <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
                 <div className="flex justify-between items-center">
                   <span className="text-slate-900 font-bold text-lg">Total:</span>
                   <span className="font-bold text-slate-900 text-xl tabular-nums">
                     {docSymbol}
-                    {totalIncludingTaxes.toFixed(2)}
+                    {total.toFixed(2)}
                   </span>
                 </div>
                 {approxHomeTotal != null && (
