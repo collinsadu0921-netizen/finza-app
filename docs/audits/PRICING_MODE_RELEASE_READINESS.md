@@ -2,15 +2,15 @@
 
 **Feature:** tax-inclusive vs tax-exclusive pricing for invoices, supplier bills, expenses (retail + service).
 **Status:** implementation + local verification complete. **Not pushed, not deployed, no remote migration.**
-**Branches/commits:** `feat/tax-pricing-mode-invoices` (local only) — `0c1562e`, `5c4a453`, `320a1de`, `6e55749`, `65f1cab`, `905f8d2`.
+**Branch/commits:** `feat/tax-pricing-mode-invoices` (local only) — `0c1562e`, `5c4a453`, `320a1de`, `6e55749`, `65f1cab`, `905f8d2`, `d096271`.
 
 ## 1. Completed checks & actual results
 
 | Check | Method | Result |
 |---|---|---|
 | Engine fix (GH respects `taxInclusive`) | Jest `pricingMode.test.ts` | ✅ exclusive 70k → net 70k + NHIL 1,750 + GETFund 1,750 + VAT 10,500 = 84k; inclusive 84k → identical |
-| Server-authoritative expense tax | Jest `computeExpenseTax.test.ts` | ✅ exclusive/inclusive/taxes-off/pre-2026-compound/mode-switch (7 cases) |
-| Regression suites | Jest (tax engine + bills + expenses + GH) | ✅ **120/120 pass** |
+| Server-authoritative expense tax | Jest `computeExpenseTax.test.ts` | ✅ exclusive/inclusive/taxes-off/pre-2026-compound/mode-switch/self-consistent-rounding (8 cases) |
+| Regression suites | Jest (tax engine + bills + expenses + GH) | ✅ **121/121 pass** |
 | Type check | `tsc --noEmit` | ✅ 0 errors |
 | Migration 628 (invoices) | applied to staging earlier + local | ✅ column + CHECK verified |
 | Migration 629 (bills/expenses) | applied to local Docker Postgres | ✅ column + CHECK verified on all three tables |
@@ -35,10 +35,51 @@ For invoices, bills and expenses (mode persisted through INSERT → SELECT → U
 
 This is **API/database-level** verification. The full browser UI was **not** exercised (see §5).
 
-## 4. API vs browser verification
+## 4. Verification method (clarified) — API vs browser
 
-- **API/DB verified:** server tax computation, mode persistence round-trip, ledger posting, idempotency, balance, mode-switch semantics.
-- **Browser NOT verified:** actual Next.js UI (no local Supabase/PostgREST stack available). Manual UI checklist in §6.
+**Important clarification:** the "API/database" verification did **not** execute the actual Next.js
+route handlers (`app/api/invoices/create/route.ts`, `app/api/bills/...`, `app/api/expenses/...`). Those
+require the running Next.js app plus a live Supabase SDK backend (PostgREST + Auth), which is not available
+locally. What was actually exercised:
+
+1. **Unit tests (Jest)** called the real helper functions directly:
+   `computeExpenseTax`, `getCanonicalTaxResultFromLineItems`, `calculateTaxes`, `toTaxLinesJsonb`.
+2. **Integration scripts** wrote directly to a disposable local PostgreSQL (via `pg`/`psql`), seeding the
+   same persisted columns the route handlers would write (`subtotal`/`amount`, tax columns, `total`,
+   `tax_lines`, `tax_pricing_mode`), then ran the real database **posting functions and triggers**
+   (`post_invoice_to_ledger`, `post_bill_to_ledger`, `post_expense_to_ledger` + their `trigger_auto_post_*`).
+
+So the calculation, persistence, and ledger posting are verified end-to-end at the code + database layer,
+but the route-handler layer (auth, authority checks, request validation, and their exact orchestration) is
+**code-reviewed only, not executed**.
+
+- **API/DB verified:** tax computation, mode persistence round-trip, ledger posting, idempotency, balance, mode-switch semantics.
+- **Route handlers NOT executed:** auth/authority/validation orchestration.
+- **Browser NOT verified:** no running app. Manual UI checklist in §6.
+
+## 4a. Concrete one-cent rounding issue (found and fixed)
+
+**Before the fix**, `computeExpenseTax(70,000, true, "inclusive")` returned:
+
+| Field | Value |
+|---|---|
+| Net base (`amount`) | 58,333.34 |
+| NHIL | 1,458.33 |
+| GETFund | 1,458.33 |
+| VAT | 8,750.00 |
+| **Sum of displayed components** | **11,666.66** |
+| `totalTax` (from legacy engine) | **11,666.67** ← off by 1 cent |
+| Gross total (`total`) | 70,000.00 |
+
+The legacy engine's `calculateBaseFromTotalIncludingTaxes` rounded the *unrounded* tax sum (11,666.6655 → 11,666.67),
+while its individually-rounded components sum to 11,666.66. For expenses this `totalTax` field is display/classification
+only (expenses have no `total_tax` column), but it disagreed with the on-screen component sum by 1 cent. A more serious
+variant affected **exclusive** non-clean amounts (e.g. 70,001): the gross total (84,001.20) disagreed with base + rounded
+components (84,001.21), so the posting-derived base (70,000.99) would not match the stored `amount` (70,001).
+
+**Fix (committed `d096271`):** `computeExpenseTax` now derives `totalTax` as the exact sum of the rounded components and
+`total` as `base + totalTax`, so `base + totalTax = total` always. For 70,000 inclusive this yields
+`totalTax = 11,666.66`, `base = 58,333.34`, `total = 70,000.00` — consistent. Regression test added for non-clean amounts.
 
 ## 5. Remaining risks
 
@@ -46,7 +87,7 @@ This is **API/database-level** verification. The full browser UI was **not** exe
 2. **FX / credit / reversal** runtime flows not exercised in the local DB (FX total math is code-preserved via `computed.total`).
 3. **Import-bill posting** not DB-tested (path unchanged; mode persisted `'exclusive'`).
 4. **Pre-existing input-tax recoverability** (separate — §7).
-5. Legacy engine 1-cent rounding nuance: `calculateBaseFromTotalIncludingTaxes` rounds `taxBreakdown.totalTax` (unrounded sum) slightly differently from the sum of its individually-rounded components; persisted expense columns stay consistent (`amount + nhil + getfund + vat = total`), so posting balances.
+5. ~~Legacy engine 1-cent rounding~~ **FIXED** — see §4a. The legacy `calculateBaseFromTotalIncludingTaxes` still rounds its `totalTax` from the unrounded sum, but `computeExpenseTax` now recomputes the total from the rounded components, so persisted/displayed/ledger amounts no longer drift.
 
 ## 6. Manual UI checklist (browser, pending)
 
@@ -64,5 +105,20 @@ Pre-2026 supplier bills/expenses post NHIL/GETFund/COVID as **recoverable** inpu
 ## 8. Migration order & rollback
 
 - **Order:** apply `628_invoice_tax_pricing_mode.sql`, then `629_bill_expense_tax_pricing_mode.sql` (both additive; 628 already on staging).
-- **Rollback (code first):** revert app commits, **retain** the `tax_pricing_mode` columns. Dropping them after exclusive documents exist destroys the information needed to interpret/edit those amounts; only drop after confirming zero exclusive records and as a last resort.
 - **No historical amounts are rewritten** — legacy records fall back to `'inclusive'`.
+
+### Rollback safeguards for exclusive documents
+
+The `tax_pricing_mode` column records whether stored line prices/amounts are net or gross. **Retaining the column alone
+does not protect exclusive documents if the application code is reverted** — older code ignores the column and would
+re-interpret a net `unit_price`/`amount` as gross, silently understating tax and total. Therefore, a safe rollback is:
+
+1. **Convert before revert (preferred).** If any exclusive documents exist, first re-interpret them to inclusive —
+   gross up the entered `unit_price` (invoices/bills) or `amount` (expenses) to the inclusive figure, recompute
+   `subtotal`/`total`/`tax_lines`, and set `tax_pricing_mode = 'inclusive'`. Only then revert the application code.
+2. **Or keep a compatibility layer.** Retain the interpretation code (or a read-only shim that respects the column)
+   rather than a full revert, so exclusive documents remain correctly interpreted.
+3. **Never drop the column while exclusive records exist** — that destroys the only signal distinguishing net from gross.
+   Only drop after confirming zero exclusive records, and only as a last resort.
+
+These steps ensure older code never silently misinterprets an exclusive document's amounts.
