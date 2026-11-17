@@ -64,6 +64,7 @@ export async function POST(request: NextRequest) {
       footer_message,
       items,
       apply_taxes = true,
+      tax_pricing_mode = "inclusive", // "inclusive" (gross, tax extracted) | "exclusive" (net, tax added on top)
       currency_code, // FX currency for this document (e.g. "USD"). Defaults to business home currency.
       currency_symbol, // Optional override symbol
       fx_rate,         // Exchange rate: 1 unit of currency_code = fx_rate units of home currency
@@ -83,6 +84,16 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       )
     }
+
+    // Validate the pricing mode before using it. Legacy callers (imports,
+    // conversions, API-created documents) that omit it fall back to "inclusive".
+    if (tax_pricing_mode !== "inclusive" && tax_pricing_mode !== "exclusive") {
+      return NextResponse.json(
+        { error: "Invalid tax_pricing_mode", message: "tax_pricing_mode must be 'inclusive' or 'exclusive'" },
+        { status: 400 }
+      )
+    }
+    const taxInclusive = tax_pricing_mode === "inclusive"
     // Resolve customer WHT by the invoice transaction date. The configured
     // rate table is authoritative; a current rate is never substituted for a
     // historical document.
@@ -305,7 +316,7 @@ export async function POST(request: NextRequest) {
       const config: TaxEngineConfig = {
         jurisdiction,
         effectiveDate: effectiveDateForCalculation,
-        taxInclusive: true, // Invoices always use tax-inclusive pricing
+        taxInclusive, // from persisted/requested pricing mode, not hardcoded
       }
       
       taxResult = getCanonicalTaxResultFromLineItems(lineItems, config)
@@ -438,6 +449,7 @@ export async function POST(request: NextRequest) {
       total_tax: taxResult ? Math.round(taxResult.total_tax * 100) / 100 : 0, // result.total_tax
       total: invoiceTotal, // result.total_amount
       apply_taxes,
+      tax_pricing_mode,
       status: status || "draft",
       public_token: publicToken,
       // Canonical tax_lines JSONB (source of truth)

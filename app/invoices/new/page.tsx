@@ -310,6 +310,9 @@ function NewInvoicePageContent() {
 
   // Accounting Settings
   const [applyGhanaTax, setApplyGhanaTax] = useState(true)
+  // Pricing mode: "exclusive" = entered prices are net (tax added on top);
+  // "inclusive" = entered prices are gross (tax extracted).
+  const [taxPricingMode, setTaxPricingMode] = useState<"inclusive" | "exclusive">("exclusive")
   const [currencySymbol, setCurrencySymbol] = useState<string>("")
   const [currencyCode, setCurrencyCode] = useState<string | null>(null)
 
@@ -790,7 +793,7 @@ function NewInvoicePageContent() {
       lineItems,
       businessCountry,
       effectiveDate,
-      true // tax-inclusive pricing
+      taxPricingMode === "inclusive"
     )
 
     baseSubtotal = taxCalculationResult.subtotal_excl_tax
@@ -913,6 +916,7 @@ function NewInvoicePageContent() {
         due_date: dueDate || null,
         notes: notes || null,
         apply_taxes: applyGhanaTax,
+        tax_pricing_mode: taxPricingMode,
         status: "draft", // Always create as draft first
         wht_receivable_applicable: applyWHTReceivable,
         wht_receivable_rate: applyWHTReceivable ? (selectedWHTRecvRate?.rate ?? null) : null,
@@ -1397,11 +1401,39 @@ function NewInvoicePageContent() {
                   </div>
                 </div>
 
-                {/* Subtotal */}
+                {/* Pricing mode (inclusive / exclusive) — only relevant when taxes apply */}
+                {applyGhanaTax && (
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <p className="mb-1.5 text-xs font-semibold text-slate-700">Prices</p>
+                    <div className="grid grid-cols-2 gap-1 rounded-md bg-slate-100 p-1">
+                      <button
+                        type="button"
+                        onClick={() => setTaxPricingMode("exclusive")}
+                        className={`rounded px-2 py-1.5 text-xs font-medium transition-colors ${taxPricingMode === "exclusive" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+                      >
+                        Exclude tax
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setTaxPricingMode("inclusive")}
+                        className={`rounded px-2 py-1.5 text-xs font-medium transition-colors ${taxPricingMode === "inclusive" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+                      >
+                        Include tax
+                      </button>
+                    </div>
+                    <p className="mt-1.5 text-[11px] leading-snug text-slate-500">
+                      {taxPricingMode === "exclusive"
+                        ? "Your entered prices are net — taxes are added on top."
+                        : "Your entered prices are gross — taxes are extracted from the total."}
+                    </p>
+                  </div>
+                )}
+
+                {/* Subtotal / amount before taxes */}
                 <div className="flex justify-between items-center text-sm text-slate-600">
-                  <span>Subtotal</span>
+                  <span>{applyGhanaTax ? "Amount before taxes" : "Subtotal"}</span>
                   <span className="font-medium tabular-nums">
-                    {formatMoney(applyGhanaTax ? total : baseSubtotal, amountCurrencyCode)}
+                    {formatMoney(baseSubtotal, amountCurrencyCode)}
                   </span>
                 </div>
 

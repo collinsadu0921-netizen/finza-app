@@ -123,14 +123,20 @@ export function getCanonicalTaxResultFromLineItems(
 ): TaxResult {
   // Use canonical engine for Ghana (canonical engines available)
   if (config.jurisdiction === 'GH') {
-    return ghanaTaxEngineCanonical.reverseCalculate(
-      lineItems.reduce((sum, item) => {
-        const lineTotal = item.quantity * item.unit_price
-        const discount = item.discount_amount || 0
-        return sum + lineTotal - discount
-      }, 0),
-      config
-    )
+    // Tax-inclusive: line prices are gross; reverse-calculate the net base + taxes.
+    // Tax-exclusive: line prices are net; add taxes on top (forward calculation).
+    // This fixes the defect where GH ignored config.taxInclusive and always reversed.
+    if (config.taxInclusive) {
+      return ghanaTaxEngineCanonical.reverseCalculate(
+        lineItems.reduce((sum, item) => {
+          const lineTotal = item.quantity * item.unit_price
+          const discount = item.discount_amount || 0
+          return sum + lineTotal - discount
+        }, 0),
+        config
+      )
+    }
+    return ghanaTaxEngineCanonical.calculateFromLineItems(lineItems, config)
   }
   
   // For other jurisdictions, use legacy engine and convert via adapter
