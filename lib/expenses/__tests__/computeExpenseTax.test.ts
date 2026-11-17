@@ -47,6 +47,18 @@ describe("computeExpenseTax", () => {
     expect(r.totalTax).toBe(15330)
     expect(r.total).toBe(85330)
   })
+
+  it("rounds self-consistently for non-clean amounts (no one-cent drift)", () => {
+    const round2 = (v: number) => Math.round(v * 100) / 100
+    for (const mode of ["exclusive", "inclusive"] as const) {
+      const entered = mode === "exclusive" ? 70001 : 84001.2
+      const r = computeExpenseTax(entered, true, mode, "2026-11-09")
+      // Invariant: totalTax is exactly the sum of the rounded components,
+      // and base + totalTax equals the gross total (both to 2dp).
+      expect(r.totalTax).toBe(round2(r.nhil + r.getfund + r.covid + r.vat))
+      expect(r.total).toBe(round2(r.baseAmount + r.totalTax))
+    }
+  })
 })
 
 describe("normalizeExpensePricingMode", () => {
