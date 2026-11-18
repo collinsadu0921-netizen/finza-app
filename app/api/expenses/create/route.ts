@@ -40,6 +40,8 @@ export async function POST(request: NextRequest) {
       currency_code,
       fx_rate,
       vat_classification,
+      apply_taxes,
+      tax_pricing_mode,
     } = body
 
     if (!business_id || !supplier || !date || amount == null) {
@@ -77,6 +79,8 @@ export async function POST(request: NextRequest) {
         currency_code,
         fx_rate,
         vat_classification,
+        apply_taxes,
+        tax_pricing_mode,
       },
       request,
       profileSettingsLabel: "Business Profile",
