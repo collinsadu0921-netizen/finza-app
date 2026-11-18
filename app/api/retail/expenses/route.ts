@@ -107,6 +107,8 @@ export async function POST(request: NextRequest) {
       receipt_path,
       currency_code,
       fx_rate,
+      apply_taxes,
+      tax_pricing_mode,
     } = body
 
     const result = await insertExpenseForBusiness(supabase, {
@@ -126,6 +128,8 @@ export async function POST(request: NextRequest) {
         receipt_path,
         currency_code,
         fx_rate,
+        apply_taxes,
+        tax_pricing_mode,
       },
       request,
       profileSettingsLabel: "Store profile",
