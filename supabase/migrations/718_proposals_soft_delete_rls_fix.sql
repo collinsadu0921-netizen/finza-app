@@ -25,8 +25,6 @@
 --
 -- No data changes.
 
-BEGIN;
-
 DROP POLICY IF EXISTS "Users can select proposals for their business" ON public.proposals;
 CREATE POLICY "Users can select proposals for their business"
   ON public.proposals FOR SELECT
@@ -40,5 +38,3 @@ CREATE POLICY "Users can update proposals for their business"
     AND deleted_at IS NULL
   )
   WITH CHECK (public.finza_user_can_access_business(business_id));
-
-COMMIT;
