@@ -118,6 +118,31 @@ describe("POST /api/expenses/create — pricing mode reaches helper and persists
     expect(Number(row.total)).toBe(84000)
   })
 
+  it("pre-2026 exclusive: persists absorbing tax_lines (NHIL/GETFund/COVID → 5100)", async () => {
+    const captured: CapturedRow[] = []
+    ;(createSupabaseServerClient as jest.Mock).mockResolvedValue(makeSupabaseMock(captured))
+
+    const res = await createExpenseRoute(
+      jsonReq("http://localhost/api/expenses/create", {
+        business_id: "biz-1",
+        supplier: "Acme",
+        amount: 100,
+        apply_taxes: true,
+        tax_pricing_mode: "exclusive",
+        date: "2025-12-31",
+      })
+    )
+
+    expect(res.status).toBe(201)
+    const row = captured[0]
+    const lines = row.tax_lines as Array<{ code: string; ledger_account_code: string; absorbed_to_cost: boolean }>
+    expect(lines.find((line) => line.code === "NHIL")?.ledger_account_code).toBe("5100")
+    expect(lines.find((line) => line.code === "GETFUND")?.ledger_account_code).toBe("5100")
+    expect(lines.find((line) => line.code === "COVID")?.ledger_account_code).toBe("5100")
+    expect(lines.find((line) => line.code === "VAT")?.ledger_account_code).toBe("2100")
+    expect(Number(row.total)).toBe(121.9)
+  })
+
   it("inclusive: entered 84,000 gross → amount 70,000, tax 14,000, total 84,000, mode inclusive", async () => {
     const captured: CapturedRow[] = []
     ;(createSupabaseServerClient as jest.Mock).mockResolvedValue(makeSupabaseMock(captured))

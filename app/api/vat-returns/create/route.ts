@@ -212,6 +212,19 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    if (Math.abs(calculation.unclassified_tax) > 0.009) {
+      return NextResponse.json(
+        {
+          error:
+            "One or more tax-account movements could not be classified as output, input or settlement. Classify the source adjustment before filing.",
+          code: "VAT_TAX_MOVEMENT_UNCLASSIFIED",
+          taxable_bases: bases,
+          warnings: [...calculation.warnings, ...bases.warnings],
+        },
+        { status: 409 }
+      )
+    }
+
     // ledger_authority: true — figures sourced exclusively from the immutable ledger
     const { data: vatReturn, error } = await supabase
       .from("vat_returns")

@@ -5,6 +5,17 @@ import {
 
 export type ExpensePricingMode = "inclusive" | "exclusive"
 
+export type ExpenseTaxLine = {
+  code: "NHIL" | "GETFUND" | "COVID" | "VAT"
+  name: string
+  rate: number
+  amount: number
+  ledger_account_code: string
+  ledger_side: "debit" | "credit"
+  is_creditable_input: boolean
+  absorbed_to_cost: boolean
+}
+
 export type ComputedExpenseTax = {
   baseAmount: number
   nhil: number
@@ -13,6 +24,7 @@ export type ComputedExpenseTax = {
   vat: number
   totalTax: number
   total: number
+  taxLines: ExpenseTaxLine[]
 }
 
 /**
@@ -50,6 +62,7 @@ export function computeExpenseTax(
       vat: 0,
       totalTax: 0,
       total: round2(amount),
+      taxLines: [],
     }
   }
 
@@ -81,7 +94,90 @@ export function computeExpenseTax(
     pricingMode === "exclusive" ? round2(amount) : round2(amount - totalTax)
   const total = round2(baseAmount + totalTax)
 
-  return { baseAmount, nhil, getfund, covid, vat, totalTax, total }
+  return {
+    baseAmount,
+    nhil,
+    getfund,
+    covid,
+    vat,
+    totalTax,
+    total,
+    taxLines: buildExpenseTaxLines({ effectiveDate, nhil, getfund, covid, vat }),
+  }
+}
+
+/**
+ * Build ledger posting metadata for an expense.
+ *
+ * Pre-2026 purchase NHIL/GETFund/COVID are not creditable input tax. They are
+ * absorbed into the expense cost (5100) so the ledger does not claim them as
+ * recoverable. VAT remains an input-tax control account. From 2026-01-01 all
+ * three levies are creditable under Act 1151 and post to 2110/2120; COVID is
+ * abolished.
+ */
+export function buildExpenseTaxLines(input: {
+  effectiveDate: string
+  nhil: number
+  getfund: number
+  covid: number
+  vat: number
+}): ExpenseTaxLine[] {
+  const pre2026 = String(input.effectiveDate || "").slice(0, 10) < "2026-01-01"
+  const absorption = "5100"
+  const lines: ExpenseTaxLine[] = []
+
+  const add = (
+    code: ExpenseTaxLine["code"],
+    name: string,
+    amount: number,
+    rate: number,
+    account: string,
+    credited: boolean,
+    absorbed: boolean
+  ) => {
+    if (!(amount > 0)) return
+    lines.push({
+      code,
+      name,
+      rate,
+      amount: round2(amount),
+      ledger_account_code: account,
+      ledger_side: "debit",
+      is_creditable_input: credited,
+      absorbed_to_cost: absorbed,
+    })
+  }
+
+  add(
+    "NHIL",
+    "NHIL",
+    input.nhil,
+    pre2026 ? 0.025 : 0.025,
+    pre2026 ? absorption : "2110",
+    !pre2026,
+    pre2026
+  )
+  add(
+    "GETFUND",
+    "GETFund",
+    input.getfund,
+    pre2026 ? 0.025 : 0.025,
+    pre2026 ? absorption : "2120",
+    !pre2026,
+    pre2026
+  )
+  add(
+    "COVID",
+    "COVID Levy",
+    input.covid,
+    0.01,
+    pre2026 ? absorption : "2100",
+    false,
+    pre2026
+  )
+  add("VAT", "VAT", input.vat, 0.15, "2100", true, false)
+
+  return lines
 }
 
 export function normalizeExpensePricingMode(

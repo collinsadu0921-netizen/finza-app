@@ -185,6 +185,7 @@ export async function PUT(
       updateData.vat = computed.vat
       updateData.total = computed.total
       updateData.tax_pricing_mode = pricingMode
+      updateData.tax_lines = computed.taxLines
     }
     if (notes !== undefined) updateData.notes = notes
     // Always set receipt_path to the determined value (preserved or updated)
@@ -251,31 +252,30 @@ export async function PUT(
           : null
     }
 
-    const { data: expense, error } = await supabase
-      .from("expenses")
-      .update(updateData)
-      .eq("id", expenseId)
-      .eq("business_id", business.id)
-      .select(
-        `
-        *,
-        expense_categories (
-          id,
-          name
-        )
-      `
-      )
-      .single()
+    const { error } = await supabase.rpc("update_expense_with_repost", {
+      p_expense_id: expenseId,
+      p_patch: updateData,
+      p_user_id: user.id,
+    })
 
     if (error) {
       console.error("Error updating expense:", error)
       const msg = error.message ?? ""
       if (
+        msg.includes("POSTED_EXPENSE_IMMUTABLE") ||
         msg.includes("Posted expenses are immutable") ||
-        msg.includes("Cannot modify expenses in a closed or locked accounting period")
+        msg.includes("Cannot modify expenses in a closed or locked accounting period") ||
+        msg.includes("closed") ||
+        msg.includes("locked") ||
+        msg.includes("accounting period")
       ) {
         return NextResponse.json(
-          { error: msg, code: msg.includes("immutable") ? "EXPENSE_IMMUTABLE" : "PERIOD_CLOSED" },
+          {
+            error: msg,
+            code: msg.includes("IMMUTABLE") || msg.includes("immutable")
+              ? "EXPENSE_IMMUTABLE"
+              : "PERIOD_CLOSED",
+          },
           { status: 400 }
         )
       }
@@ -285,32 +285,27 @@ export async function PUT(
       )
     }
 
-    // Ledger: if expense was posted, reverse prior posting and post new (immutable-safe)
-    try {
-      const { error: repostError } = await supabase.rpc("repost_expense_to_ledger", {
-        p_expense_id: expenseId,
-      })
-      if (repostError) {
-        const repostMsg = repostError.message ?? ""
-        if (
-          repostMsg.includes("closed") ||
-          repostMsg.includes("locked") ||
-          repostMsg.includes("accounting period")
-        ) {
-          return NextResponse.json(
-            {
-              error: repostMsg,
-              code: "PERIOD_CLOSED",
-              expense,
-            },
-            { status: 400 }
-          )
-        }
-        console.error("repost_expense_to_ledger error (non-fatal):", repostError)
-      }
-    } catch (repostErr: unknown) {
-      console.error("repost_expense_to_ledger threw:", repostErr)
+    const { data: expense, error: reloadError } = await supabase
+      .from("expenses")
+      .select(
+        `
+        *,
+        expense_categories (
+          id,
+          name
+        )
+      `
+      )
+      .eq("id", expenseId)
+      .eq("business_id", business.id)
+      .single()
+
+    if (reloadError) {
+      return NextResponse.json({ error: reloadError.message }, { status: 500 })
     }
+
+    // Ledger reversal/repost is performed atomically inside
+    // update_expense_with_repost (same transaction as the row update).
 
     // Log audit entry
     try {

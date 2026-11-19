@@ -148,6 +148,15 @@ export async function POST(request: NextRequest) {
       standardRatedPurchases: calculation.total_standard_rated_purchases,
       taxableBasesComplete: calculation.taxable_bases_complete,
     })
+    const taxClassException =
+      Math.abs(calculation.unclassified_tax) > 0.009
+        ? {
+            code: "VAT_TAX_MOVEMENT_UNCLASSIFIED",
+            message:
+              "One or more tax-account movements could not be classified as output, input or settlement (for example a manual adjustment). Classify the source adjustment before filing.",
+          }
+        : null
+    const exception = dataQualityException ?? taxClassException
 
     const responseBody: Record<string, unknown> = {
       calculation,
@@ -155,8 +164,8 @@ export async function POST(request: NextRequest) {
       ledger_source: true,
     }
 
-    if (dataQualityException) {
-      responseBody.data_quality_exception = dataQualityException
+    if (exception) {
+      responseBody.data_quality_exception = exception
     }
 
     const warnings = [...calculation.warnings, ...bases.warnings]

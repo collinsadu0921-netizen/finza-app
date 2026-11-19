@@ -152,6 +152,7 @@ export async function insertExpenseForBusiness(
       vat: computed.vat,
       total: computed.total,
       tax_pricing_mode: pricingMode,
+      tax_lines: computed.taxLines,
       date,
       notes: notes || null,
       receipt_path: receipt_path || null,

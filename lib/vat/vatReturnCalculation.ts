@@ -10,6 +10,14 @@ export type VatLedgerRow = {
   tax_code: string
   period_debits?: number | null
   period_credits?: number | null
+  output_debits?: number | null
+  output_credits?: number | null
+  input_debits?: number | null
+  input_credits?: number | null
+  settlement_debits?: number | null
+  settlement_credits?: number | null
+  unclassified_debits?: number | null
+  unclassified_credits?: number | null
 }
 
 export type VatReturnCalculationInput = {
@@ -51,6 +59,14 @@ export type VatReturnCalculation = {
   total_input_covid: number
   total_input_vat: number
   total_input_tax: number
+  /** Pre-2026 input levies that were not claimable; disclosure only. */
+  total_noncreditable_input_nhil: number
+  total_noncreditable_input_getfund: number
+  total_noncreditable_input_covid: number
+  total_noncreditable_input_tax: number
+  /** Tax-account movements excluded from input/output boxes. */
+  settlement_tax: number
+  unclassified_tax: number
   net_vat_payable: number
   net_vat_refund: number
   /**
@@ -102,7 +118,23 @@ function amount(value: unknown): number {
   return Number.isFinite(n) ? n : 0
 }
 
-function rowAmount(rows: VatLedgerRow[], code: string, field: "period_debits" | "period_credits"): number {
+function rowAmount(
+  rows: VatLedgerRow[],
+  code: string,
+  field: keyof Pick<
+    VatLedgerRow,
+    | "period_debits"
+    | "period_credits"
+    | "output_debits"
+    | "output_credits"
+    | "input_debits"
+    | "input_credits"
+    | "settlement_debits"
+    | "settlement_credits"
+    | "unclassified_debits"
+    | "unclassified_credits"
+  >
+): number {
   return rows
     .filter((row) => String(row.tax_code).toLowerCase() === code.toLowerCase())
     .reduce((sum, row) => sum + amount(row[field]), 0)
@@ -169,15 +201,75 @@ export function calculateVatReturnTotals(
   const periodEndDate = String(input.periodEndDate || "").slice(0, 10)
   const periodIsPost2026 = periodEndDate >= "2026-01-01"
 
-  const totalOutputVat = roundMoney(rowAmount(rows, "VAT", "period_credits"))
-  const totalOutputNhil = roundMoney(rowAmount(rows, "NHIL", "period_credits"))
-  const totalOutputGetfund = roundMoney(rowAmount(rows, "GETFund", "period_credits"))
-  const totalOutputCovid = roundMoney(rowAmount(rows, "COVID", "period_credits"))
+  const hasClassifiedMovements = rows.some(
+    (row) =>
+      row.output_debits != null ||
+      row.output_credits != null ||
+      row.input_debits != null ||
+      row.input_credits != null
+  )
 
-  const totalInputVat = roundMoney(rowAmount(rows, "VAT", "period_debits"))
-  const totalInputNhil = roundMoney(rowAmount(rows, "NHIL", "period_debits"))
-  const totalInputGetfund = roundMoney(rowAmount(rows, "GETFund", "period_debits"))
-  const totalInputCovid = roundMoney(rowAmount(rows, "COVID", "period_debits"))
+  const outputNet = (code: string) =>
+    hasClassifiedMovements
+      ? roundMoney(
+          rowAmount(rows, code, "output_credits") -
+            rowAmount(rows, code, "output_debits")
+        )
+      : roundMoney(rowAmount(rows, code, "period_credits"))
+  const inputNet = (code: string) =>
+    hasClassifiedMovements
+      ? roundMoney(
+          rowAmount(rows, code, "input_debits") -
+            rowAmount(rows, code, "input_credits")
+        )
+      : roundMoney(rowAmount(rows, code, "period_debits"))
+
+  const totalOutputVat = outputNet("VAT")
+  const totalOutputNhil = outputNet("NHIL")
+  const totalOutputGetfund = outputNet("GETFund")
+  const totalOutputCovid = outputNet("COVID")
+
+  const totalInputVat = inputNet("VAT")
+  const inputNhil = inputNet("NHIL")
+  const inputGetfund = inputNet("GETFund")
+  const inputCovid = inputNet("COVID")
+
+  // Pre-2026 input NHIL/GETFund/COVID are not claimable. They are excluded
+  // from input-tax boxes and total input tax, and disclosed separately.
+  const totalInputNhil = periodIsPost2026 ? inputNhil : 0
+  const totalInputGetfund = periodIsPost2026 ? inputGetfund : 0
+  const totalInputCovid = 0
+  const noncreditableInputNhil = periodIsPost2026 ? 0 : inputNhil
+  const noncreditableInputGetfund = periodIsPost2026 ? 0 : inputGetfund
+  const noncreditableInputCovid = periodIsPost2026 ? 0 : inputCovid
+  const totalNoncreditableInputTax = roundMoney(
+    noncreditableInputNhil + noncreditableInputGetfund + noncreditableInputCovid
+  )
+
+  const settlementTax = hasClassifiedMovements
+    ? roundMoney(
+        rowAmount(rows, "VAT", "settlement_debits") +
+          rowAmount(rows, "NHIL", "settlement_debits") +
+          rowAmount(rows, "GETFund", "settlement_debits") +
+          rowAmount(rows, "COVID", "settlement_debits") -
+          rowAmount(rows, "VAT", "settlement_credits") -
+          rowAmount(rows, "NHIL", "settlement_credits") -
+          rowAmount(rows, "GETFund", "settlement_credits") -
+          rowAmount(rows, "COVID", "settlement_credits")
+      )
+    : 0
+  const unclassifiedTax = hasClassifiedMovements
+    ? roundMoney(
+        rowAmount(rows, "VAT", "unclassified_debits") +
+          rowAmount(rows, "NHIL", "unclassified_debits") +
+          rowAmount(rows, "GETFund", "unclassified_debits") +
+          rowAmount(rows, "COVID", "unclassified_debits") -
+          rowAmount(rows, "VAT", "unclassified_credits") -
+          rowAmount(rows, "NHIL", "unclassified_credits") -
+          rowAmount(rows, "GETFund", "unclassified_credits") -
+          rowAmount(rows, "COVID", "unclassified_credits")
+      )
+    : 0
 
   const outputAdjustment = roundMoney(amount(input.outputAdjustment))
   const inputAdjustment = roundMoney(amount(input.inputAdjustment))
@@ -237,6 +329,11 @@ export function calculateVatReturnTotals(
       "Standard-rated taxable purchases could not be determined from transaction evidence. The return cannot be filed until purchases are classified."
     )
   }
+  if (Math.abs(unclassifiedTax) > 0.009) {
+    warnings.push(
+      `Unclassified tax-account movements (${unclassifiedTax.toFixed(2)}) were excluded from the return. Classify the source adjustment before filing.`
+    )
+  }
 
   const totalTaxableSales = roundMoney((standardRatedSales ?? 0) + zeroRatedSales)
   const totalTaxablePurchases = roundMoney(
@@ -262,6 +359,12 @@ export function calculateVatReturnTotals(
     total_input_covid: totalInputCovid,
     total_input_vat: totalInputVat,
     total_input_tax: roundMoney(rawInputTax + inputAdjustment),
+    total_noncreditable_input_nhil: roundMoney(noncreditableInputNhil),
+    total_noncreditable_input_getfund: roundMoney(noncreditableInputGetfund),
+    total_noncreditable_input_covid: roundMoney(noncreditableInputCovid),
+    total_noncreditable_input_tax: totalNoncreditableInputTax,
+    settlement_tax: settlementTax,
+    unclassified_tax: unclassifiedTax,
     net_vat_payable: roundMoney(netVatPayable),
     net_vat_refund: roundMoney(netVatRefund),
     separate_nhil_payable: position.separate_nhil_payable,

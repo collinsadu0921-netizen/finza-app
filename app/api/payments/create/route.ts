@@ -35,7 +35,12 @@ export async function POST(request: NextRequest) {
       notes,
       settlement_fx_rate, // Rate at time of payment for FX invoices (1 FX unit = X home currency)
       wht_amount = 0,     // WHT deducted by customer — recorded as WHT Receivable (2155), not cash
+      idempotency_key,
     } = body
+    const idempotencyKey =
+      (typeof idempotency_key === "string" && idempotency_key.trim()) ||
+      request.headers.get("idempotency-key")?.trim() ||
+      null
 
     // Validate method
     const validMethods = ["cash", "bank", "momo", "card", "cheque", "paystack", "other", "customer_credit"]
@@ -331,6 +336,26 @@ export async function POST(request: NextRequest) {
     const { data: tokenData } = await supabase.rpc("generate_public_token")
     const publicToken = tokenData || Buffer.from(`${business_id}-${invoice_id}-${Date.now()}`).toString("base64url")
 
+    // Duplicate retry of the same request: return the already-created payment.
+    if (idempotencyKey) {
+      const { data: existingPayment } = await supabase
+        .from("payments")
+        .select("*")
+        .eq("business_id", business_id)
+        .eq("idempotency_key", idempotencyKey)
+        .is("deleted_at", null)
+        .maybeSingle()
+
+      if (existingPayment) {
+        return NextResponse.json({
+          success: true,
+          payment: existingPayment,
+          idempotent: true,
+          message: "Payment already recorded",
+        }, { status: 200 })
+      }
+    }
+
     // Create payment
     const { data: payment, error: paymentError } = await supabase
       .from("payments")
@@ -346,11 +371,32 @@ export async function POST(request: NextRequest) {
         public_token: publicToken,
         settlement_fx_rate: isFxInvoice ? parsedSettlementFxRate : null,
         wht_amount: requestedWhtAmount,
+        idempotency_key: idempotencyKey,
       })
       .select()
       .single()
 
     if (paymentError) {
+      // A concurrent retry can lose the unique-index race. Reconcile to the
+      // existing payment instead of surfacing an opaque duplicate error.
+      if (idempotencyKey && (paymentError.code === "23505" || paymentError.message?.includes("duplicate key"))) {
+        const { data: existingPayment } = await supabase
+          .from("payments")
+          .select("*")
+          .eq("business_id", business_id)
+          .eq("idempotency_key", idempotencyKey)
+          .is("deleted_at", null)
+          .maybeSingle()
+        if (existingPayment) {
+          return NextResponse.json({
+            success: true,
+            payment: existingPayment,
+            idempotent: true,
+            message: "Payment already recorded",
+          }, { status: 200 })
+        }
+      }
+
       console.error("Error creating payment:", paymentError)
       // Surface the real DB error so it shows in the UI — avoids silent "check all fields" loops
       const userMessage = paymentError.message?.includes("payments_method_check")

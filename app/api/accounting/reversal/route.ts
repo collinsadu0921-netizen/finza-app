@@ -7,6 +7,7 @@ import { assertAccountingAccess, accountingUserFromRequest } from "@/lib/account
 import { resolveAccountingContext } from "@/lib/accounting/resolveAccountingContext"
 import { enforceServiceIndustryBusinessTierForAccountingApi } from "@/lib/serviceWorkspace/enforceServiceIndustryBusinessTierForAccountingApi"
 import { inventoryLinkedJournalReversalBlock } from "@/lib/accounting/inventoryLinkedJournalReversal"
+import { sourceDocumentReversalBlock } from "@/lib/accounting/sourceDocumentReversal"
 import { mapServiceManualRpcError } from "@/lib/service/accounting/manualJournal"
 
 const MIN_REASON_LENGTH = 10
@@ -161,6 +162,16 @@ export async function POST(request: NextRequest) {
     if (inventoryBlock) {
       return NextResponse.json(
         { error: inventoryBlock.error, code: inventoryBlock.code },
+        { status: 409 }
+      )
+    }
+
+    const sourceDocumentBlock = sourceDocumentReversalBlock(
+      originalJe.reference_type as string | null
+    )
+    if (sourceDocumentBlock) {
+      return NextResponse.json(
+        { error: sourceDocumentBlock.error, code: sourceDocumentBlock.code },
         { status: 409 }
       )
     }

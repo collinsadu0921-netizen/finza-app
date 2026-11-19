@@ -71,6 +71,7 @@ function CreateCreditNoteContent() {
   const [invoice, setInvoice] = useState<any>(null)
   const [creditCapacity, setCreditCapacity] = useState<InvoiceCreditCapacity | null>(null)
   const [jurisdiction, setJurisdiction] = useState<string>("GH")
+  const [pricingMode, setPricingMode] = useState<"inclusive" | "exclusive">("inclusive")
   const [items, setItems] = useState<LineItem[]>([])
   const [date, setDate] = useState(new Date().toISOString().split("T")[0])
   const [reason, setReason] = useState("")
@@ -179,6 +180,9 @@ function CreateCreditNoteContent() {
 
       const data = await response.json()
       setInvoice(data.invoice)
+      setPricingMode(
+        data.invoice?.tax_pricing_mode === "exclusive" ? "exclusive" : "inclusive"
+      )
 
       const capacityRes = await fetch(`/api/invoices/${invoiceIdToLoad}/credit-capacity`)
       if (!capacityRes.ok) {
@@ -269,7 +273,7 @@ function CreateCreditNoteContent() {
       const canonical = getCanonicalTaxResultFromLineItems(lineItems, {
         jurisdiction,
         effectiveDate,
-        taxInclusive: true,
+        taxInclusive: pricingMode === "inclusive",
       })
       const legacy = deriveLegacyTaxColumnsFromTaxLines(canonical.lines)
       return {
@@ -691,6 +695,11 @@ function CreateCreditNoteContent() {
                       </label>
                       <p className="text-xs text-gray-500 mt-1">
                         Include NHIL, GETFund, and VAT
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {pricingMode === "exclusive"
+                          ? "Pricing mode inherited from invoice: prices exclude tax (tax is added on top)."
+                          : "Pricing mode inherited from invoice: prices include tax (tax is extracted)."}
                       </p>
                     </div>
                     <button

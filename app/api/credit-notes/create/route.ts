@@ -67,7 +67,7 @@ export async function POST(request: NextRequest) {
 
     const { data: invoice } = await supabase
       .from("invoices")
-      .select("id, total, subtotal, total_tax, customer_id, vat_classification")
+      .select("id, total, subtotal, total_tax, customer_id, vat_classification, tax_pricing_mode")
       .eq("id", invoice_id)
       .eq("business_id", business_id)
       .is("deleted_at", null)
@@ -136,7 +136,15 @@ export async function POST(request: NextRequest) {
     // Determine effective date: use credit note date
     const effectiveDate = date.split('T')[0] // YYYY-MM-DD format
 
-    // Calculate taxes using canonical tax engine (tax-inclusive mode)
+    // Credit notes inherit the invoice pricing mode. This keeps the UI prefill,
+    // server calculation, persisted mode and ledger posting on one agreement:
+    // inclusive -> line prices are gross; exclusive -> line prices are net.
+    const invoicePricingMode =
+      (invoice as { tax_pricing_mode?: string | null }).tax_pricing_mode === "exclusive"
+        ? "exclusive"
+        : "inclusive"
+
+    // Calculate taxes using canonical tax engine (same mode as the invoice)
     const jurisdiction = countryCode
     const taxEngineCode = getTaxEngineCode(jurisdiction)
     let taxResult: import('@/lib/taxEngine/types').TaxResult | null = null
@@ -149,7 +157,7 @@ export async function POST(request: NextRequest) {
       const config: TaxEngineConfig = {
         jurisdiction,
         effectiveDate,
-        taxInclusive: true, // Credit notes always use tax-inclusive pricing (like invoices)
+        taxInclusive: invoicePricingMode === "inclusive",
       }
       
       taxResult = getCanonicalTaxResultFromLineItems(lineItems, config)
@@ -297,6 +305,7 @@ export async function POST(request: NextRequest) {
       tax_engine_code: taxResult ? taxEngineCode : null,
       tax_engine_effective_from: taxResult ? effectiveDate : null,
       tax_jurisdiction: taxResult ? jurisdiction : null,
+      tax_pricing_mode: invoicePricingMode,
       vat_classification: classification.classification,
       nhil: taxResult ? Math.round(legacyTaxColumns.nhil * 100) / 100 : 0,
       getfund: taxResult ? Math.round(legacyTaxColumns.getfund * 100) / 100 : 0,
@@ -307,7 +316,7 @@ export async function POST(request: NextRequest) {
     const { data: creditNote, error: creditNoteError } = await supabase
       .from("credit_notes")
       .insert(creditNoteData)
-      .select("id, business_id, invoice_id, credit_number, date, reason, subtotal, nhil, getfund, covid, vat, total_tax, total, status, notes, public_token, created_at, updated_at, deleted_at, tax_lines, tax_engine_code, tax_engine_effective_from, tax_jurisdiction")
+      .select("id, business_id, invoice_id, credit_number, date, reason, subtotal, nhil, getfund, covid, vat, total_tax, total, status, notes, public_token, created_at, updated_at, deleted_at, tax_lines, tax_engine_code, tax_engine_effective_from, tax_jurisdiction, tax_pricing_mode")
       .single()
 
     if (creditNoteError) {

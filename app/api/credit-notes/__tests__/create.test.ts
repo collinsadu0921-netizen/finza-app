@@ -142,6 +142,7 @@ describe('POST /api/credit-notes/create - Canonical Tax Engine', () => {
             subtotal: 200.0,
             total_tax: 0,
             customer_id: 'test-customer',
+            tax_pricing_mode: 'exclusive',
           })
         }
         if (table === 'businesses') {
@@ -229,6 +230,29 @@ describe('POST /api/credit-notes/create - Canonical Tax Engine', () => {
     expect(creditNoteData.total_tax).toBe(21.90) // result.total_tax
     expect(creditNoteData.total).toBe(121.90) // result.total_amount
     expect(mockSupabase.from).not.toHaveBeenCalledWith('journal_entries')
+  })
+
+  it('inherits exclusive pricing mode from the invoice', async () => {
+    const request = new NextRequest('http://localhost/api/credit-notes/create', {
+      method: 'POST',
+      body: JSON.stringify({
+        business_id: 'test-business',
+        invoice_id: 'test-invoice-id',
+        date: '2026-10-20',
+        items: [{ qty: 1, unit_price: 70000, discount_amount: 0 }],
+        apply_taxes: true,
+      }),
+    })
+
+    await POST(request)
+
+    const helpers = require('@/lib/taxEngine/helpers')
+    expect(helpers.getCanonicalTaxResultFromLineItems).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.objectContaining({ taxInclusive: false })
+    )
+    const creditNoteData = creditNotesInsert.mock.calls[0][0]
+    expect(creditNoteData.tax_pricing_mode).toBe('exclusive')
   })
 
   it('stores tax_lines JSONB from TaxResult', async () => {

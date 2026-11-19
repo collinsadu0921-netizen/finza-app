@@ -3,7 +3,11 @@ import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { normalizeCountry } from "@/lib/payments/eligibility"
 import { resolveProfessionalVatBusinessId } from "@/lib/serviceWorkspace/enforceServiceWorkspaceAccess"
 import { repairMojibake } from "@/lib/text/repairMojibake"
-import { resolveMonthlyVatPosition } from "@/lib/vat/monthlyVat"
+import {
+  calculateVatReturnTotals,
+  resolveVatReturnPosition,
+} from "@/lib/vat/vatReturnCalculation"
+import { classifyVatReference, type VatTaxClass } from "@/lib/vat/classifyVatReference"
 
 export type LedgerLine = {
   id: string
@@ -17,6 +21,7 @@ export type LedgerLine = {
   /** Human-readable invoice/bill/credit-note reference resolved from the source row. */
   reference_label?: string | null
   tax_code: string
+  tax_class?: VatTaxClass
   debit: number
   credit: number
 }
@@ -131,7 +136,7 @@ export async function GET(request: NextRequest) {
       .from("journal_entry_lines")
       .select(
         `id, debit, credit, description, account_id,
-         journal_entries!inner(id, date, description, reference_type, reference_id, source_type)`
+         journal_entries!inner(id, date, description, reference_type, reference_id, source_type, reverses_entry_id)`
       )
       .in("account_id", accountIds)
       .order("date", { referencedTable: "journal_entries", ascending: true })
@@ -139,6 +144,30 @@ export async function GET(request: NextRequest) {
     if (linesError) {
       console.error("Error fetching ledger lines:", linesError)
       return NextResponse.json({ error: linesError.message }, { status: 500 })
+    }
+
+    // Reversal lines inherit the economic class of the journal they reverse.
+    const reversalTargetIds = Array.from(
+      new Set(
+        (rawLines ?? [])
+          .map((line: any) => line.journal_entries?.reverses_entry_id)
+          .filter((id: unknown): id is string => typeof id === "string" && id.length > 0)
+      )
+    )
+    const originalTypeById = new Map<string, string | null>()
+    if (reversalTargetIds.length > 0) {
+      const { data: originalEntries, error: originalError } = await supabase
+        .from("journal_entries")
+        .select("id, reference_type")
+        .eq("business_id", businessId)
+        .in("id", reversalTargetIds)
+      if (originalError) {
+        console.error("Error resolving reversal originals:", originalError)
+      } else {
+        for (const row of originalEntries ?? []) {
+          originalTypeById.set(String((row as any).id), (row as any).reference_type ?? null)
+        }
+      }
     }
 
     // Resolve human document numbers for ledger references (never show raw UUIDs).
@@ -259,13 +288,27 @@ export async function GET(request: NextRequest) {
 
       const credit = Number(line.credit || 0)
       const debit  = Number(line.debit  || 0)
+      const refTypeRaw = je.reference_type ? repairMojibake(je.reference_type) : null
+      const originalType = je.reverses_entry_id
+        ? originalTypeById.get(String(je.reverses_entry_id)) ?? null
+        : null
+      const taxClass = classifyVatReference(refTypeRaw, originalType)
 
-      if (taxCode === "VAT")      { byMonth[month].output_vat     += credit; byMonth[month].input_vat     += debit }
-      if (taxCode === "NHIL")     { byMonth[month].output_nhil    += credit; byMonth[month].input_nhil    += debit }
-      if (taxCode === "GETFund")  { byMonth[month].output_getfund += credit; byMonth[month].input_getfund += debit }
-      if (taxCode === "COVID")    { byMonth[month].output_covid   += credit; byMonth[month].input_covid   += debit }
+      if (taxClass === "output") {
+        if (taxCode === "VAT")      byMonth[month].output_vat     += credit - debit
+        if (taxCode === "NHIL")     byMonth[month].output_nhil    += credit - debit
+        if (taxCode === "GETFund")  byMonth[month].output_getfund += credit - debit
+        if (taxCode === "COVID")    byMonth[month].output_covid   += credit - debit
+      } else if (taxClass === "input") {
+        // Claimable input only. The calculation below zeroes pre-2026
+        // non-creditable NHIL/GETFund/COVID for the displayed boxes.
+        if (taxCode === "VAT")      byMonth[month].input_vat     += debit - credit
+        if (taxCode === "NHIL")     byMonth[month].input_nhil    += debit - credit
+        if (taxCode === "GETFund")  byMonth[month].input_getfund += debit - credit
+        if (taxCode === "COVID")    byMonth[month].input_covid   += debit - credit
+      }
 
-      const refType = je.reference_type ? repairMojibake(je.reference_type) : null
+      const refType = refTypeRaw
       const refId = je.reference_id ?? null
       const reference = refType && refId ? `${refType}:${refId}` : refType || null
       const referenceLabel =
@@ -282,6 +325,7 @@ export async function GET(request: NextRequest) {
         reference_id:      refId,
         reference_label:   referenceLabel,
         tax_code:         taxCode,
+        tax_class:         taxClass,
         debit,
         credit,
       })
@@ -328,10 +372,18 @@ export async function GET(request: NextRequest) {
     const monthlyReturns: MonthlyVatReturn[] = sortedMonths.map((month) => {
       const m = byMonth[month] ?? emptyMonth
       const filed = filedByMonth.get(month)
-      const position = resolveMonthlyVatPosition({ month, ledger: m, filed })
-      const netVat = money(position.net_vat_payable - position.net_vat_refund)
+      const periodEndDate = `${month}-28`
 
       if (filed) {
+        const position = resolveVatReturnPosition({
+          periodEndDate,
+          netVatPayable: filed.net_vat_payable,
+          netVatRefund: filed.net_vat_refund,
+          totalOutputNhil: filed.total_output_nhil,
+          totalOutputGetfund: filed.total_output_getfund,
+          totalOutputCovid: filed.total_output_covid,
+        })
+        const netVat = money(position.net_vat_payable - position.net_vat_refund)
         return {
           month,
           output_nhil: money(filed.total_output_nhil),
@@ -353,17 +405,47 @@ export async function GET(request: NextRequest) {
         }
       }
 
+      // Classified rows from source-aware lines: output credits/debits and
+      // input debits/credits, not blanket debit=credit.
+      const rows = ["VAT", "NHIL", "GETFund", "COVID"].map((code) => {
+        const entries = m.entries.filter((entry) => entry.tax_code === code)
+        const sum = (taxClass: VatTaxClass, side: "debit" | "credit") =>
+          entries
+            .filter((entry) => entry.tax_class === taxClass)
+            .reduce((total, entry) => total + Number(entry[side] || 0), 0)
+        return {
+          tax_code: code,
+          output_debits: sum("output", "debit"),
+          output_credits: sum("output", "credit"),
+          input_debits: sum("input", "debit"),
+          input_credits: sum("input", "credit"),
+        }
+      })
+
+      const calculation = calculateVatReturnTotals({
+        rows,
+        periodEndDate,
+      })
+      const position = resolveVatReturnPosition({
+        periodEndDate,
+        netVatPayable: calculation.net_vat_payable,
+        netVatRefund: calculation.net_vat_refund,
+        totalOutputNhil: calculation.total_output_nhil,
+        totalOutputGetfund: calculation.total_output_getfund,
+        totalOutputCovid: calculation.total_output_covid,
+      })
+
       return {
         month,
-        output_nhil: money(m.output_nhil),
-        output_getfund: money(m.output_getfund),
-        output_covid: money(m.output_covid),
-        output_vat: money(m.output_vat),
-        input_nhil: money(m.input_nhil),
-        input_getfund: money(m.input_getfund),
-        input_covid: money(m.input_covid),
-        input_vat: money(m.input_vat),
-        net_vat: netVat,
+        output_nhil: money(calculation.total_output_nhil),
+        output_getfund: money(calculation.total_output_getfund),
+        output_covid: money(calculation.total_output_covid),
+        output_vat: money(calculation.total_output_vat),
+        input_nhil: money(calculation.total_input_nhil),
+        input_getfund: money(calculation.total_input_getfund),
+        input_covid: money(calculation.total_input_covid),
+        input_vat: money(calculation.total_input_vat),
+        net_vat: money(position.net_vat_payable - position.net_vat_refund),
         separate_nhil_payable: money(position.separate_nhil_payable),
         separate_getfund_payable: money(position.separate_getfund_payable),
         separate_covid_payable: money(position.separate_covid_payable),

@@ -48,6 +48,29 @@ describe("computeExpenseTax", () => {
     expect(r.total).toBe(85330)
   })
 
+  it("pre-2026 tax lines absorb NHIL/GETFund/COVID into cost (5100)", () => {
+    const r = computeExpenseTax(100, true, "exclusive", "2025-12-01")
+    const byCode = Object.fromEntries(r.taxLines.map((line) => [line.code, line]))
+    expect(byCode.NHIL.ledger_account_code).toBe("5100")
+    expect(byCode.GETFUND.ledger_account_code).toBe("5100")
+    expect(byCode.COVID.ledger_account_code).toBe("5100")
+    expect(byCode.VAT.ledger_account_code).toBe("2100")
+    expect(byCode.NHIL.absorbed_to_cost).toBe(true)
+    expect(byCode.NHIL.is_creditable_input).toBe(false)
+    expect(byCode.VAT.is_creditable_input).toBe(true)
+  })
+
+  it("post-2026 tax lines keep levies in input-tax control accounts", () => {
+    const r = computeExpenseTax(100, true, "exclusive", "2026-01-01")
+    const byCode = Object.fromEntries(r.taxLines.map((line) => [line.code, line]))
+    expect(byCode.NHIL.ledger_account_code).toBe("2110")
+    expect(byCode.GETFUND.ledger_account_code).toBe("2120")
+    expect(byCode.VAT.ledger_account_code).toBe("2100")
+    expect(byCode.NHIL.absorbed_to_cost).toBe(false)
+    expect(byCode.NHIL.is_creditable_input).toBe(true)
+    expect(byCode.COVID).toBeUndefined()
+  })
+
   it("rounds self-consistently for non-clean amounts (no one-cent drift)", () => {
     const round2 = (v: number) => Math.round(v * 100) / 100
     for (const mode of ["exclusive", "inclusive"] as const) {

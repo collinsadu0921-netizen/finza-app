@@ -327,7 +327,7 @@ describe("POST /api/accounting/reversal — Service manual journals", () => {
     ])
   })
 
-  it("does not touch a draft for a non-manual journal", async () => {
+  it("blocks a generic reversal for an invoice source journal", async () => {
     const { serverClient } = makeHarness()
     const original = { ...ORIGINAL, source_type: null, reference_type: "invoice" }
     let journalLookups = 0
@@ -358,7 +358,8 @@ describe("POST /api/accounting/reversal — Service manual journals", () => {
     jest.mocked(createSupabaseAdminClient).mockReturnValue(admin as never)
 
     const res = await call()
-    expect(res.status).toBe(200)
+    expect(res.status).toBe(409)
+    expect((await res.json()).code).toBe("SOURCE_DOCUMENT_REQUIRES_WORKFLOW")
     expect(updates).toEqual([])
   })
 })

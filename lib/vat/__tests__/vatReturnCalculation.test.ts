@@ -34,13 +34,63 @@ describe("calculateVatReturnTotals", () => {
     expect(result.period_is_post_2026).toBe(false)
     expect(result.net_vat_payable).toBe(10.9)
     expect(result.total_output_tax).toBe(21.9)
-    expect(result.total_input_tax).toBe(10)
+    expect(result.total_input_tax).toBe(5)
+    expect(result.total_noncreditable_input_nhil).toBe(2)
+    expect(result.total_noncreditable_input_getfund).toBe(2)
+    expect(result.total_noncreditable_input_covid).toBe(1)
+    expect(result.total_noncreditable_input_tax).toBe(5)
     expect(result.separate_nhil_payable).toBe(2.5)
     expect(result.separate_getfund_payable).toBe(2.5)
     expect(result.separate_covid_payable).toBe(1)
     expect(result.separate_levies_payable).toBe(6)
     expect(result.total_tax_payable).toBe(16.9)
     expect(result.total_tax_refund).toBe(0)
+  })
+
+  it("classifies credits/reversals/settlements by economic source", () => {
+    const result = calculateVatReturnTotals({
+      rows: [
+        {
+          tax_code: "VAT",
+          output_credits: 150, // invoice
+          output_debits: 30, // credit note
+          input_debits: 105, // bill 75 + expense 30
+          input_credits: 0,
+          settlement_debits: 20, // VAT return payment
+          unclassified_debits: 5,
+        },
+      ],
+      periodEndDate: "2026-10-31",
+    })
+
+    expect(result.total_output_vat).toBe(120)
+    expect(result.total_input_vat).toBe(105)
+    expect(result.net_vat_payable).toBe(15)
+    expect(result.settlement_tax).toBe(20)
+    expect(result.unclassified_tax).toBe(5)
+    expect(result.warnings.join(" ")).toContain("Unclassified")
+  })
+
+  it("excludes pre-2026 non-creditable input levies from claimable input tax", () => {
+    const result = calculateVatReturnTotals({
+      rows: [
+        { tax_code: "VAT", output_credits: 15.9, input_debits: 5 },
+        { tax_code: "NHIL", output_credits: 2.5, input_debits: 2 },
+        { tax_code: "GETFund", output_credits: 2.5, input_debits: 2 },
+        { tax_code: "COVID", output_credits: 1, input_debits: 1 },
+      ],
+      periodEndDate: "2025-12-31",
+    })
+
+    expect(result.net_vat_payable).toBe(10.9)
+    expect(result.total_input_tax).toBe(5)
+    expect(result.total_input_nhil).toBe(0)
+    expect(result.total_input_getfund).toBe(0)
+    expect(result.total_input_covid).toBe(0)
+    expect(result.total_noncreditable_input_tax).toBe(5)
+    expect(result.separate_nhil_payable).toBe(2.5)
+    expect(result.separate_getfund_payable).toBe(2.5)
+    expect(result.separate_covid_payable).toBe(1)
   })
 
   it("matches the December 2025 production UAT case", () => {
