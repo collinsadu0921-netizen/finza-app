@@ -185,6 +185,29 @@ export async function PUT(
       if (writeDenied) return writeDenied
     }
 
+    if (status !== undefined && !["draft", "issued", "applied"].includes(status)) {
+      return NextResponse.json(
+        { error: "Invalid status" },
+        { status: 400 }
+      )
+    }
+
+    // Applied credit notes are posted source documents. Unapplying one would
+    // leave the credit-note journal, AR subledger and invoice status out of
+    // step. Block it here as well as in the database trigger, and point the
+    // user at the supported correction path.
+    if (existingCreditNote.status === "applied" && status !== undefined && status !== "applied") {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "This credit note is applied and posted to the ledger. It cannot be unapplied, deleted or repriced. Contact support to arrange a reviewed reversal of the posted credit before issuing a replacement credit note.",
+          code: "CREDIT_NOTE_APPLIED_IMMUTABLE",
+        },
+        { status: 409 }
+      )
+    }
+
     // APPLY validation: cap credit notes to invoice gross (minus other applied credit notes).
     // Accounting rule: a paid invoice may still be credited; settlement/refund is handled separately.
     // Source of truth: never use stored balance fields.
@@ -300,12 +323,6 @@ export async function PUT(
     }
 
     if (status) {
-      if (!["draft", "issued", "applied"].includes(status)) {
-        return NextResponse.json(
-          { error: "Invalid status" },
-          { status: 400 }
-        )
-      }
       updateData.status = status
     }
     if (reason !== undefined) updateData.reason = reason
