@@ -90,43 +90,56 @@ CREATE TRIGGER trigger_prevent_posted_bill_monetary_change
   FOR EACH ROW
   EXECUTE FUNCTION public.prevent_posted_bill_monetary_change();
 
-CREATE OR REPLACE FUNCTION public.prevent_posted_expense_monetary_change()
-RETURNS trigger
-LANGUAGE plpgsql
+CREATE OR REPLACE FUNCTION public.build_expense_tax_lines(
+  p_date date,
+  p_nhil numeric,
+  p_getfund numeric,
+  p_covid numeric,
+  p_vat numeric
+)
+RETURNS jsonb
+LANGUAGE sql
+IMMUTABLE
 AS $function$
-BEGIN
-  -- The supported edit route sets this transaction-local flag inside
-  -- update_expense_with_repost. It is not a client-settable bypass.
-  IF current_setting('finza.expense_repost', true) = 'on' THEN
-    RETURN NEW;
-  END IF;
-
-  IF NEW.amount IS DISTINCT FROM OLD.amount
-     OR NEW.nhil IS DISTINCT FROM OLD.nhil
-     OR NEW.getfund IS DISTINCT FROM OLD.getfund
-     OR NEW.covid IS DISTINCT FROM OLD.covid
-     OR NEW.vat IS DISTINCT FROM OLD.vat
-     OR NEW.total IS DISTINCT FROM OLD.total
-     OR NEW.tax_lines IS DISTINCT FROM OLD.tax_lines
-     OR NEW.tax_pricing_mode IS DISTINCT FROM OLD.tax_pricing_mode
-     OR NEW.date IS DISTINCT FROM OLD.date
-     OR NEW.currency_code IS DISTINCT FROM OLD.currency_code
-     OR NEW.fx_rate IS DISTINCT FROM OLD.fx_rate
-     OR NEW.home_currency_total IS DISTINCT FROM OLD.home_currency_total
-  THEN
-    RAISE EXCEPTION 'POSTED_EXPENSE_IMMUTABLE: use the supported expense edit/repost workflow to change a posted expense.'
-      USING ERRCODE = 'P0001';
-  END IF;
-
-  RETURN NEW;
-END;
+  WITH pre AS (
+    SELECT COALESCE(p_date < DATE '2026-01-01', false) AS is_pre
+  )
+  SELECT COALESCE(jsonb_agg(jsonb_build_object(
+    'code', s.code,
+    'name', s.name,
+    'rate', s.rate,
+    'amount', ROUND(s.amount, 2),
+    'ledger_account_code', s.account,
+    'ledger_side', 'debit',
+    'is_creditable_input', s.creditable,
+    'absorbed_to_cost', s.absorbed
+  ) ORDER BY s.ord), '[]'::jsonb)
+  FROM (
+    SELECT 1 AS ord, 'NHIL'::text AS code, 'NHIL'::text AS name, 0.025 AS rate,
+      COALESCE(p_nhil, 0) AS amount,
+      CASE WHEN pre.is_pre THEN '5100' ELSE '2110' END AS account,
+      NOT pre.is_pre AS creditable, pre.is_pre AS absorbed
+    FROM pre
+    WHERE COALESCE(p_nhil, 0) > 0
+    UNION ALL
+    SELECT 2, 'GETFUND', 'GETFund', 0.025, COALESCE(p_getfund, 0),
+      CASE WHEN pre.is_pre THEN '5100' ELSE '2120' END,
+      NOT pre.is_pre, pre.is_pre
+    FROM pre
+    WHERE COALESCE(p_getfund, 0) > 0
+    UNION ALL
+    SELECT 3, 'COVID', 'COVID Levy', 0.01, COALESCE(p_covid, 0),
+      CASE WHEN pre.is_pre THEN '5100' ELSE '2100' END,
+      false, pre.is_pre
+    FROM pre
+    WHERE COALESCE(p_covid, 0) > 0
+    UNION ALL
+    SELECT 4, 'VAT', 'VAT', 0.15, COALESCE(p_vat, 0),
+      '2100', true, false
+    FROM pre
+    WHERE COALESCE(p_vat, 0) > 0
+  ) s;
 $function$;
-
-DROP TRIGGER IF EXISTS trigger_prevent_posted_expense_monetary_change ON public.expenses;
-CREATE TRIGGER trigger_prevent_posted_expense_monetary_change
-  BEFORE UPDATE ON public.expenses
-  FOR EACH ROW
-  EXECUTE FUNCTION public.prevent_posted_expense_monetary_change();
 
 CREATE OR REPLACE FUNCTION public.update_expense_with_repost(
   p_expense_id uuid,
@@ -144,6 +157,10 @@ DECLARE
   v_current_je uuid;
   v_reversal_lines jsonb;
   v_je_date date;
+  v_role text;
+  v_custom jsonb;
+  v_readonly boolean;
+  v_revoked boolean;
 BEGIN
   SELECT * INTO v_expense
   FROM public.expenses
@@ -160,14 +177,40 @@ BEGIN
     RAISE EXCEPTION 'EXPENSE_EDIT_FORBIDDEN: actor mismatch' USING ERRCODE = '42501';
   END IF;
 
-  IF NOT EXISTS (
-    SELECT 1 FROM public.businesses b
-    WHERE b.id = v_business_id AND b.owner_id = p_user_id
-  ) AND NOT EXISTS (
-    SELECT 1 FROM public.business_users bu
-    WHERE bu.business_id = v_business_id AND bu.user_id = p_user_id
-  ) THEN
-    RAISE EXCEPTION 'EXPENSE_EDIT_FORBIDDEN: no access to this business' USING ERRCODE = '42501';
+  SELECT bu.role, COALESCE(bu.accountant_readonly, false), COALESCE(bu.custom_permissions, '{}'::jsonb)
+  INTO v_role, v_readonly, v_custom
+  FROM public.business_users bu
+  WHERE bu.business_id = v_business_id
+    AND bu.user_id = p_user_id
+  LIMIT 1;
+
+  IF v_role IS NULL THEN
+    IF EXISTS (
+      SELECT 1 FROM public.businesses b
+      WHERE b.id = v_business_id AND b.owner_id = p_user_id
+    ) THEN
+      v_role := 'owner';
+    ELSE
+      RAISE EXCEPTION 'EXPENSE_EDIT_FORBIDDEN: no access to this business' USING ERRCODE = '42501';
+    END IF;
+  END IF;
+
+  -- Expense edits post to the ledger, so the caller must be able to post:
+  -- owner, admin or non-readonly accountant. Manager/employee/cashier rights
+  -- to create expenses do not grant journal-posting authority. An explicit
+  -- expenses.create revocation still wins.
+  IF v_role <> 'owner' THEN
+    IF v_role NOT IN ('admin', 'accountant') THEN
+      RAISE EXCEPTION 'EXPENSE_EDIT_FORBIDDEN: owner, admin or accountant authority is required to edit a posted expense'
+        USING ERRCODE = '42501';
+    END IF;
+    IF v_role = 'accountant' AND v_readonly THEN
+      RAISE EXCEPTION 'EXPENSE_EDIT_FORBIDDEN: accountant access is read-only' USING ERRCODE = '42501';
+    END IF;
+    v_revoked := COALESCE(v_custom->'revoked', '[]'::jsonb) ? 'expenses.create';
+    IF v_revoked THEN
+      RAISE EXCEPTION 'EXPENSE_EDIT_FORBIDDEN: expenses.create permission has been revoked' USING ERRCODE = '42501';
+    END IF;
   END IF;
 
   PERFORM set_config('finza.expense_repost', 'on', true);
@@ -183,7 +226,17 @@ BEGIN
     vat = COALESCE((p_patch->>'vat')::numeric, vat),
     total = COALESCE((p_patch->>'total')::numeric, total),
     tax_pricing_mode = COALESCE(p_patch->>'tax_pricing_mode', tax_pricing_mode),
-    tax_lines = CASE WHEN p_patch ? 'tax_lines' THEN p_patch->'tax_lines' ELSE tax_lines END,
+    tax_lines = CASE
+      WHEN p_patch ? 'tax_lines' THEN p_patch->'tax_lines'
+      WHEN tax_lines IS NULL THEN public.build_expense_tax_lines(
+        COALESCE((p_patch->>'date')::date, date),
+        COALESCE((p_patch->>'nhil')::numeric, nhil),
+        COALESCE((p_patch->>'getfund')::numeric, getfund),
+        COALESCE((p_patch->>'covid')::numeric, covid),
+        COALESCE((p_patch->>'vat')::numeric, vat)
+      )
+      ELSE tax_lines
+    END,
     date = COALESCE((p_patch->>'date')::date, date),
     notes = CASE WHEN p_patch ? 'notes' THEN NULLIF(p_patch->>'notes','') ELSE notes END,
     receipt_path = CASE WHEN p_patch ? 'receipt_path' THEN NULLIF(p_patch->>'receipt_path','') ELSE receipt_path END,
@@ -242,3 +295,7 @@ BEGIN
   RETURN to_jsonb(v_expense);
 END;
 $function$;
+
+REVOKE ALL ON FUNCTION public.update_expense_with_repost(uuid, jsonb, uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.update_expense_with_repost(uuid, jsonb, uuid) TO authenticated, service_role;
+REVOKE ALL ON FUNCTION public.build_expense_tax_lines(date, numeric, numeric, numeric, numeric) FROM PUBLIC;

@@ -1,7 +1,6 @@
--- Credit-note status rollup: use the NEW credit-note row instead of re-reading
--- the row inside the trigger (the statement snapshot cannot see the new status).
--- This makes draft -> applied update the invoice immediately, without waiting
--- for the invoice GET safety net.
+-- Credit-note status rollup for apply, unapply, soft-delete and supported
+-- amount changes. Uses the NEW row (not a re-read of the uncommitted row) so
+-- the invoice is correct as soon as the credit-note write commits.
 
 CREATE OR REPLACE FUNCTION public.update_invoice_status_on_credit_note()
 RETURNS trigger
@@ -11,12 +10,18 @@ DECLARE
   invoice_total NUMERIC;
   payments_sum NUMERIC := 0;
   other_credits NUMERIC := 0;
+  effective_credit NUMERIC := 0;
   new_balance NUMERIC;
 BEGIN
-  IF NEW.status <> 'applied' THEN
+  IF TG_OP = 'INSERT'
+     AND (NEW.status <> 'applied' OR NEW.deleted_at IS NOT NULL) THEN
     RETURN NEW;
   END IF;
-  IF TG_OP = 'UPDATE' AND OLD.status = 'applied' THEN
+
+  IF TG_OP = 'UPDATE'
+     AND NEW.status IS NOT DISTINCT FROM OLD.status
+     AND NEW.deleted_at IS NOT DISTINCT FROM OLD.deleted_at
+     AND NEW.total IS NOT DISTINCT FROM OLD.total THEN
     RETURN NEW;
   END IF;
 
@@ -41,7 +46,14 @@ BEGIN
     AND deleted_at IS NULL
     AND id <> NEW.id;
 
-  new_balance := ROUND(invoice_total - payments_sum - other_credits - COALESCE(NEW.total, 0), 2);
+  IF NEW.status = 'applied' AND NEW.deleted_at IS NULL THEN
+    effective_credit := COALESCE(NEW.total, 0);
+  END IF;
+
+  new_balance := ROUND(
+    invoice_total - payments_sum - other_credits - effective_credit,
+    2
+  );
 
   IF new_balance <= 0 THEN
     UPDATE public.invoices
@@ -53,12 +65,12 @@ BEGIN
     UPDATE public.invoices
     SET status = 'partially_paid'
     WHERE id = NEW.invoice_id
-      AND status NOT IN ('paid', 'cancelled', 'void');
+      AND status NOT IN ('cancelled', 'void');
   ELSE
     UPDATE public.invoices
     SET status = 'sent'
     WHERE id = NEW.invoice_id
-      AND status NOT IN ('paid', 'cancelled', 'void');
+      AND status NOT IN ('cancelled', 'void');
   END IF;
 
   RETURN NEW;
@@ -67,7 +79,6 @@ $function$;
 
 DROP TRIGGER IF EXISTS trigger_update_invoice_on_credit_note ON public.credit_notes;
 CREATE TRIGGER trigger_update_invoice_on_credit_note
-  AFTER INSERT OR UPDATE OF status ON public.credit_notes
+  AFTER INSERT OR UPDATE OF status, deleted_at, total ON public.credit_notes
   FOR EACH ROW
-  WHEN (NEW.status = 'applied')
   EXECUTE FUNCTION public.update_invoice_status_on_credit_note();

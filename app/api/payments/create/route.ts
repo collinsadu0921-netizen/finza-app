@@ -10,6 +10,7 @@ import { ReconciliationContext, ReconciliationStatus } from "@/lib/accounting/re
 import { logReconciliationMismatch } from "@/lib/accounting/reconciliation/mismatch-logger"
 import { assertBusinessNotArchived } from "@/lib/archivedBusiness"
 import { assertPaymentJournalPosted } from "@/lib/payments/assertPaymentJournalPosted"
+import { paymentMatchesIdempotentRequest } from "@/lib/payments/idempotency"
 import { enforceServiceIndustryFinancialWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryFinancialWrite"
 import { voidRecordBusinessActivationEvent } from "@/lib/growth/recordBusinessActivationEvent"
 import { fireAfterAccountingPost } from "@/lib/server/fireAfterAccountingPost"
@@ -336,7 +337,19 @@ export async function POST(request: NextRequest) {
     const { data: tokenData } = await supabase.rpc("generate_public_token")
     const publicToken = tokenData || Buffer.from(`${business_id}-${invoice_id}-${Date.now()}`).toString("base64url")
 
-    // Duplicate retry of the same request: return the already-created payment.
+    // Duplicate retry of the same request: return the already-created payment
+    // only when the payload is identical. Reusing a key for a different
+    // payment is a conflict, not a replay.
+    const idempotentRequest = {
+      invoice_id,
+      amount: Number(amount),
+      date,
+      method,
+      wht_amount: requestedWhtAmount,
+      settlement_fx_rate: isFxInvoice ? parsedSettlementFxRate : null,
+      reference: reference || null,
+    }
+
     if (idempotencyKey) {
       const { data: existingPayment } = await supabase
         .from("payments")
@@ -347,6 +360,16 @@ export async function POST(request: NextRequest) {
         .maybeSingle()
 
       if (existingPayment) {
+        if (!paymentMatchesIdempotentRequest(existingPayment, idempotentRequest)) {
+          return NextResponse.json(
+            {
+              success: false,
+              error: "This idempotency key was already used for a different payment.",
+              code: "IDEMPOTENCY_KEY_CONFLICT",
+            },
+            { status: 409 }
+          )
+        }
         return NextResponse.json({
           success: true,
           payment: existingPayment,
@@ -388,6 +411,16 @@ export async function POST(request: NextRequest) {
           .is("deleted_at", null)
           .maybeSingle()
         if (existingPayment) {
+          if (!paymentMatchesIdempotentRequest(existingPayment, idempotentRequest)) {
+            return NextResponse.json(
+              {
+                success: false,
+                error: "This idempotency key was already used for a different payment.",
+                code: "IDEMPOTENCY_KEY_CONFLICT",
+              },
+              { status: 409 }
+            )
+          }
           return NextResponse.json({
             success: true,
             payment: existingPayment,

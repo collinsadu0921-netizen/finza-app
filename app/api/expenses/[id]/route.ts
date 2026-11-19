@@ -6,6 +6,7 @@ import { handleFilePersistence } from "@/lib/fileHandlingServer"
 import { getCurrencySymbol } from "@/lib/currency"
 import { enforceServiceIndustryFinancialWrite } from "@/lib/serviceWorkspace/enforceServiceIndustryFinancialWrite"
 import {
+  buildExpenseTaxLines,
   computeExpenseTax,
   normalizeExpensePricingMode,
 } from "@/lib/expenses/computeExpenseTax"
@@ -186,6 +187,30 @@ export async function PUT(
       updateData.total = computed.total
       updateData.tax_pricing_mode = pricingMode
       updateData.tax_lines = computed.taxLines
+    }
+
+    // Legacy rows may predate tax_lines. When an edit/repost does not change
+    // the entered amount, rebuild the posting metadata from the persisted
+    // components so a pre-2026 row does not fall back to recoverable input tax.
+    if (!updateData.tax_lines) {
+      const existingTaxLines = (existingExpense as { tax_lines?: unknown }).tax_lines
+      const effectiveDate =
+        (updateData.date as string | undefined) ||
+        (existingExpense as { date?: string }).date ||
+        new Date().toISOString().split("T")[0]
+      const dateChanged =
+        typeof updateData.date === "string" &&
+        updateData.date !== (existingExpense as { date?: string }).date
+
+      if (!existingTaxLines || dateChanged) {
+        updateData.tax_lines = buildExpenseTaxLines({
+          effectiveDate,
+          nhil: Number(updateData.nhil ?? (existingExpense as { nhil?: number }).nhil ?? 0),
+          getfund: Number(updateData.getfund ?? (existingExpense as { getfund?: number }).getfund ?? 0),
+          covid: Number(updateData.covid ?? (existingExpense as { covid?: number }).covid ?? 0),
+          vat: Number(updateData.vat ?? (existingExpense as { vat?: number }).vat ?? 0),
+        })
+      }
     }
     if (notes !== undefined) updateData.notes = notes
     // Always set receipt_path to the determined value (preserved or updated)
