@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { requireFirmMemberForApi } from "@/lib/requireFirmMember"
 import { canAccessForensicMonitoring } from "@/lib/forensicMonitoringAuth"
+import { getSupabaseServiceRoleClient } from "@/lib/supabaseServiceRole"
 
 /**
  * GET /api/admin/accounting/forensic-runs/[run_id]
@@ -32,12 +33,17 @@ export async function GET(
       )
     }
 
+    const dataClient = getSupabaseServiceRoleClient()
+    if (!dataClient) {
+      return NextResponse.json({ error: "Server misconfigured" }, { status: 500 })
+    }
+
     const { run_id } = await params
     if (!run_id) {
       return NextResponse.json({ error: "Missing run_id" }, { status: 400 })
     }
 
-    const { data: run, error } = await supabase
+    const { data: run, error } = await dataClient
       .from("accounting_invariant_runs")
       .select("id, started_at, finished_at, status, summary, alert_sent, created_at")
       .eq("id", run_id)

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 import { requireFirmMemberForApi } from "@/lib/requireFirmMember"
 import { canAccessForensicMonitoring } from "@/lib/forensicMonitoringAuth"
+import { getSupabaseServiceRoleClient } from "@/lib/supabaseServiceRole"
 
 const PAGE_SIZE = 20
 
@@ -32,12 +33,17 @@ export async function GET(request: NextRequest) {
       )
     }
 
+    const dataClient = getSupabaseServiceRoleClient()
+    if (!dataClient) {
+      return NextResponse.json({ error: "Server misconfigured" }, { status: 500 })
+    }
+
     const { searchParams } = new URL(request.url)
     const page = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10) || 1)
     const limit = Math.min(100, Math.max(1, parseInt(searchParams.get("limit") ?? String(PAGE_SIZE), 10) || PAGE_SIZE))
     const offset = (page - 1) * limit
 
-    const { data: runs, error } = await supabase
+    const { data: runs, error } = await dataClient
       .from("accounting_invariant_runs")
       .select("id, started_at, finished_at, status, summary, alert_sent, created_at")
       .order("started_at", { ascending: false })
@@ -51,7 +57,7 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const { count } = await supabase
+    const { count } = await dataClient
       .from("accounting_invariant_runs")
       .select("id", { count: "exact", head: true })
 

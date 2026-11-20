@@ -46,7 +46,7 @@ export default function FirmSetupPage() {
   const ensureUserRecord = async (authUser: any) => {
     const { data: existingUser } = await supabase
       .from("users")
-      .select("*")
+      .select("id, email, full_name")
       .eq("id", authUser.id)
       .maybeSingle()
 
@@ -61,7 +61,7 @@ export default function FirmSetupPage() {
         email: authUser.email,
         full_name: authUser.user_metadata?.full_name || "",
       })
-      .select()
+      .select("id, email, full_name")
       .single()
 
     if (newUserError) {

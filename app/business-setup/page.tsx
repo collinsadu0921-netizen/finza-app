@@ -127,7 +127,11 @@ function BusinessSetupPageInner() {
   }
 
   const ensureUserRecord = async (authUser: any) => {
-    const { data: existingUser } = await supabase.from("users").select("*").eq("id", authUser.id).maybeSingle()
+    const { data: existingUser } = await supabase
+      .from("users")
+      .select("id, email, full_name")
+      .eq("id", authUser.id)
+      .maybeSingle()
 
     if (existingUser) {
       return existingUser
@@ -140,7 +144,7 @@ function BusinessSetupPageInner() {
         email: authUser.email,
         full_name: authUser.user_metadata?.full_name || "",
       })
-      .select()
+      .select("id, email, full_name")
       .single()
 
     if (newUserError) {
