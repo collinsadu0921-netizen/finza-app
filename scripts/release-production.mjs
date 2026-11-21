@@ -35,6 +35,7 @@ import { createRequire } from "node:module"
 const require = createRequire(import.meta.url)
 const {
   PRODUCTION,
+  vercelCliArgs,
   ReleaseGuardError,
   assertExpectedSha,
   assertShaMatch,
@@ -65,6 +66,19 @@ const {
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..")
 const TEAM_QUERY = `teamId=${PRODUCTION.teamId}`
+
+/**
+ * Child-process environment for every Vercel CLI call. The authoritative
+ * project/team live in productionReleaseGuards.cjs, never in repository
+ * secrets that can drift out of date.
+ */
+function vercelChildEnv() {
+  return {
+    ...process.env,
+    VERCEL_ORG_ID: PRODUCTION.teamId,
+    VERCEL_PROJECT_ID: PRODUCTION.projectId,
+  }
+}
 
 function parseArgs(argv) {
   const args = { verifyOnly: false, preflight: false, expectedSha: null }
@@ -139,12 +153,13 @@ async function gitOutput(args) {
   return stdout.trim()
 }
 
-function runSecretSafe(command, args) {
+function runSecretSafe(command, args, opts = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: ROOT,
       shell: true,
       stdio: ["ignore", "pipe", "pipe"],
+      ...opts,
     })
     child.stdout.on("data", () => {})
     child.stderr.on("data", () => {})
@@ -240,19 +255,17 @@ function ensureLocalProjectLink() {
  */
 async function ensureHostedProjectLink() {
   if (!preferHostedProductionEnvApi(process.env)) return
-  await run(
-    "npx",
-    [
-      "vercel",
-      "link",
-      "--yes",
-      "--team",
-      PRODUCTION.teamId,
-      "--project",
-      PRODUCTION.projectId,
-    ],
-    { failCode: "DEPLOY_FAILURE" },
-  )
+  await run("npx", vercelCliArgs([
+    "link",
+    "--yes",
+    "--scope",
+    PRODUCTION.teamId,
+    "--project",
+    PRODUCTION.projectId,
+  ]), {
+    failCode: "DEPLOY_FAILURE",
+    env: vercelChildEnv(),
+  })
   const projectFile = join(ROOT, ".vercel", "project.json")
   if (!existsSync(projectFile)) {
     throw new ReleaseGuardError("DEPLOY_FAILURE", "vercel link did not create .vercel/project.json")
@@ -267,8 +280,8 @@ async function ensureHostedProjectLink() {
 async function vercelApi(path) {
   const { stdout } = await run(
     "npx",
-    ["vercel", "api", path],
-    { failCode: "VERCEL_API_FAILED" },
+    vercelCliArgs(["api", path]),
+    { failCode: "VERCEL_API_FAILED", env: vercelChildEnv() },
   )
   const start = stdout.indexOf("{")
   if (start < 0) throw new ReleaseGuardError("VERCEL_API_FAILED", `No JSON in Vercel API response for ${path}`)
@@ -342,8 +355,7 @@ async function readProductionSupabaseEnvViaCliPull() {
   const dir = mkdtempSync(join(tmpdir(), "finza-release-env-"))
   const dest = join(dir, "production.env")
   try {
-    await runSecretSafe("npx", [
-      "vercel",
+    await runSecretSafe("npx", vercelCliArgs([
       "env",
       "pull",
       dest,
@@ -352,7 +364,7 @@ async function readProductionSupabaseEnvViaCliPull() {
       "--yes",
       "--scope",
       PRODUCTION.teamId,
-    ])
+    ]), { env: vercelChildEnv() })
     if (!existsSync(dest)) {
       throw new ReleaseGuardError(
         "SERVICE_ROLE_ENV_UNVERIFIED",
@@ -402,8 +414,8 @@ function lastHttpsUrl(text) {
 async function inspectText(deploymentId) {
   const { stdout, stderr } = await run(
     "npx",
-    ["vercel", "inspect", deploymentId, "--scope", PRODUCTION.teamId],
-    { failCode: "INSPECT_FAILED" },
+    vercelCliArgs(["inspect", deploymentId, "--scope", PRODUCTION.teamId]),
+    { failCode: "INSPECT_FAILED", env: vercelChildEnv() },
   )
   return `${stdout}\n${stderr}`
 }
@@ -433,6 +445,45 @@ async function liveRegionEvidence(deploymentId) {
   return { deploymentId, header, region, healthStatus: versionRes.status }
 }
 
+/**
+ * Fail closed before build/deploy when the hosted token cannot authenticate.
+ * Vercel's REST API has historically answered team-scoped reads for tokens the
+ * CLI rejects (e.g. a token for a removed user). Validate both the CLI identity
+ * and access to the exact production project. Never surface CLI stderr.
+ */
+async function verifyVercelAuth() {
+  if (!preferHostedProductionEnvApi(process.env)) return null
+  let whoami
+  try {
+    whoami = await run("npx", vercelCliArgs(["whoami"]), {
+      failCode: "AUTH_INVALID",
+      env: vercelChildEnv(),
+    })
+  } catch {
+    throw new ReleaseGuardError(
+      "AUTH_INVALID",
+      "Vercel authentication failed: VERCEL_TOKEN is invalid or expired. Replace the repository secret with a valid personal access token.",
+    )
+  }
+  const user =
+    whoami.stdout
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .pop() || "unknown"
+  let project
+  try {
+    project = await vercelApi(`/v9/projects/${PRODUCTION.projectId}?${TEAM_QUERY}`)
+  } catch {
+    throw new ReleaseGuardError(
+      "AUTH_INVALID",
+      "Vercel authentication succeeded but VERCEL_TOKEN cannot read the production project. Verify the token belongs to the production team.",
+    )
+  }
+  assertProject({ id: project.id, name: project.name })
+  return { user }
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2))
   const head = await gitOutput(["rev-parse", "HEAD"])
@@ -441,6 +492,7 @@ async function main() {
     throw new ReleaseGuardError("SHA_MISMATCH", "--expected-sha does not match HEAD")
   }
   assertCleanWorktree(await gitOutput(["status", "--porcelain"]))
+  const vercelAuth = await verifyVercelAuth()
   ensureLocalProjectLink()
   await ensureHostedProjectLink()
 
@@ -476,6 +528,7 @@ async function main() {
           supabase_ref: PRODUCTION.supabaseRef,
           service_role_format: supabasePair.format,
           service_role_ref: supabasePair.ref,
+          vercel_user: vercelAuth?.user || null,
         },
         null,
         2,
@@ -499,7 +552,10 @@ async function main() {
         "--scope",
         PRODUCTION.teamId,
       ]
-      const deployed = await run("npx", ["vercel", ...deployArgs], { failCode: "DEPLOY_FAILURE" })
+      const deployed = await run("npx", vercelCliArgs(deployArgs), {
+        failCode: "DEPLOY_FAILURE",
+        env: vercelChildEnv(),
+      })
       const url = lastHttpsUrl(`${deployed.stdout}\n${deployed.stderr}`)
       if (!url) throw new ReleaseGuardError("DEPLOY_FAILURE", "Deploy succeeded but no deployment URL was returned")
       const created = await vercelApi(`/v13/deployments/${encodeURIComponent(url.replace(/^https:\/\//, ""))}?${TEAM_QUERY}`)
@@ -558,6 +614,7 @@ async function main() {
         supabase_ref: PRODUCTION.supabaseRef,
         service_role_format: supabasePair.format,
         service_role_ref: supabasePair.ref,
+        vercel_user: vercelAuth?.user || null,
       },
       null,
       2,

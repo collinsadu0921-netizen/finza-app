@@ -133,11 +133,26 @@ function parseCliArgs(argv) {
   return { ...flags, versions }
 }
 
+function decodeUrlComponent(value, label) {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    throw new RunnerError(`${label} contains invalid percent-encoding`, "URL_DECODE")
+  }
+}
+
 function parseProductionDatabaseUrl(rawUrl) {
   if (!rawUrl || typeof rawUrl !== "string" || !rawUrl.trim()) {
     throw new RunnerError("PRODUCTION_DATABASE_URL is missing", "MISSING_URL")
   }
   const raw = rawUrl.trim()
+  const scheme = raw.slice(0, raw.indexOf(":"))
+  if (!/^postgres(ql)?$/i.test(scheme)) {
+    throw new RunnerError(
+      "PRODUCTION_DATABASE_URL must use postgres:// or postgresql://",
+      "BAD_SCHEME"
+    )
+  }
   if (raw.includes(STAGING_REF)) {
     throw new RunnerError(
       `PRODUCTION_DATABASE_URL contains staging ref ${STAGING_REF}; refused`,
@@ -159,10 +174,22 @@ function parseProductionDatabaseUrl(rawUrl) {
   }
 
   const host = parsed.hostname || ""
-  const user = decodeURIComponent(parsed.username || "")
-  const password = parsed.password == null ? "" : String(parsed.password)
-  const database = (parsed.pathname || "/postgres").replace(/^\//, "") || "postgres"
+  // WHATWG URL keeps userinfo percent-encoded. Decode each component exactly
+  // once: a password containing a literal "%40" becomes "%40", not "@".
+  const user = decodeUrlComponent(parsed.username || "", "Database user")
+  const password =
+    parsed.password == null
+      ? ""
+      : decodeUrlComponent(String(parsed.password), "Database password")
+  const database =
+    decodeUrlComponent(
+      (parsed.pathname || "/postgres").replace(/^\//, ""),
+      "Database name"
+    ) || "postgres"
   const port = Number(parsed.port || 5432)
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new RunnerError("PRODUCTION_DATABASE_URL has an invalid port", "BAD_PORT")
+  }
 
   const hostIsPooler = host.includes("pooler.supabase.com")
   const hostIsDirect = host === `db.${PRODUCTION_REF}.supabase.co`
